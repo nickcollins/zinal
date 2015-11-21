@@ -96,31 +96,6 @@
   )
 )
 
-; TODO: cleanup
-;(define (row-exists? table id)
-;  (pair? (q* 'query-rows "SELECT * FROM ~a WHERE id = ?1" table id))
-;)
-;
-;(define (get-tables-with-id* id) (
-;  (filter (lambda (t) (row-exists? t id)) TABLES)
-;)
-;
-;(define (id-exists? id)
-;  (pair? (get-tables-with-id* id))
-;)
-;
-;(define (get-table id)
-;  (let* (
-;    [tables (get-tables-with-id id)]
-;    [num-tables (length tables)])
-;    (cond
-;      [(< num-tables 1) (error 'get-table "no tables with id ~a" id)]
-;      [(equal? num-tables 1) (car tables)]
-;      [else (error 'get-table "multiple tables with id ~a: ~a" id tables)]
-;    )
-;  )
-;)
-
 (define (assert-exists row-loc)
   (assert
     (format "row ~a does not exist" row-loc)
