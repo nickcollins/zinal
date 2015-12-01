@@ -85,7 +85,7 @@
   (let* (
     [tables
       (filter
-        (lambda (rl) (pair? (q* query-rows "SELECT * FROM ~a WHERE id = ?1" rl)))
+        (lambda (rl) (cons? (q* query-rows "SELECT * FROM ~a WHERE id = ?1" rl)))
 	(map (lambda (t) (make-row-loc t id)) TABLES)
       )
     ]
@@ -101,7 +101,7 @@
 (define (assert-exists row-loc)
   (assert
     (format "row ~a does not exist" row-loc)
-    (pair? (q* query-rows "SELECT * FROM ~a WHERE id = ?1" row-loc))
+    (cons? (q* query-rows "SELECT * FROM ~a WHERE id = ?1" row-loc))
   )
 )
 
