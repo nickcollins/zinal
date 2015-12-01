@@ -1,6 +1,8 @@
 #lang racket
 
-(require db) ; sqlite
+(require db)
+(require racket/gui/base)
+(require mrlib/hierlist)
 
 ; MACROS
 
@@ -212,4 +214,44 @@
 
 ; GUI
 
+(define logic-hierarchy%
+  (class hierarchical-list%
+    (define/override (on-char key-event)
+      (case (send key-event get-key-code)
+        [(#\j #\J) (send this select-next)]
+        [(#\k #\K) (send this select-prev)]
+        [(#\h #\H) (send this select-out)]
+        [(#\l #\L) (send this select-in)]
+      )
+      (super on-char key-event)
+    )
+    (super-new)
+  )
+)
+
+; lots of code liberally stolen from mred-designer
+(define (new-hier-item hier label)
+  (let* (
+    [item (send hier new-item)]
+    [ed (send item get-editor)])
+    (send ed erase)
+    (send ed insert label)
+  )
+)
+
+(define (new-opened-sublist hier)
+  (let ([sl (send hier new-list)]) (send sl open) sl)
+)
+
+(define main-window (new frame% [label "Veme"]))
+(define prog-tree (new logic-hierarchy% [parent main-window]))
+(new-hier-item prog-tree "1")
+(let (
+  [c (new-opened-sublist prog-tree)])
+  (new-hier-item c "2")
+  (new-hier-item c "3")
+)
+(new-hier-item prog-tree "4")
+
+(send main-window show #t)
 
