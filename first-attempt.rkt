@@ -12,7 +12,7 @@
   )
 )
 
-; All db queries, unless looking for program start, must check that id is non-zero first. higher-level stuff need not check
+; All indexed db queries must check that id is non-zero first. higher-level stuff need not check directly
 (define-syntax-rule (assert-not-nil id)
   (assert "id was nil" (not (equal? id 0)))
 )
@@ -38,8 +38,8 @@
   (hash
     "f" "lambdas"
     "p" "params"
-    "c" "computations"
-    "r" "comp_results"
+    "d" "defines"
+    "r" "definitions"
     "l" "lists"
     "a" "atoms"
     "e" "links"
@@ -121,10 +121,14 @@
   (q* query-exec (format "UPDATE ~~a SET ~a = ?2 WHERE id = ?1" col) row-loc value)
 )
 
-; the program start is at id 0 in the lists table. Note that 0 as an id means "nil", and doesn't point to the program start
+(define (query-prog-start* q-proc query)
+  (q* q-proc query (make-row-loc "lists" 1))
+)
+
+; the program start is at id 1 in the lists table.
 (define (init-db!)
-  (assert "PROTO db is already init'd" (null? (query-rows PROTO "SELECT * FROM lists WHERE id = 0")))
-  (query-exec PROTO "INSERT INTO lists(id, short_desc, long_desc, car_id, cdr_id) values(0, 'Main Program', '', 0, 0)")
+  (assert "PROTO db is already init'd" (null? (query-prog-start* query-rows "SELECT * FROM ~a WHERE id = ?1")))
+  (create-something! "lists(id, short_desc, long_desc, car_id, cdr_id)" (list "Main Program" "" 0 0))
 )
 
 (define (get-next-id)
@@ -196,11 +200,11 @@
   )
 )
 
-; returns the id of the comp-result, not the computation
-(define (create-computation! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
+; returns the id of the definition, not the define
+(define (create-define! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
   (let (
-    [comp-id (create-something! "computations(id, short_desc, long_desc, expr_id, cdr_id)" (list short-desc long-desc 0 0) dest-row-loc dest-col)])
-    (create-something! "comp_results(id, ref_count, computation_id)" (list 0 comp-id))
+    [define-id (create-something! "defines(id, short_desc, long_desc, expr_id)" (list short-desc long-desc 0) dest-row-loc dest-col)])
+    (create-something! "definitions(id, ref_count, define_id)" (list 0 define-id))
   )
 )
 
