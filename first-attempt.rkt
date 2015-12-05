@@ -21,33 +21,6 @@
   (if (sql-null? a) b a)
 )
 
-; CONSTANTS
-
-(define PROTO (sqlite3-connect #:database "/home/nick/veme/proto.db"))
-
-(define ATOM-TYPE->ATOM-TYPE-CHAR
-  (hash
-    "number" "n"
-    "character" "c"
-    "string" "s"
-    "boolean" "b"
-  )
-)
-
-(define TYPE-CHAR->TABLE
-  (hash
-    "f" "lambdas"
-    "p" "params"
-    "d" "defines"
-    "r" "definitions"
-    "l" "lists"
-    "a" "atoms"
-    "e" "links"
-  )
-)
-
-(define TABLES (hash-values TYPE-CHAR->TABLE))
-
 ; FUNCTIONS
 
 ; ugh - in srfi/13, but that seems to redefine string-join
@@ -121,14 +94,22 @@
   (q* query-exec (format "UPDATE ~~a SET ~a = ?2 WHERE id = ?1" col) row-loc value)
 )
 
+; WARNING: do not use this on id columns unless ref-counts have already been updated
+(define (set-id*! row-loc col id)
+  (assert (format "destination column does not end in '_id': ~a" col) (string-suffix? "_id" col))
+  (assert-nil-id row-loc col)
+  (set-cell*! row-loc col id)
+)
+
 (define (query-prog-start* q-proc query)
-  (q* q-proc query (make-row-loc "lists" 1))
+  (q* q-proc query prog-start-row-loc)
 )
 
 ; the program start is at id 1 in the lists table.
 (define (init-db!)
   (assert "PROTO db is already init'd" (null? (query-prog-start* query-rows "SELECT * FROM ~a WHERE id = ?1")))
   (create-something! "lists(id, short_desc, long_desc, car_id, cdr_id)" (list "Main Program" "" 0 0))
+  (link! prog-start-row-loc "car_id" "begin" 1)
 )
 
 (define (get-next-id)
@@ -150,11 +131,7 @@
   (assert "you must specify both dest-col and dest-row-loc, or neither" (not (xor dest-row-loc dest-col)))
   (let (
     [id (get-next-id)])
-    (cond [dest-row-loc
-      (assert (format "destination column does not end in '_id': ~a" dest-col) (string-suffix? "_id" dest-col))
-      (assert-nil-id dest-row-loc dest-col)
-      (set-cell*! dest-row-loc dest-col id)
-    ])
+    (cond [dest-row-loc (set-id*! dest-row-loc dest-col id)])
     (apply q* query-exec (create-something-build-string*! table-with-cols) (make-row-loc table-with-cols id) non-id-values)
     id
   )
@@ -215,6 +192,220 @@
     (create-something! "links(id, ref_count, library, public_id)" (list 0 library public-id))
   )
 )
+
+(define (link! dest-row-loc dest-col library public-id)
+  (define link-id (get-or-create-link! library public-id))
+  (inc-ref-count! (make-row-loc "links" link-id))
+  (set-id*! dest-row-loc dest-col link-id)
+)
+
+(define (inc-ref-count! dest-row-loc)
+  (define old-ref-count (q* query-value "SELECT ref_count FROM ~a WHERE id = ?1" dest-row-loc))
+  (q* query "UPDATE ~a SET ref_count = ?2 WHERE id = ?1" dest-row-loc (+ 1 old-ref-count))
+)
+
+(define (visit-id visitors id [asserted-type #f])
+  (cond
+    [(equal? id 0)
+      (assert
+        (format "Expected type ~a but was nil list" asserted-type)
+        (implies asserted-type (equal? asserted-type "lists"))
+      )
+      ((hash-ref visitors "nil"))
+    ]
+    [else (visit-non-nil-id* visitors id asserted-type)]
+  )
+)
+
+(define (visit-non-nil-id* visitors id [asserted-type #f])
+  (define row-loc (get-row-loc id))
+  (define type (row-loc->table row-loc))
+  (assert
+    (format "Expected id ~a to be ~a but was ~a" id asserted-type type)
+    (implies asserted-type (equal? asserted-type type))
+  )
+  (define visitor (hash-ref visitors type))
+  (define (get-cols* cols)
+    (vector->list (q* query-row (format "SELECT ~a FROM ~~a WHERE id = ?1" (string-join cols ", ")) row-loc))
+  )
+  (define (visit* . cols)
+    (apply visitor id (get-cols* cols))
+  )
+  (case type
+    [("lambdas") (apply visit-lambda visitor id (get-cols* '("short_desc" "long_desc" "arity" "body_id")))]
+    [("params") (visit* "short_desc" "long_desc" "lambda_id" "position")]
+    [("definitions") (visit* "define_id")]
+    [("defines") (visit* "short_desc" "long_desc" "expr_id")]
+    [("lists") (visit* "short_desc" "long_desc" "car_id" "cdr_id")]
+    [("atoms") (visit* "short_desc" "long_desc" "type" "value")]
+    [("links") (visit* "library" "public_id")]
+    [else (error 'visit-non-nil-id* "id ~a has invalid type ~a" id type)]
+  )
+)
+
+(define (visit-lambda lambda-visitor id short-desc long-desc arity body-id)
+  (define positions->param-ids
+    (foldl (lambda (p h) (let ([param-id (get-param id p)]) (if param-id (hash-set h p param-id) h))) #hash() (range arity))
+  )
+  (lambda-visitor id short-desc long-desc arity positions->param-ids body-id)
+)
+
+; TRANSPILATION
+
+(define (id->string* id)
+  (format "veme:_~a" id)
+)
+
+(define (id->sym id)
+  (string->symbol (id->string* id))
+)
+
+(define (id->scheme id [asserted-type #f])
+  (define (id->sym* id . stuff) (id->sym id))
+  ; We can't use #hash form, cuz it will interpret (type . proc) as '(type . proc), meaning proc is a symbol, not a proc
+  ; ugh
+  (define visitors (hash
+    "nil" (lambda () '())
+    "lambdas" lambda-data->scheme
+    "params" id->sym*
+    "definitions" id->sym*
+    "defines" define-data->scheme
+    "lists" list-data->scheme
+    "atoms" atom-data->scheme
+    "links" link-data->scheme
+  ))
+  (visit-id visitors id asserted-type)
+)
+
+;(define (id->scheme id [asserted-type #f])
+;  (cond
+;    [(equal? id 0)
+;      (assert
+;        (format "Expected type ~a but was nil list" asserted-type)
+;        (implies asserted-type (equal? asserted-type "lists"))
+;      )
+;      '()
+;    ]
+;    [else (non-nil-id->scheme* id asserted-type)]
+;  )
+;)
+;
+;; TODO generalize as some sort of visit-id
+;(define (non-nil-id->scheme* id [asserted-type #f])
+;  (define row-loc (get-row-loc id))
+;  (define type (row-loc->table row-loc))
+;  (assert
+;    (format "Expected id ~a to be ~a but was ~a" id asserted-type type)
+;    (implies asserted-type (equal? asserted-type type))
+;  )
+;  (define (apply-to-cols* dispatch . cols)
+;    (apply dispatch (vector->list (q* query-row (format "SELECT ~a FROM ~~a WHERE id = ?1" (string-join cols ", ")) row-loc)))
+;  )
+;  (case type
+;    [("params" "definitions") (id->sym id)]
+;    [("lambdas") (apply-to-cols* lambda->scheme "id" "arity" "body_id")]
+;    [("defines") (apply-to-cols* define-data->scheme "id" "expr_id")]
+;    [("lists") (apply-to-cols* list-data->scheme "car_id" "cdr_id")]
+;    [("atoms") (apply-to-cols* atom-data->scheme "type" "value")]
+;    [("links") (apply-to-cols* link-data->scheme "library" "public_id")]
+;    [else (error 'id->sym "id ~a has invalid type ~a" id type)]
+;  )
+;)
+
+(define (link-data->scheme id library public-id)
+  ; TODO this is completely wrong, but will make things easy for now, until i manage to get a proper links setup working
+  (string->symbol library)
+)
+
+(define (define-data->scheme id short-desc long-desc expr-id)
+  (define definition-id (query-value PROTO "SELECT id FROM definitions WHERE define_id = ?1" id))
+  (append (list 'define (id->scheme definition-id)) (id->scheme expr-id "lists"))
+)
+
+(define (atom-data->scheme id short-desc long-desc type value)
+  (case type
+    [("n") (or (string->number value) (error 'atom-data->scheme "Number atom ~a cannot be converted to number" value))]
+    [("c")
+      (define int-value (string->number value))
+      (assert
+        (format "Character ~a must either be the integer value of the desired character" value)
+        (and int-value (exact-positive-integer? int-value))
+      )
+      (integer->char int-value)
+    ]
+    [("s") value]
+    [("b")
+      (case value
+        [("f") #f]
+        [("t") #t]
+        [else (error 'atom-data->scheme "Boolean ~a is neither 'f' nor 't'" value)]
+      )
+    ]
+    [else (error 'atom-data->scheme "atom ~a has invalid type char ~a" value type)]
+  )
+)
+
+(define (lambda-data->scheme id short-desc long-desc arity positions->param-ids body-id)
+  (append
+    (list 'lambda
+      (build-list arity (lambda (pos)
+        (let (
+          [param-id (hash-ref positions->param-ids pos #f)])
+          (if param-id
+            (id->scheme param-id)
+            (string->symbol (format "~a:unused_~a" (id->string* id) pos))
+          )
+        )
+      ))
+    )
+    (id->scheme body-id "lists")
+  )
+)
+
+(define (list-data->scheme id short-desc long-desc car-id cdr-id)
+  (cons (id->scheme car-id) (id->scheme cdr-id "lists"))
+)
+
+(define (get-program-as-scheme*)
+  (id->scheme prog-start-id "lists")
+)
+
+(define (build-scheme-code)
+  ;(define prog-start (query-prog-start* query-row "SELECT id, car_id, cdr_id FROM ~a WHERE id = ?1"))
+  ;prog-start ; TODO
+  (write (get-program-as-scheme*))
+)
+
+; CONSTANTS
+
+(define PROTO (sqlite3-connect #:database "/home/nick/veme/proto.db"))
+
+(define ATOM-TYPE->ATOM-TYPE-CHAR
+  #hash(
+    ("number" . "n")
+    ("character" . "c")
+    ("string" . "s")
+    ("boolean" . "b")
+  )
+)
+
+(define TYPE-CHAR->TABLE
+  #hash(
+    ("f" . "lambdas")
+    ("p" . "params")
+    ("d" . "defines")
+    ("r" . "definitions")
+    ("l" . "lists")
+    ("a" . "atoms")
+    ("e" . "links")
+  )
+)
+
+(define TABLES (hash-values TYPE-CHAR->TABLE))
+
+(define prog-start-id 1)
+
+(define prog-start-row-loc (make-row-loc "lists" prog-start-id))
 
 ; GUI
 
