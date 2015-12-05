@@ -277,41 +277,6 @@
   (visit-id visitors id asserted-type)
 )
 
-;(define (id->scheme id [asserted-type #f])
-;  (cond
-;    [(equal? id 0)
-;      (assert
-;        (format "Expected type ~a but was nil list" asserted-type)
-;        (implies asserted-type (equal? asserted-type "lists"))
-;      )
-;      '()
-;    ]
-;    [else (non-nil-id->scheme* id asserted-type)]
-;  )
-;)
-;
-;; TODO generalize as some sort of visit-id
-;(define (non-nil-id->scheme* id [asserted-type #f])
-;  (define row-loc (get-row-loc id))
-;  (define type (row-loc->table row-loc))
-;  (assert
-;    (format "Expected id ~a to be ~a but was ~a" id asserted-type type)
-;    (implies asserted-type (equal? asserted-type type))
-;  )
-;  (define (apply-to-cols* dispatch . cols)
-;    (apply dispatch (vector->list (q* query-row (format "SELECT ~a FROM ~~a WHERE id = ?1" (string-join cols ", ")) row-loc)))
-;  )
-;  (case type
-;    [("params" "definitions") (id->sym id)]
-;    [("lambdas") (apply-to-cols* lambda->scheme "id" "arity" "body_id")]
-;    [("defines") (apply-to-cols* define-data->scheme "id" "expr_id")]
-;    [("lists") (apply-to-cols* list-data->scheme "car_id" "cdr_id")]
-;    [("atoms") (apply-to-cols* atom-data->scheme "type" "value")]
-;    [("links") (apply-to-cols* link-data->scheme "library" "public_id")]
-;    [else (error 'id->sym "id ~a has invalid type ~a" id type)]
-;  )
-;)
-
 (define (link-data->scheme id library public-id)
   ; TODO this is completely wrong, but will make things easy for now, until i manage to get a proper links setup working
   (string->symbol library)
