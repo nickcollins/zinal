@@ -532,19 +532,7 @@
 
 (define (add-all-to-prog-tree* prog-tree list-id)
   (visit-list (lambda (data id) (add-to-prog-tree prog-tree id)) prog-tree list-id)
-  ; TODO
-  ;(define visitors (hash
-  ;  "nil" (lambda (data) #f)
-  ;  "lists" add-flattened-list-to-prog-tree*
-  ;))
-  ;(visit-id visitors prog-tree list-id "lists")
 )
-
-; TODO
-;(define (add-flattened-list-to-prog-tree* prog-tree id short-desc long-desc car-id cdr-id)
-;  (add-to-prog-tree prog-tree car-id)
-;  (add-all-to-prog-tree* prog-tree cdr-id)
-;)
 
 (define (add-to-prog-tree prog-tree id)
   (define (just-short-desc* pt id . etc) (new-prog-tree-item prog-tree (get-short-desc-or id "<no desc>")))
