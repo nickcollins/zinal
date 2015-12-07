@@ -204,20 +204,20 @@
   (q* query "UPDATE ~a SET ref_count = ?2 WHERE id = ?1" dest-row-loc (+ 1 old-ref-count))
 )
 
-(define (visit-id visitors id [asserted-type #f])
+(define (visit-id visitors data id [asserted-type #f])
   (cond
     [(equal? id 0)
       (assert
         (format "Expected type ~a but was nil list" asserted-type)
         (implies asserted-type (equal? asserted-type "lists"))
       )
-      ((hash-ref visitors "nil"))
+      ((hash-ref visitors "nil") data)
     ]
-    [else (visit-non-nil-id* visitors id asserted-type)]
+    [else (visit-non-nil-id* visitors data id asserted-type)]
   )
 )
 
-(define (visit-non-nil-id* visitors id [asserted-type #f])
+(define (visit-non-nil-id* visitors data id [asserted-type #f])
   (define row-loc (get-row-loc id))
   (define type (row-loc->table row-loc))
   (assert
@@ -229,13 +229,16 @@
     (vector->list (q* query-row (format "SELECT ~a FROM ~~a WHERE id = ?1" (string-join cols ", ")) row-loc))
   )
   (define (visit* . cols)
-    (apply visitor id (get-cols* cols))
+    (apply visitor data id (get-cols* cols))
+  )
+  (define (visit-special* special . cols)
+    (apply special visitor data id (get-cols* cols))
   )
   (case type
-    [("lambdas") (apply visit-lambda visitor id (get-cols* '("short_desc" "long_desc" "arity" "body_id")))]
+    [("lambdas") (visit-special* visit-lambda "short_desc" "long_desc" "arity" "body_id")]
+    [("defines") (visit-special* visit-define "short_desc" "long_desc" "expr_id")]
     [("params") (visit* "short_desc" "long_desc" "lambda_id" "position")]
     [("definitions") (visit* "define_id")]
-    [("defines") (visit* "short_desc" "long_desc" "expr_id")]
     [("lists") (visit* "short_desc" "long_desc" "car_id" "cdr_id")]
     [("atoms") (visit* "short_desc" "long_desc" "type" "value")]
     [("links") (visit* "library" "public_id")]
@@ -243,11 +246,50 @@
   )
 )
 
-(define (visit-lambda lambda-visitor id short-desc long-desc arity body-id)
+(define (visit-lambda lambda-visitor data id short-desc long-desc arity body-id)
   (define positions->param-ids
     (foldl (lambda (p h) (let ([param-id (get-param id p)]) (if param-id (hash-set h p param-id) h))) #hash() (range arity))
   )
-  (lambda-visitor id short-desc long-desc arity positions->param-ids body-id)
+  (lambda-visitor data id short-desc long-desc arity positions->param-ids body-id)
+)
+
+(define (visit-define define-visitor data id short-desc long-desc expr-id)
+  (define definition-id (query-value PROTO "SELECT id FROM definitions WHERE define_id = ?1" id))
+  (define-visitor data id short-desc long-desc definition-id expr-id)
+)
+
+(define (visit-list* item-visitor+data id short-desc long-desc car-id cdr-id)
+  (define item-visitor (hash-ref item-visitor+data "item-visitor"))
+  (define data (hash-ref item-visitor+data "data"))
+  (cons (item-visitor data car-id) (visit-list item-visitor data cdr-id))
+)
+
+(define (visit-list item-visitor data list-id)
+  (define visitors (hash
+    "nil" (lambda (data) '())
+    "lists" visit-list*
+  ))
+  (visit-id visitors (hash "item-visitor" item-visitor "data" data) list-id "lists")
+)
+
+(define (get-short-desc id)
+  (define (just-short-desc* data id short-desc . etc) short-desc)
+  (define (just-sql-null* data) sql-null)
+  (define visitors (hash
+    "nil" just-sql-null*
+    "lambdas" just-short-desc*
+    "params" just-short-desc*
+    "definitions" (lambda (data id define-id) (get-short-desc define-id))
+    "defines" just-short-desc*
+    "lists" just-short-desc*
+    "atoms" just-short-desc*
+    "links" just-sql-null*
+  ))
+  (visit-id visitors id)
+)
+
+(define (get-short-desc-or id alt)
+  (sql:// (get-short-desc id) alt)
 )
 
 ; TRANSPILATION
@@ -261,11 +303,11 @@
 )
 
 (define (id->scheme id [asserted-type #f])
-  (define (id->sym* id . stuff) (id->sym id))
+  (define (id->sym* data id . etc) (id->sym id))
   ; We can't use #hash form, cuz it will interpret (type . proc) as '(type . proc), meaning proc is a symbol, not a proc
   ; ugh
   (define visitors (hash
-    "nil" (lambda () '())
+    "nil" (lambda (data) '())
     "lambdas" lambda-data->scheme
     "params" id->sym*
     "definitions" id->sym*
@@ -274,20 +316,19 @@
     "atoms" atom-data->scheme
     "links" link-data->scheme
   ))
-  (visit-id visitors id asserted-type)
+  (visit-id visitors #f id asserted-type)
 )
 
-(define (link-data->scheme id library public-id)
+(define (link-data->scheme data id library public-id)
   ; TODO this is completely wrong, but will make things easy for now, until i manage to get a proper links setup working
   (string->symbol library)
 )
 
-(define (define-data->scheme id short-desc long-desc expr-id)
-  (define definition-id (query-value PROTO "SELECT id FROM definitions WHERE define_id = ?1" id))
+(define (define-data->scheme data id short-desc long-desc definition-id expr-id)
   (append (list 'define (id->scheme definition-id)) (id->scheme expr-id "lists"))
 )
 
-(define (atom-data->scheme id short-desc long-desc type value)
+(define (atom-data->scheme data id short-desc long-desc type value)
   (case type
     [("n") (or (string->number value) (error 'atom-data->scheme "Number atom ~a cannot be converted to number" value))]
     [("c")
@@ -310,24 +351,27 @@
   )
 )
 
-(define (lambda-data->scheme id short-desc long-desc arity positions->param-ids body-id)
-  (append
-    (list 'lambda
-      (build-list arity (lambda (pos)
-        (let (
-          [param-id (hash-ref positions->param-ids pos #f)])
-          (if param-id
-            (id->scheme param-id)
-            (string->symbol (format "~a:unused_~a" (id->string* id) pos))
-          )
-        )
-      ))
+(define (map-params param-visitor unused-param-visitor arity positions->param-ids)
+  (build-list arity (lambda (pos)
+    (define param-id (hash-ref positions->param-ids pos #f))
+    (if param-id
+      (param-visitor param-id)
+      (unused-param-visitor pos)
     )
+  ))
+)
+
+(define (lambda-data->scheme data id short-desc long-desc arity positions->param-ids body-id)
+  (define (unused-param->symbol pos)
+    (string->symbol (format "~a:unused_~a" (id->string* id) pos))
+  )
+  (append
+    (list 'lambda (map-params id->scheme unused-param->symbol arity positions->param-ids))
     (id->scheme body-id "lists")
   )
 )
 
-(define (list-data->scheme id short-desc long-desc car-id cdr-id)
+(define (list-data->scheme data id short-desc long-desc car-id cdr-id)
   (cons (id->scheme car-id) (id->scheme cdr-id "lists"))
 )
 
@@ -336,8 +380,6 @@
 )
 
 (define (build-scheme-code)
-  ;(define prog-start (query-prog-start* query-row "SELECT id, car_id, cdr_id FROM ~a WHERE id = ?1"))
-  ;prog-start ; TODO
   (write (get-program-as-scheme*))
 )
 
@@ -390,28 +432,146 @@
 )
 
 ; lots of code liberally stolen from mred-designer
-(define (new-hier-item hier label)
-  (let* (
-    [item (send hier new-item)]
-    [ed (send item get-editor)])
-    (send ed erase)
-    (send ed insert label)
-  )
+(define (change-text hier new-text)
+  (define ed (send hier get-editor))
+  (send ed erase)
+  (send ed insert new-text)
+  hier
+)
+
+(define (new-prog-tree-item parent text)
+  (change-text (send parent new-item) text)
+)
+
+(define (new-prog-tree-list parent text)
+  (change-text (new-opened-sublist parent) text)
 )
 
 (define (new-opened-sublist hier)
   (let ([sl (send hier new-list)]) (send sl open) sl)
 )
 
-(define main-window (new frame% [label "Veme"]))
-(define prog-tree (new logic-hierarchy% [parent main-window]))
-(new-hier-item prog-tree "1")
-(let (
-  [c (new-opened-sublist prog-tree)])
-  (new-hier-item c "2")
-  (new-hier-item c "3")
+(define (add-nil-to-prog-tree* prog-tree)
+  (new-prog-tree-item prog-tree "()")
 )
-(new-hier-item prog-tree "4")
 
+(define (add-lambda-to-prog-tree* prog-tree id short-desc long-desc arity positions->param-ids body-id)
+  (define lambda-text (sql:// short-desc
+    (string-join
+      (map-params (lambda (pid) (get-short-desc-or pid "<?>")) (lambda (pos) "¯\\_(ツ)_/¯") arity positions->param-ids)
+      ", "
+      #:before-first "λ "
+      #:after-last (format " -> ~a" (get-short-desc-or body-id "..."))
+    )
+  ))
+  (define lambda-tree (new-prog-tree-list prog-tree (sql:// short-desc (format "λ "))))
+  (add-all-to-prog-tree* lambda-tree body-id)
+)
+
+(define (add-define-to-prog-tree* prog-tree id short-desc long-desc definition-id expr-id)
+  (define define-tree (new-prog-tree-list prog-tree (define->short-text* short-desc expr-id)))
+  (add-to-prog-tree define-tree expr-id)
+)
+
+(define (define->short-text* short-desc expr-id)
+  (format "~a = ~a" (sql:// short-desc "<no desc>") (get-short-desc-or expr-id "..."))
+)
+
+(define (atom->short-text* data id short-desc long-desc type value)
+  (sql:// short-desc (~a (atom-data->scheme data id short-desc long-desc type value)))
+)
+
+(define (link->short-text* data id library public-id)
+  ; TODO this is wrong and needs to change when we do legacy links
+  library
+)
+
+(define (list-item->text* id)
+  (define (short-desc-or* alt)
+    (lambda (data id . etc)
+      (get-short-desc-or id alt)
+    )
+  )
+  (define (define->short-text** data id short-desc long-desc definition-id expr-id)
+    (format "{~a}" (define->short-text* short-desc expr-id))
+  )
+  (define visitors (hash
+    "nil" (lambda (data) "()")
+    "lambdas" (short-desc-or* "λ...")
+    "params" (short-desc-or* "<no desc>")
+    "definitions" (short-desc-or* "<no desc>")
+    "defines" define->short-text**
+    "lists" (short-desc-or* "(...)")
+    "atoms" atom->short-text*
+    "links" link->short-text*
+  ))
+  (visit-id visitors #f id)
+)
+
+(define (list->text* list-id)
+  (string-join
+    (visit-list (lambda (data id) (list-item->text* id)) #f list-id)
+    ", "
+    #:before-first "("
+    #:after-last ")"
+  )
+)
+
+(define (add-list-to-prog-tree* prog-tree id short-desc long-desc car-id cdr-id)
+  (define list-tree (new-prog-tree-list prog-tree (sql:// short-desc (list->text* id))))
+  (add-all-to-prog-tree* list-tree id)
+)
+
+(define (add-atom-to-prog-tree* prog-tree id short-desc long-desc type value)
+  (new-prog-tree-item prog-tree (atom->short-text* prog-tree id short-desc long-desc type value))
+)
+
+(define (add-link-to-prog-tree* prog-tree id library public-id)
+  (new-prog-tree-item prog-tree (link->short-text* prog-tree id library public-id))
+)
+
+(define (add-all-to-prog-tree* prog-tree list-id)
+  (visit-list (lambda (data id) (add-to-prog-tree prog-tree id)) prog-tree list-id)
+  ; TODO
+  ;(define visitors (hash
+  ;  "nil" (lambda (data) #f)
+  ;  "lists" add-flattened-list-to-prog-tree*
+  ;))
+  ;(visit-id visitors prog-tree list-id "lists")
+)
+
+; TODO
+;(define (add-flattened-list-to-prog-tree* prog-tree id short-desc long-desc car-id cdr-id)
+;  (add-to-prog-tree prog-tree car-id)
+;  (add-all-to-prog-tree* prog-tree cdr-id)
+;)
+
+(define (add-to-prog-tree prog-tree id)
+  (define (just-short-desc* pt id . etc) (new-prog-tree-item prog-tree (get-short-desc-or id "<no desc>")))
+
+  (define prog-tree-visitors (hash
+    "nil" add-nil-to-prog-tree*
+    "lambdas" add-lambda-to-prog-tree*
+    "params" just-short-desc*
+    "definitions" just-short-desc*
+    "defines" add-define-to-prog-tree*
+    "lists" add-list-to-prog-tree*
+    "atoms" add-atom-to-prog-tree*
+    "links" add-link-to-prog-tree*
+  ))
+
+  (visit-id prog-tree-visitors prog-tree id)
+)
+
+(define (build-prog-tree parent)
+  (define prog-tree (new logic-hierarchy% [parent parent]))
+  (add-all-to-prog-tree* prog-tree prog-start-id)
+  prog-tree
+)
+
+; PROGRAM
+
+(define main-window (new frame% [label "Veme"]))
+(build-prog-tree main-window)
 (send main-window show #t)
 
