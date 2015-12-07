@@ -109,7 +109,7 @@
 (define (init-db!)
   (assert "PROTO db is already init'd" (null? (query-prog-start* query-rows "SELECT * FROM ~a WHERE id = ?1")))
   (create-something! "lists(id, short_desc, long_desc, car_id, cdr_id)" (list "Main Program" "" 0 0))
-  (link! prog-start-row-loc "car_id" "begin" 1)
+  (legacy-link! prog-start-row-loc "car_id" "" "begin")
 )
 
 (define (get-next-id)
@@ -186,16 +186,16 @@
 )
 
 ; library and public-id must be vetted before calling this function
-(define (get-or-create-link! library public-id)
+(define (get-or-create-legacy-link! library name)
   (or
-    (query-maybe-value PROTO "SELECT id FROM links WHERE library = ?1 AND public_id = ?2" library public-id)
-    (create-something! "links(id, ref_count, library, public_id)" (list 0 library public-id))
+    (query-maybe-value PROTO "SELECT id FROM legacies WHERE library = ?1 AND name = ?2" library name)
+    (create-something! "legacies(id, ref_count, library, name)" (list 0 library name))
   )
 )
 
-(define (link! dest-row-loc dest-col library public-id)
-  (define link-id (get-or-create-link! library public-id))
-  (inc-ref-count! (make-row-loc "links" link-id))
+(define (legacy-link! dest-row-loc dest-col library name)
+  (define link-id (get-or-create-legacy-link! library name))
+  (inc-ref-count! (make-row-loc "legacies" link-id))
   (set-id*! dest-row-loc dest-col link-id)
 )
 
@@ -241,7 +241,7 @@
     [("definitions") (visit* "define_id")]
     [("lists") (visit* "short_desc" "long_desc" "car_id" "cdr_id")]
     [("atoms") (visit* "short_desc" "long_desc" "type" "value")]
-    [("links") (visit* "library" "public_id")]
+    [("legacies") (visit* "library" "name")]
     [else (error 'visit-non-nil-id* "id ~a has invalid type ~a" id type)]
   )
 )
@@ -283,7 +283,7 @@
     "defines" just-short-desc*
     "lists" just-short-desc*
     "atoms" just-short-desc*
-    "links" just-sql-null*
+    "legacies" (lambda (data id library name) name)
   ))
   (visit-id visitors id)
 )
@@ -314,14 +314,17 @@
     "defines" define-data->scheme
     "lists" list-data->scheme
     "atoms" atom-data->scheme
-    "links" link-data->scheme
+    "legacies" legacy-link-data->scheme
   ))
   (visit-id visitors #f id asserted-type)
 )
 
-(define (link-data->scheme data id library public-id)
-  ; TODO this is completely wrong, but will make things easy for now, until i manage to get a proper links setup working
-  (string->symbol library)
+(define (legacy-link-data->scheme data id library name)
+  (if (equal? library "")
+    (string->symbol name)
+    ; TODO implement this
+    (error 'legacy-link-data->scheme "Support for non-standard libraries not yet implemented: ~a::~a" library name)
+  )
 )
 
 (define (define-data->scheme data id short-desc long-desc definition-id expr-id)
@@ -404,7 +407,7 @@
     ("r" . "definitions")
     ("l" . "lists")
     ("a" . "atoms")
-    ("e" . "links")
+    ("e" . "legacies")
   )
 )
 
@@ -481,9 +484,8 @@
   (sql:// short-desc (~a (atom-data->scheme data id short-desc long-desc type value)))
 )
 
-(define (link->short-text* data id library public-id)
-  ; TODO this is wrong and needs to change when we do legacy links
-  library
+(define (legacy-link->short-text* data id library name)
+  name
 )
 
 (define (list-item->text* id)
@@ -503,7 +505,7 @@
     "defines" define->short-text**
     "lists" (short-desc-or* "(...)")
     "atoms" atom->short-text*
-    "links" link->short-text*
+    "legacies" legacy-link->short-text*
   ))
   (visit-id visitors #f id)
 )
@@ -526,8 +528,8 @@
   (new-prog-tree-item prog-tree (atom->short-text* prog-tree id short-desc long-desc type value))
 )
 
-(define (add-link-to-prog-tree* prog-tree id library public-id)
-  (new-prog-tree-item prog-tree (link->short-text* prog-tree id library public-id))
+(define (add-legacy-link-to-prog-tree* prog-tree id library name)
+  (new-prog-tree-item prog-tree (legacy-link->short-text* prog-tree id library name))
 )
 
 (define (add-all-to-prog-tree* prog-tree list-id)
@@ -545,7 +547,7 @@
     "defines" add-define-to-prog-tree*
     "lists" add-list-to-prog-tree*
     "atoms" add-atom-to-prog-tree*
-    "links" add-link-to-prog-tree*
+    "legacies" add-legacy-link-to-prog-tree*
   ))
 
   (visit-id prog-tree-visitors prog-tree id)
