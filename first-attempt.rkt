@@ -1,8 +1,12 @@
 #lang racket
 
 (require db)
-(require racket/gui/base)
 (require mrlib/hierlist)
+(require racket/gui/base)
+; for hash-union
+(require racket/hash)
+; for list-index
+(require srfi/1)
 
 ; MACROS
 
@@ -14,7 +18,7 @@
 
 ; All indexed db queries must check that id is non-zero first. higher-level stuff need not check directly
 (define-syntax-rule (assert-not-nil id)
-  (assert "id was nil" (not (equal? id 0)))
+  (assert "id was nil" (not (= id 0)))
 )
 
 (define-syntax-rule (sql:// a b)
@@ -59,13 +63,13 @@
     [tables
       (filter
         (lambda (rl) (cons? (q* query-rows "SELECT * FROM ~a WHERE id = ?1" rl)))
-	(map (lambda (t) (make-row-loc t id)) TABLES)
+	(map (curryr make-row-loc id) TABLES)
       )
     ]
     [num-tables (length tables)])
     (cond
       [(< num-tables 1) #f]
-      [(equal? num-tables 1) (car tables)]
+      [(= num-tables 1) (car tables)]
       [else (error 'get-row-loc "multiple tables with id ~a: ~a" id tables)]
     )
   )
@@ -80,16 +84,29 @@
 
 (define (assert-nil-id row-loc col)
   (let (
-    [id-val (q* query-maybe-value (format "SELECT ~a FROM ~~a WHERE id = ?1" col) row-loc)])
+    [id-val (get-cell row-loc col)])
     (assert
       (format "id cell ~a ~a should be nil but is ~a" row-loc col id-val)
-      (implies id-val (equal? 0 id-val))
+      (implies id-val (= 0 id-val))
     )
   )
 )
 
+(define (get-cell row-loc col)
+  (q* query-maybe-value (format "SELECT ~a FROM ~~a WHERE id = ?1" col) row-loc)
+)
+
+(define (get-cell-strict row-loc/id col)
+  (define row-loc (if (number? row-loc/id) (get-row-loc row-loc/id) row-loc/id))
+  (define result (get-cell row-loc col))
+  (assert (format "Could not find cell ~a, ~a" row-loc col) result)
+  result
+)
+
 ; WARNING: do not use this on id columns unless ref-counts have already been updated
-(define (set-cell*! row-loc col value)
+; WARNING: set-id*! ensures that you don't orphan something, by only allowing you to set the value if it's 0
+;          set-cell-dangerous*! can orphan an id so use sparingly and document why each use is safe
+(define (set-cell-dangerous*! row-loc col value)
   (assert-exists row-loc)
   (q* query-exec (format "UPDATE ~~a SET ~a = ?2 WHERE id = ?1" col) row-loc value)
 )
@@ -98,27 +115,27 @@
 (define (set-id*! row-loc col id)
   (assert (format "destination column does not end in '_id': ~a" col) (string-suffix? "_id" col))
   (assert-nil-id row-loc col)
-  (set-cell*! row-loc col id)
+  (set-cell-dangerous*! row-loc col id)
 )
 
 (define (query-prog-start* q-proc query)
-  (q* q-proc query prog-start-row-loc)
+  (q* q-proc query PROG-START-ROW-LOC)
 )
 
 ; the program start is at id 1 in the lists table.
 (define (init-db!)
   (assert "PROTO db is already init'd" (null? (query-prog-start* query-rows "SELECT * FROM ~a WHERE id = ?1")))
   (create-something! "lists(id, short_desc, long_desc, car_id, cdr_id)" (list "Main Program" "" 0 0))
-  (legacy-link! prog-start-row-loc "car_id" "" "begin")
+  (legacy-link! PROG-START-ROW-LOC "car_id" "" "begin")
 )
 
 (define (get-next-id)
-  (+ 1 (apply max (map (lambda (t) (sql:// (query-value PROTO (format "SELECT MAX(id) FROM ~a" t)) 0)) TABLES)))
+  (add1 (apply max (map (lambda (t) (sql:// (query-value PROTO (format "SELECT MAX(id) FROM ~a" t)) 0)) TABLES)))
 )
 
 (define (create-something-build-string*! table-with-cols)
   (string-join
-    (build-list (length (string-split table-with-cols ",")) (lambda (n) (format "?~a" (+ n 1))))
+    (build-list (length (string-split table-with-cols ",")) (lambda (n) (format "?~a" (add1 n))))
     ", "
     #:before-first "INSERT INTO ~a values("
     #:after-last ")"
@@ -138,9 +155,9 @@
 )
 
 ; the params will be created lazily
-(define (create-lambda! arity [short-desc sql-null] [long-desc sql-null])
+(define (create-lambda! arity dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
   (assert (format "negative arity: ~a" arity) (>= arity 0))
-  (create-something! "lambdas(id, short_desc, long_desc, arity, ref_count, body_id)" (list short-desc long-desc arity 0 0))
+  (create-something! "lambdas(id, short_desc, long_desc, arity, body_id)" (list short-desc long-desc arity 0) dest-row-loc dest-col)
 )
 
 (define (create-list! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
@@ -157,7 +174,7 @@
     [lambda-row-loc (make-row-loc "lambdas" lambda-id)])
     (assert-exists lambda-row-loc)
     (let (
-      [arity (q* query-value "SELECT arity FROM ~a WHERE id = ?1" lambda-row-loc)])
+      [arity (get-cell-strict lambda-row-loc "arity")])
       (assert
         (format "attempt to make param with position ~a for lambda ~a with arity ~a" position lambda-id arity)
         (and (>= position 0) (< position arity))
@@ -200,13 +217,13 @@
 )
 
 (define (inc-ref-count! dest-row-loc)
-  (define old-ref-count (q* query-value "SELECT ref_count FROM ~a WHERE id = ?1" dest-row-loc))
-  (q* query "UPDATE ~a SET ref_count = ?2 WHERE id = ?1" dest-row-loc (+ 1 old-ref-count))
+  (define old-ref-count (get-cell-strict dest-row-loc "ref_count"))
+  (q* query "UPDATE ~a SET ref_count = ?2 WHERE id = ?1" dest-row-loc (add1 old-ref-count))
 )
 
 (define (visit-id visitors data id [asserted-type #f])
   (cond
-    [(equal? id 0)
+    [(= id 0)
       (assert
         (format "Expected type ~a but was nil list" asserted-type)
         (implies asserted-type (equal? asserted-type "lists"))
@@ -258,18 +275,33 @@
   (define-visitor data id short-desc long-desc definition-id expr-id)
 )
 
-(define (visit-list* item-visitor+data id short-desc long-desc car-id cdr-id)
-  (define item-visitor (hash-ref item-visitor+data "item-visitor"))
-  (define data (hash-ref item-visitor+data "data"))
-  (cons (item-visitor data car-id) (visit-list item-visitor data cdr-id))
+; TODO
+;(define (visit-list* item-visitor+data id short-desc long-desc car-id cdr-id)
+;  (define item-visitor (hash-ref item-visitor+data "item-visitor"))
+;  (define data (hash-ref item-visitor+data "data"))
+;  (cons (item-visitor data car-id) (visit-list item-visitor data cdr-id))
+;)
+;
+;(define (visit-list item-visitor data list-id)
+;  (define visitors (hash
+;    "nil" (const '())
+;    "lists" visit-list*
+;  ))
+;  (visit-id visitors (hash "item-visitor" item-visitor "data" data) list-id "lists")
+;)
+
+(define (get-cars list-id)
+  (if (= 0 list-id)
+    '()
+    (cons (get-cell-strict list-id "car_id") (get-cars (get-cell-strict list-id "cdr_id")))
+  )
 )
 
-(define (visit-list item-visitor data list-id)
-  (define visitors (hash
-    "nil" (lambda (data) '())
-    "lists" visit-list*
-  ))
-  (visit-id visitors (hash "item-visitor" item-visitor "data" data) list-id "lists")
+(define (get-cdrs list-id)
+  (if (= 0 list-id)
+    '()
+    (cons list-id (get-cdrs (get-cell-strict list-id "cdr_id")))
+  )
 )
 
 (define (get-short-desc id)
@@ -292,6 +324,36 @@
   (sql:// (get-short-desc id) alt)
 )
 
+(define (insert-at-beginning-of-list*! list-id new-node-id)
+  (assert-not-nil list-id)
+  (define list-row-loc (get-row-loc list-id))
+  (define orig-first-value (get-cell-strict list-row-loc "car_id"))
+  (define rest (get-cell-strict list-row-loc "cdr_id"))
+
+  ; We've captured original car_id and cdr_id values, and will soon move them to a new list, so we can safely replace them with new values
+  (set-cell-dangerous*! list-row-loc "car_id" new-node-id)
+  (set-cell-dangerous*! list-row-loc "cdr_id" 0)
+
+  (define new-list-row-loc (get-row-loc (create-list! list-row-loc "cdr_id")))
+  (set-id*! new-list-row-loc "car_id" orig-first-value)
+  (set-id*! new-list-row-loc "cdr_id" rest)
+)
+
+(define (nil-list->real-list*! row-loc col first-item-id [short-desc sql-null] [long-desc sql-null])
+  (assert
+    (format "Don't use nil-list->real-list*! for the '() at the end of a list. Instead use an append operation: ~a" row-loc)
+    (not (equal? col "cdr_id"))
+  )
+  (define new-list-row-loc (get-row-loc (create-list! row-loc col short-desc long-desc)))
+  (set-id*! new-list-row-loc "car_id" first-item-id)
+)
+
+; TODO
+;(define (create-db-list-item*! list-id pos)
+;  (define (list-ref (visit-list (lambda (data id) id) #f list-id) pos)
+;  
+;)
+
 ; TRANSPILATION
 
 (define (id->string* id)
@@ -307,7 +369,7 @@
   ; We can't use #hash form, cuz it will interpret (type . proc) as '(type . proc), meaning proc is a symbol, not a proc
   ; ugh
   (define visitors (hash
-    "nil" (lambda (data) '())
+    "nil" (const '())
     "lambdas" lambda-data->scheme
     "params" id->sym*
     "definitions" id->sym*
@@ -379,7 +441,7 @@
 )
 
 (define (get-program-as-scheme*)
-  (id->scheme prog-start-id "lists")
+  (id->scheme PROG-START-ID "lists")
 )
 
 (define (build-scheme-code)
@@ -413,20 +475,160 @@
 
 (define TABLES (hash-values TYPE-CHAR->TABLE))
 
-(define prog-start-id 1)
+(define PROG-START-ID 1)
 
-(define prog-start-row-loc (make-row-loc "lists" prog-start-id))
+(define PROG-START-ROW-LOC (make-row-loc "lists" PROG-START-ID))
 
 ; GUI
+
+(define (get-node-id prog-tree-item)
+  (send prog-tree-item user-data)
+)
+
+(define (get-list-body-id* prog-tree-item)
+  (define row-loc (get-row-loc (get-node-id prog-tree-item)))
+  (define id (row-loc->id row-loc))
+  (if (= id 0)
+    0
+    (case (row-loc->table row-loc)
+      [("lists") id]
+      [("lambdas") (get-cell-strict (make-row-loc "lambdas" id) "body_id")]
+      [else #f]
+    )
+  )
+)
+
+; TODO
+;(define (is-list-type* prog-tree-item)
+;  (case (row-loc->table (get-row-loc (get-node-id prog-tree-item)))
+;    [("lambdas" "lists") #t]
+;    [else #f]
+;  )
+;)
+
+; TODO
+;(define (get-insertion-point* prog-tree-item)
+;  (define insertion-list-item
+;    (if (is-list-type* prog-tree-item) prog-tree-item (send get-parent prog-tree-item))
+;  )
+;  (cond [(not (is-list-type* insertion-list-item))
+;    (error 'get-insertion-point* "Neither ~a nor its parent is a list type, and cannot be inserted into" (get-node-id prog-tree-item))
+;  ])
+;  (list insertion-list-item
+;    (if (eq? prog-tree-item insertion-list-item)
+;      0
+;      (add1 (list-index (curry eq? prog-tree-item) insertion-list-item))
+;    )
+;  )
+;)
+
+(define (maybe-create-new-list! prog-tree-item)
+  #f
+  ; TODO
+)
+
+(define (maybe-create-new-number! prog-tree-item)
+  #f
+  ; TODO
+)
+
+(define (maybe-create-new-character! prog-tree-item)
+  #f
+  ; TODO
+)
+
+(define (maybe-create-new-string! prog-tree-item)
+  #f
+  ; TODO
+)
+
+(define (maybe-create-new-boolean! prog-tree-item)
+  #f
+  ; TODO
+)
+
+(define (maybe-create-new-function! prog-tree-item)
+  #f
+  ; TODO
+)
+
+(define (maybe-create-new-lambda! prog-tree-item)
+  #f
+  ; TODO
+)
+
+(define (maybe-create-new-value-definition! prog-tree-item)
+  #f
+  ; TODO
+)
+
+(define (maybe-create-new-value-read! prog-tree-item)
+  #f
+  ; TODO
+)
+
+(define (request-new-node-handler*)
+  (define friendly-types (hash-keys FRIENDLY-TYPE->HANDLER))
+  (define choices (get-choices-from-user "Create new node" "Choose the node's type:" friendly-types))
+  (cond
+    [choices
+      (assert (format "Multiple types chosen: ~a" choices) (= 1 (length choices)))
+      (hash-ref FRIENDLY-TYPE->HANDLER (list-ref friendly-types (car choices)))
+    ]
+    [else #f]
+  )
+)
+
+(define (find-node-index compound-node node-to-find)
+  (list-index (curry eq? node-to-find) (send compound-node get-items))
+)
+
+(define (insert-new-node*! insertion-list-node list-body-id new-node-id)
+  (cond
+    [(= 0 list-body-id)
+      (define parent-list (send insertion-list-node get-parent))
+      (define parent-list-body-id (get-list-body-id* parent-list))
+      (assert (format "~a's parent is not a valid list: ~a" insertion-list-node parent-list-body-id) ((conjoin identity (negate (curry = 0))) parent-list-body-id))
+      (define sublist-id (list-ref (get-cdrs parent-list-body-id) (find-node-index parent-list insertion-list-node)))
+      (nil-list->real-list*! (get-row-loc sublist-id) "car_id" new-node-id)
+    ]
+    [else
+      (insert-at-beginning-of-list*! list-body-id new-node-id)
+    ]
+  )
+)
+
+(define (maybe-insert-new-node! selected-prog-tree-item)
+  (cond [selected-prog-tree-item
+    (define list-body-id (get-list-body-id* selected-prog-tree-item))
+    (define handler (request-new-node-handler*))
+    (cond [(and list-body-id handler)
+      (define new-node-id (handler selected-prog-tree-item))
+      (cond [new-node-id
+        ; the ref-count of new-node-id has already been updated, so we must ensure we successfully insert
+        (insert-new-node*! selected-prog-tree-item list-body-id new-node-id)
+        (refresh-prog-tree)
+      ])
+    ])
+  ])
+)
+
+(define (append-new-node! selected-prog-tree-item)
+  ; TODO
+  #f
+)
 
 (define logic-hierarchy%
   (class hierarchical-list%
     (define/override (on-char key-event)
+      (define selected (send this get-selected))
       (case (send key-event get-key-code)
-        [(#\j #\J) (send this select-next)]
-        [(#\k #\K) (send this select-prev)]
-        [(#\h #\H) (send this select-out)]
-        [(#\l #\L) (send this select-in)]
+        [(#\j) (send this select-next)]
+        [(#\k) (send this select-prev)]
+        [(#\h) (send this select-out)]
+        [(#\l) (send this select-in)]
+        [(#\a) (append-new-node! selected)]
+        [(#\i) (maybe-insert-new-node! selected)]
       )
       (super on-char key-event)
     )
@@ -439,15 +641,20 @@
   (define ed (send hier get-editor))
   (send ed erase)
   (send ed insert new-text)
-  hier
 )
 
-(define (new-prog-tree-item parent text)
-  (change-text (send parent new-item) text)
+(define (init-prog-tree-item* item text id)
+  (change-text item text)
+  (send item user-data id)
+  item
 )
 
-(define (new-prog-tree-list parent text)
-  (change-text (new-opened-sublist parent) text)
+(define (new-prog-tree-item parent text id)
+  (init-prog-tree-item* (send parent new-item) text id)
+)
+
+(define (new-prog-tree-list parent text id)
+  (init-prog-tree-item* (new-opened-sublist parent) text id)
 )
 
 (define (new-opened-sublist hier)
@@ -455,24 +662,24 @@
 )
 
 (define (add-nil-to-prog-tree* prog-tree)
-  (new-prog-tree-item prog-tree "()")
+  (new-prog-tree-item prog-tree "()" 0)
 )
 
 (define (add-lambda-to-prog-tree* prog-tree id short-desc long-desc arity positions->param-ids body-id)
   (define lambda-text (sql:// short-desc
     (string-join
-      (map-params (lambda (pid) (get-short-desc-or pid "<?>")) (lambda (pos) "¯\\_(ツ)_/¯") arity positions->param-ids)
+      (map-params (curryr get-short-desc-or "<?>") (const "¯\\_(ツ)_/¯") arity positions->param-ids)
       ", "
       #:before-first "λ "
       #:after-last (format " -> ~a" (get-short-desc-or body-id "..."))
     )
   ))
-  (define lambda-tree (new-prog-tree-list prog-tree (sql:// short-desc (format "λ "))))
+  (define lambda-tree (new-prog-tree-list prog-tree (sql:// short-desc (format "λ ")) id))
   (add-all-to-prog-tree* lambda-tree body-id)
 )
 
 (define (add-define-to-prog-tree* prog-tree id short-desc long-desc definition-id expr-id)
-  (define define-tree (new-prog-tree-list prog-tree (define->short-text* short-desc expr-id)))
+  (define define-tree (new-prog-tree-list prog-tree (define->short-text* short-desc expr-id) id))
   (add-to-prog-tree define-tree expr-id)
 )
 
@@ -498,7 +705,7 @@
     (format "{~a}" (define->short-text* short-desc expr-id))
   )
   (define visitors (hash
-    "nil" (lambda (data) "()")
+    "nil" (const "()")
     "lambdas" (short-desc-or* "λ...")
     "params" (short-desc-or* "<no desc>")
     "definitions" (short-desc-or* "<no desc>")
@@ -512,7 +719,8 @@
 
 (define (list->text* list-id)
   (string-join
-    (visit-list (lambda (data id) (list-item->text* id)) #f list-id)
+    ;(visit-list (lambda (data id) (list-item->text* id)) #f list-id) TODO
+    (map list-item->text* (get-cars list-id))
     ", "
     #:before-first "("
     #:after-last ")"
@@ -520,24 +728,25 @@
 )
 
 (define (add-list-to-prog-tree* prog-tree id short-desc long-desc car-id cdr-id)
-  (define list-tree (new-prog-tree-list prog-tree (sql:// short-desc (list->text* id))))
+  (define list-tree (new-prog-tree-list prog-tree (sql:// short-desc (list->text* id)) id))
   (add-all-to-prog-tree* list-tree id)
 )
 
 (define (add-atom-to-prog-tree* prog-tree id short-desc long-desc type value)
-  (new-prog-tree-item prog-tree (atom->short-text* prog-tree id short-desc long-desc type value))
+  (new-prog-tree-item prog-tree (atom->short-text* prog-tree id short-desc long-desc type value) id)
 )
 
 (define (add-legacy-link-to-prog-tree* prog-tree id library name)
-  (new-prog-tree-item prog-tree (legacy-link->short-text* prog-tree id library name))
+  (new-prog-tree-item prog-tree (legacy-link->short-text* prog-tree id library name) id)
 )
 
 (define (add-all-to-prog-tree* prog-tree list-id)
-  (visit-list (lambda (data id) (add-to-prog-tree prog-tree id)) prog-tree list-id)
+  ;(visit-list (lambda (data id) (add-to-prog-tree prog-tree id)) prog-tree list-id) TODO
+  (for-each (curry add-to-prog-tree prog-tree) (get-cars list-id))
 )
 
 (define (add-to-prog-tree prog-tree id)
-  (define (just-short-desc* pt id . etc) (new-prog-tree-item prog-tree (get-short-desc-or id "<no desc>")))
+  (define (just-short-desc* pt id . etc) (new-prog-tree-item prog-tree (get-short-desc-or id "<no desc>") id))
 
   (define prog-tree-visitors (hash
     "nil" add-nil-to-prog-tree*
@@ -553,15 +762,31 @@
   (visit-id prog-tree-visitors prog-tree id)
 )
 
-(define (build-prog-tree parent)
-  (define prog-tree (new logic-hierarchy% [parent parent]))
-  (add-all-to-prog-tree* prog-tree prog-start-id)
-  prog-tree
-)
+; GUI CONSTANTS
+
+(define FRIENDLY-LITERAL-TYPE->HANDLER (hash
+  "list" maybe-create-new-list!
+  "number" maybe-create-new-number!
+  "character" maybe-create-new-character!
+  "string" maybe-create-new-string!
+  "boolean" maybe-create-new-boolean!
+))
+
+(define FRIENDLY-TYPE->HANDLER (hash-union FRIENDLY-LITERAL-TYPE->HANDLER (hash
+  "define function" maybe-create-new-function!
+  "anonymous function" maybe-create-new-lambda!
+  "define value" maybe-create-new-value-definition!
+  "read definition" maybe-create-new-value-read!
+)))
 
 ; PROGRAM
 
 (define main-window (new frame% [label "Veme"]))
-(build-prog-tree main-window)
+(define (refresh-prog-tree)
+  (define prog-tree (new logic-hierarchy% [parent main-window]))
+  (add-to-prog-tree prog-tree PROG-START-ID)
+)
+(refresh-prog-tree)
 (send main-window show #t)
 
+(build-scheme-code)
