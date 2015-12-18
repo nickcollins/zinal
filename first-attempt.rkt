@@ -275,21 +275,6 @@
   (define-visitor data id short-desc long-desc definition-id expr-id)
 )
 
-; TODO
-;(define (visit-list* item-visitor+data id short-desc long-desc car-id cdr-id)
-;  (define item-visitor (hash-ref item-visitor+data "item-visitor"))
-;  (define data (hash-ref item-visitor+data "data"))
-;  (cons (item-visitor data car-id) (visit-list item-visitor data cdr-id))
-;)
-;
-;(define (visit-list item-visitor data list-id)
-;  (define visitors (hash
-;    "nil" (const '())
-;    "lists" visit-list*
-;  ))
-;  (visit-id visitors (hash "item-visitor" item-visitor "data" data) list-id "lists")
-;)
-
 (define (get-cars list-id)
   (if (= 0 list-id)
     '()
@@ -347,12 +332,6 @@
   (define new-list-row-loc (get-row-loc (create-list! row-loc col short-desc long-desc)))
   (set-id*! new-list-row-loc "car_id" first-item-id)
 )
-
-; TODO
-;(define (create-db-list-item*! list-id pos)
-;  (define (list-ref (visit-list (lambda (data id) id) #f list-id) pos)
-;  
-;)
 
 ; TRANSPILATION
 
@@ -497,30 +476,6 @@
     )
   )
 )
-
-; TODO
-;(define (is-list-type* prog-tree-item)
-;  (case (row-loc->table (get-row-loc (get-node-id prog-tree-item)))
-;    [("lambdas" "lists") #t]
-;    [else #f]
-;  )
-;)
-
-; TODO
-;(define (get-insertion-point* prog-tree-item)
-;  (define insertion-list-item
-;    (if (is-list-type* prog-tree-item) prog-tree-item (send get-parent prog-tree-item))
-;  )
-;  (cond [(not (is-list-type* insertion-list-item))
-;    (error 'get-insertion-point* "Neither ~a nor its parent is a list type, and cannot be inserted into" (get-node-id prog-tree-item))
-;  ])
-;  (list insertion-list-item
-;    (if (eq? prog-tree-item insertion-list-item)
-;      0
-;      (add1 (list-index (curry eq? prog-tree-item) insertion-list-item))
-;    )
-;  )
-;)
 
 (define (maybe-create-new-list! prog-tree-item)
   #f
@@ -719,7 +674,6 @@
 
 (define (list->text* list-id)
   (string-join
-    ;(visit-list (lambda (data id) (list-item->text* id)) #f list-id) TODO
     (map list-item->text* (get-cars list-id))
     ", "
     #:before-first "("
@@ -741,7 +695,6 @@
 )
 
 (define (add-all-to-prog-tree* prog-tree list-id)
-  ;(visit-list (lambda (data id) (add-to-prog-tree prog-tree id)) prog-tree list-id) TODO
   (for-each (curry add-to-prog-tree prog-tree) (get-cars list-id))
 )
 
