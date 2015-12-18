@@ -309,7 +309,7 @@
   (sql:// (get-short-desc id) alt)
 )
 
-(define (insert-at-beginning-of-list*! list-id new-node-id)
+(define (insert-at-beginning-of-non-nil-list*! list-id new-node-id)
   (assert-not-nil list-id)
   (define list-row-loc (get-row-loc list-id))
   (define orig-first-value (get-cell-strict list-row-loc "car_id"))
@@ -324,13 +324,19 @@
   (set-id*! new-list-row-loc "cdr_id" rest)
 )
 
-(define (nil-list->real-list*! row-loc col first-item-id [short-desc sql-null] [long-desc sql-null])
-  (assert
-    (format "Don't use nil-list->real-list*! for the '() at the end of a list. Instead use an append operation: ~a" row-loc)
-    (not (equal? col "cdr_id"))
+(define (insert-into-non-nil-list! list-id index new-node-id)
+  (define cdrs (get-cdrs list-id))
+  (define list-len (length cdrs))
+  (assert (format "index ~a out of bounds for list ~a" index list-id) (and (>= index 0) (<= index list-len)))
+  (if (= index list-len)
+    (nil-list->real-list*! (get-row-loc (list-ref crds (sub1 list-len))) "cdr_id" new-node-id)
+    (insert-at-beginning-of-non-nil-list*! (list-ref cdrs index) new-node-id)
   )
+)
+
+(define (nil-list->real-list*! row-loc col new-node-id [short-desc sql-null] [long-desc sql-null])
   (define new-list-row-loc (get-row-loc (create-list! row-loc col short-desc long-desc)))
-  (set-id*! new-list-row-loc "car_id" first-item-id)
+  (set-id*! new-list-row-loc "car_id" new-node-id)
 )
 
 ; TRANSPILATION
@@ -548,7 +554,7 @@
       (nil-list->real-list*! (get-row-loc sublist-id) "car_id" new-node-id)
     ]
     [else
-      (insert-at-beginning-of-list*! list-body-id new-node-id)
+      (insert-at-beginning-of-non-nil-list*! list-body-id new-node-id)
     ]
   )
 )
