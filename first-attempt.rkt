@@ -16,9 +16,9 @@
   )
 )
 
-; All indexed db queries must check that id is non-zero first. higher-level stuff need not check directly
-(define-syntax-rule (assert-not-nil id)
-  (assert "id was nil" (not (= id 0)))
+; All indexed db queries must check that id is real first. higher-level stuff need not check directly
+(define-syntax-rule (assert-real-id id)
+  (assert "id was non-positive" (positive? id))
 )
 
 (define-syntax-rule (sql:// a b)
@@ -35,6 +35,8 @@
     (equal? (substring s (- s-len suf-len) s-len) suf)
   )
 )
+
+(define non-negative? (negate negative?))
 
 ; DB FUNCTIONS
 
@@ -53,7 +55,7 @@
 (define (q* q-proc query row-loc . q-parms)
   (let (
     [id (row-loc->id row-loc)])
-    (assert-not-nil id)
+    (assert-real-id id)
     (apply q-proc PROTO (format query (row-loc->table row-loc)) id q-parms)
   )
 )
@@ -63,7 +65,7 @@
     [tables
       (filter
         (lambda (rl) (cons? (q* query-rows "SELECT * FROM ~a WHERE id = ?1" rl)))
-	(map (curryr make-row-loc id) TABLES)
+        (map (curryr make-row-loc id) TABLES)
       )
     ]
     [num-tables (length tables)])
@@ -82,29 +84,29 @@
   )
 )
 
-(define (assert-nil-id row-loc col)
+(define (is-nil*? list-id)
+  (= NIL-LIST-ID list-id)
+)
+
+(define (assert-unassigned row-loc col)
   (let (
     [id-val (get-cell row-loc col)])
     (assert
-      (format "id cell ~a ~a should be nil but is ~a" row-loc col id-val)
-      (implies id-val (= 0 id-val))
+      (format "id cell ~a ~a should be unassigned but is ~a" row-loc col id-val)
+      (= UNASSIGNED-ID id-val)
     )
   )
 )
 
-(define (get-cell row-loc col)
-  (q* query-maybe-value (format "SELECT ~a FROM ~~a WHERE id = ?1" col) row-loc)
-)
-
-(define (get-cell-strict row-loc/id col)
+(define (get-cell row-loc/id col)
   (define row-loc (if (number? row-loc/id) (get-row-loc row-loc/id) row-loc/id))
-  (define result (get-cell row-loc col))
+  (define result (q* query-maybe-value (format "SELECT ~a FROM ~~a WHERE id = ?1" col) row-loc))
   (assert (format "Could not find cell ~a, ~a" row-loc col) result)
   result
 )
 
 ; WARNING: do not use this on id columns unless ref-counts have already been updated
-; WARNING: set-id*! ensures that you don't orphan something, by only allowing you to set the value if it's 0
+; WARNING: set-id*! ensures that you don't orphan something, by only allowing you to set the cell if it's unassigned
 ;          set-cell-dangerous*! can orphan an id so use sparingly and document why each use is safe
 (define (set-cell-dangerous*! row-loc col value)
   (assert-exists row-loc)
@@ -114,7 +116,7 @@
 ; WARNING: do not use this on id columns unless ref-counts have already been updated
 (define (set-id*! row-loc col id)
   (assert (format "destination column does not end in '_id': ~a" col) (string-suffix? "_id" col))
-  (assert-nil-id row-loc col)
+  (assert-unassigned row-loc col)
   (set-cell-dangerous*! row-loc col id)
 )
 
@@ -122,15 +124,22 @@
   (q* q-proc query PROG-START-ROW-LOC)
 )
 
-; the program start is at id 1 in the lists table.
+; the program start is at id 1 in the list_headers table.
 (define (init-db!)
   (assert "PROTO db is already init'd" (null? (query-prog-start* query-rows "SELECT * FROM ~a WHERE id = ?1")))
-  (create-something! "lists(id, short_desc, long_desc, car_id, cdr_id)" (list "Main Program" "" 0 0))
-  (legacy-link! PROG-START-ROW-LOC "car_id" "" "begin")
+  (define first-id (create-something! "list_headers(id, short_desc, long_desc, cdr_id)" (list "Main Program" "" UNASSIGNED-ID)))
+  (assert
+    (format "first created item should have id ~a but has id ~a" PROG-START-ID)
+    (= PROG-START-ID first-id)
+  )
+  (define first-list-node-row-loc (get-row-loc (create-list*! first-id)))
+  (legacy-link! first-list-node-row-loc "car_id" DEFAULT-LIBRARY "begin")
+  ; TODO later, we may delete end-list in favor of a wholesale list creation thing
+  (end-list*! first-list-node-row-loc)
 )
 
 (define (get-next-id)
-  (add1 (apply max (map (lambda (t) (sql:// (query-value PROTO (format "SELECT MAX(id) FROM ~a" t)) 0)) TABLES)))
+  (add1 (apply max (map (lambda (t) (sql:// (query-value PROTO (format "SELECT MAX(id) FROM ~a" t)) (sub1 PROG-START-ID))) TABLES)))
 )
 
 (define (create-something-build-string*! table-with-cols)
@@ -142,7 +151,7 @@
   )
 )
 
-; in table-with-cols, id must be first. e.g. "lists(id, short_desc, long_desc, car_id, cdr_id)"
+; in table-with-cols, id must be first. e.g. "list_headers(id, short_desc, long_desc, cdr_id)"
 ; non-id-values are the values for ?2, ?3, ?4 .... as a list
 (define (create-something! table-with-cols non-id-values [dest-row-loc #f] [dest-col #f])
   (assert "you must specify both dest-col and dest-row-loc, or neither" (not (xor dest-row-loc dest-col)))
@@ -156,12 +165,30 @@
 
 ; the params will be created lazily
 (define (create-lambda! arity dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
-  (assert (format "negative arity: ~a" arity) (>= arity 0))
-  (create-something! "lambdas(id, short_desc, long_desc, arity, body_id)" (list short-desc long-desc arity 0) dest-row-loc dest-col)
+  (assert (format "negative arity: ~a" arity) (non-negative? arity))
+  (create-something! "lambdas(id, short_desc, long_desc, arity, body_id)" (list short-desc long-desc arity UNASSIGNED-ID) dest-row-loc dest-col)
 )
 
-(define (create-list! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
-  (create-something! "lists(id, short_desc, long_desc, car_id, cdr_id)" (list short-desc long-desc 0 0) dest-row-loc dest-col)
+; TODO probably we should just have something that creates the list wholesale
+(define (end-list*! dest-row-loc)
+  (set-id*! dest-row-loc "cdr_id" NIL-LIST-ID)
+)
+
+(define (create-list*! owner-id [dest-row-loc (get-row-loc owner-id)])
+  (create-something! "lists(id, owner_id, car_id, cdr_id)" (list owner-id UNASSIGNED-ID UNASSIGNED-ID) dest-row-loc "cdr_id")
+)
+
+(define (create-list-header*! dest-row-loc dest-col short-desc long-desc cdr-id)
+  (create-something! "list_headers(id, short_desc, long_desc, cdr_id)" (list short-desc long-desc cdr-id) dest-row-loc dest-col)
+)
+
+(define (create-unassigned-list-header! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
+  (create-list-header*! dest-row-loc dest-col short-desc long-desc UNASSIGNED-ID)
+)
+
+; TODO probably delete. We should just use the unassigned version, and then set-id*! to NIL-LIST-ID
+(define (create-nil-list-header! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
+  (create-list-header*! dest-row-loc dest-col short-desc long-desc NIL-LIST-ID)
 )
 
 ; returns #f if there is no param
@@ -169,15 +196,15 @@
   (query-maybe-value PROTO "SELECT id FROM params WHERE lambda_id = ?1 AND position = ?2" lambda-id position)
 )
 
-(define (create-param! lambda-id position [short-desc sql-null] [long-desc sql-null])
+(define (create-param*! lambda-id position [short-desc sql-null] [long-desc sql-null])
   (let (
     [lambda-row-loc (make-row-loc "lambdas" lambda-id)])
     (assert-exists lambda-row-loc)
     (let (
-      [arity (get-cell-strict lambda-row-loc "arity")])
+      [arity (get-cell lambda-row-loc "arity")])
       (assert
         (format "attempt to make param with position ~a for lambda ~a with arity ~a" position lambda-id arity)
-        (and (>= position 0) (< position arity))
+        (and (non-negative? position) (< position arity))
       )
     )
   )
@@ -197,7 +224,7 @@
 ; returns the id of the definition, not the define
 (define (create-define! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
   (let (
-    [define-id (create-something! "defines(id, short_desc, long_desc, expr_id)" (list short-desc long-desc 0) dest-row-loc dest-col)])
+    [define-id (create-something! "defines(id, short_desc, long_desc, expr_id)" (list short-desc long-desc UNASSIGNED-ID) dest-row-loc dest-col)])
     (create-something! "definitions(id, ref_count, define_id)" (list 0 define-id))
   )
 )
@@ -217,30 +244,15 @@
 )
 
 (define (inc-ref-count! dest-row-loc)
-  (define old-ref-count (get-cell-strict dest-row-loc "ref_count"))
+  (define old-ref-count (get-cell dest-row-loc "ref_count"))
   (q* query "UPDATE ~a SET ref_count = ?2 WHERE id = ?1" dest-row-loc (add1 old-ref-count))
 )
 
-(define (visit-id visitors data id [asserted-type #f])
-  (cond
-    [(= id 0)
-      (assert
-        (format "Expected type ~a but was nil list" asserted-type)
-        (implies asserted-type (equal? asserted-type "lists"))
-      )
-      ((hash-ref visitors "nil") data)
-    ]
-    [else (visit-non-nil-id* visitors data id asserted-type)]
-  )
-)
-
-(define (visit-non-nil-id* visitors data id [asserted-type #f])
+; can't be used on list nodes
+(define (visit-id visitors data id)
+  (assert-real-id id)
   (define row-loc (get-row-loc id))
   (define type (row-loc->table row-loc))
-  (assert
-    (format "Expected id ~a to be ~a but was ~a" id asserted-type type)
-    (implies asserted-type (equal? asserted-type type))
-  )
   (define visitor (hash-ref visitors type))
   (define (get-cols* cols)
     (vector->list (q* query-row (format "SELECT ~a FROM ~~a WHERE id = ?1" (string-join cols ", ")) row-loc))
@@ -254,12 +266,12 @@
   (case type
     [("lambdas") (visit-special* visit-lambda "short_desc" "long_desc" "arity" "body_id")]
     [("defines") (visit-special* visit-define "short_desc" "long_desc" "expr_id")]
+    [("list_headers") (visit-special* visit-list-header "short_desc" "long_desc" "cdr_id")]
     [("params") (visit* "short_desc" "long_desc" "lambda_id" "position")]
     [("definitions") (visit* "define_id")]
-    [("lists") (visit* "short_desc" "long_desc" "car_id" "cdr_id")]
     [("atoms") (visit* "short_desc" "long_desc" "type" "value")]
     [("legacies") (visit* "library" "name")]
-    [else (error 'visit-non-nil-id* "id ~a has invalid type ~a" id type)]
+    [else (error 'visit-id "id ~a has unvisitable type ~a" id type)]
   )
 )
 
@@ -275,17 +287,16 @@
   (define-visitor data id short-desc long-desc definition-id expr-id)
 )
 
-(define (get-cars list-id)
-  (if (= 0 list-id)
-    '()
-    (cons (get-cell-strict list-id "car_id") (get-cars (get-cell-strict list-id "cdr_id")))
-  )
+(define (visit-list-header list-header-visitor data id short-desc long-desc cdr-id)
+  (define item-ids (get-cars* cdr-id))
+  (list-header-visitor data id short-desc long-desc item-ids)
 )
 
-(define (get-cdrs list-id)
-  (if (= 0 list-id)
+; TODO get-cars* should become a more internal method only being used by list-header internals and not accessible to general stuff
+(define (get-cars* list-id)
+  (if (is-nil*? list-id)
     '()
-    (cons list-id (get-cdrs (get-cell-strict list-id "cdr_id")))
+    (cons (get-cell list-id "car_id") (get-cars* (get-cell list-id "cdr_id")))
   )
 )
 
@@ -293,50 +304,19 @@
   (define (just-short-desc* data id short-desc . etc) short-desc)
   (define (just-sql-null* data) sql-null)
   (define visitors (hash
-    "nil" just-sql-null*
     "lambdas" just-short-desc*
     "params" just-short-desc*
     "definitions" (lambda (data id define-id) (get-short-desc define-id))
     "defines" just-short-desc*
-    "lists" just-short-desc*
+    "list_headers" just-short-desc*
     "atoms" just-short-desc*
     "legacies" (lambda (data id library name) name)
   ))
-  (visit-id visitors id)
+  (visit-id visitors #f id)
 )
 
 (define (get-short-desc-or id alt)
   (sql:// (get-short-desc id) alt)
-)
-
-(define (insert-at-beginning-of-non-nil-list*! list-id new-node-id)
-  (assert-not-nil list-id)
-  (define list-row-loc (get-row-loc list-id))
-  (define orig-first-value (get-cell-strict list-row-loc "car_id"))
-  (define rest (get-cell-strict list-row-loc "cdr_id"))
-
-  ; We've captured original car_id and cdr_id values, and will soon move them to a new list, so we can safely replace them with new values
-  (set-cell-dangerous*! list-row-loc "car_id" new-node-id)
-  (set-cell-dangerous*! list-row-loc "cdr_id" 0)
-
-  (define new-list-row-loc (get-row-loc (create-list! list-row-loc "cdr_id")))
-  (set-id*! new-list-row-loc "car_id" orig-first-value)
-  (set-id*! new-list-row-loc "cdr_id" rest)
-)
-
-(define (insert-into-non-nil-list! list-id index new-node-id)
-  (define cdrs (get-cdrs list-id))
-  (define list-len (length cdrs))
-  (assert (format "index ~a out of bounds for list ~a" index list-id) (and (>= index 0) (<= index list-len)))
-  (if (= index list-len)
-    (nil-list->real-list*! (get-row-loc (list-ref crds (sub1 list-len))) "cdr_id" new-node-id)
-    (insert-at-beginning-of-non-nil-list*! (list-ref cdrs index) new-node-id)
-  )
-)
-
-(define (nil-list->real-list*! row-loc col new-node-id [short-desc sql-null] [long-desc sql-null])
-  (define new-list-row-loc (get-row-loc (create-list! row-loc col short-desc long-desc)))
-  (set-id*! new-list-row-loc "car_id" new-node-id)
 )
 
 ; TRANSPILATION
@@ -349,25 +329,24 @@
   (string->symbol (id->string* id))
 )
 
-(define (id->scheme id [asserted-type #f])
+(define (id->scheme id)
   (define (id->sym* data id . etc) (id->sym id))
   ; We can't use #hash form, cuz it will interpret (type . proc) as '(type . proc), meaning proc is a symbol, not a proc
   ; ugh
   (define visitors (hash
-    "nil" (const '())
     "lambdas" lambda-data->scheme
     "params" id->sym*
     "definitions" id->sym*
     "defines" define-data->scheme
-    "lists" list-data->scheme
+    "list_headers" list-header-data->scheme
     "atoms" atom-data->scheme
     "legacies" legacy-link-data->scheme
   ))
-  (visit-id visitors #f id asserted-type)
+  (visit-id visitors #f id)
 )
 
 (define (legacy-link-data->scheme data id library name)
-  (if (equal? library "")
+  (if (equal? library DEFAULT-LIBRARY)
     (string->symbol name)
     ; TODO implement this
     (error 'legacy-link-data->scheme "Support for non-standard libraries not yet implemented: ~a::~a" library name)
@@ -375,7 +354,7 @@
 )
 
 (define (define-data->scheme data id short-desc long-desc definition-id expr-id)
-  (append (list 'define (id->scheme definition-id)) (id->scheme expr-id "lists"))
+  (append (list 'define (id->scheme definition-id)) (id->scheme expr-id))
 )
 
 (define (atom-data->scheme data id short-desc long-desc type value)
@@ -417,16 +396,16 @@
   )
   (append
     (list 'lambda (map-params id->scheme unused-param->symbol arity positions->param-ids))
-    (id->scheme body-id "lists")
+    (id->scheme body-id)
   )
 )
 
-(define (list-data->scheme data id short-desc long-desc car-id cdr-id)
-  (cons (id->scheme car-id) (id->scheme cdr-id "lists"))
+(define (list-header-data->scheme data id short-desc long-desc item-ids)
+  (map id->scheme item-ids)
 )
 
 (define (get-program-as-scheme*)
-  (id->scheme PROG-START-ID "lists")
+  (id->scheme PROG-START-ID)
 )
 
 (define (build-scheme-code)
@@ -437,6 +416,7 @@
 
 (define PROTO (sqlite3-connect #:database "/home/nick/veme/proto.db"))
 
+; TODO change keys to symbols?
 (define ATOM-TYPE->ATOM-TYPE-CHAR
   #hash(
     ("number" . "n")
@@ -453,6 +433,7 @@
     ("d" . "defines")
     ("r" . "definitions")
     ("l" . "lists")
+    ("h" . "list_headers")
     ("a" . "atoms")
     ("e" . "legacies")
   )
@@ -460,123 +441,138 @@
 
 (define TABLES (hash-values TYPE-CHAR->TABLE))
 
+(define DEFAULT-LIBRARY "")
+
+(define UNASSIGNED-ID -1)
+
+(define NIL-LIST-ID 0)
+
 (define PROG-START-ID 1)
 
-(define PROG-START-ROW-LOC (make-row-loc "lists" PROG-START-ID))
+(define PROG-START-ROW-LOC (make-row-loc "list_headers" PROG-START-ID))
 
 ; GUI
 
-(define (get-node-id prog-tree-item)
+(define (get-item-id prog-tree-item)
   (send prog-tree-item user-data)
 )
 
-(define (get-list-body-id* prog-tree-item)
-  (define row-loc (get-row-loc (get-node-id prog-tree-item)))
-  (define id (row-loc->id row-loc))
-  (if (= id 0)
-    0
-    (case (row-loc->table row-loc)
-      [("lists") id]
-      [("lambdas") (get-cell-strict (make-row-loc "lambdas" id) "body_id")]
-      [else #f]
-    )
-  )
+; new-blah-creator is a function of form
+; <nil> => (dest-row-loc, dest-col => <nil>) OR #f
+; If it returns #f, it means no operation should be performed
+; The returned creator is destructive and must succeed
+(define (new-list-creator)
+  ; TODO "dog"?
+  (lambda (dest-row-loc dest-col) (create-nil-list-header! dest-row-loc dest-col "dog"))
 )
 
-(define (maybe-create-new-list! prog-tree-item)
+(define (new-number-creator)
+  ; TODO 3?
+  (lambda (dest-row-loc dest-col) (create-atom! "number" "3" dest-row-loc dest-col "cat"))
+)
+
+(define (new-character-creator)
   #f
   ; TODO
 )
 
-(define (maybe-create-new-number! prog-tree-item)
+(define (new-string-creator)
   #f
   ; TODO
 )
 
-(define (maybe-create-new-character! prog-tree-item)
+(define (new-boolean-creator)
   #f
   ; TODO
 )
 
-(define (maybe-create-new-string! prog-tree-item)
+(define (new-function-creator)
   #f
   ; TODO
 )
 
-(define (maybe-create-new-boolean! prog-tree-item)
+(define (new-lambda-creator)
   #f
   ; TODO
 )
 
-(define (maybe-create-new-function! prog-tree-item)
+(define (new-value-definition-creator)
   #f
   ; TODO
 )
 
-(define (maybe-create-new-lambda! prog-tree-item)
+(define (new-value-read-creator)
   #f
   ; TODO
 )
 
-(define (maybe-create-new-value-definition! prog-tree-item)
-  #f
-  ; TODO
-)
-
-(define (maybe-create-new-value-read! prog-tree-item)
-  #f
-  ; TODO
-)
-
-(define (request-new-node-handler*)
-  (define friendly-types (hash-keys FRIENDLY-TYPE->HANDLER))
-  (define choices (get-choices-from-user "Create new node" "Choose the node's type:" friendly-types))
+; TODO minor cleanup of this comment along with the prior one about creators
+; <nil> => (dest-row-loc, dest-col => <nil>)
+; Returned creator will, when called, create a new item (if necessary) and update ref-counts (if necessary)
+; The returned creator is not allowed to fail. A failure of this function should return #f instead of a creator
+(define (request-new-item-creator*)
+  (define friendly-types (hash-keys FRIENDLY-TYPE->CREATOR))
+  (define choices (get-choices-from-user "Create new AST node" "Choose the node's type:" friendly-types))
   (cond
     [choices
       (assert (format "Multiple types chosen: ~a" choices) (= 1 (length choices)))
-      (hash-ref FRIENDLY-TYPE->HANDLER (list-ref friendly-types (car choices)))
+      ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref friendly-types (car choices))))
     ]
     [else #f]
   )
 )
 
-(define (find-node-index compound-node node-to-find)
-  (list-index (curry eq? node-to-find) (send compound-node get-items))
+(define (find-item-index compound-item item-to-find)
+  (list-index (curry eq? item-to-find) (send compound-item get-items))
 )
 
-(define (insert-new-node*! insertion-list-node list-body-id new-node-id)
-  (cond
-    [(= 0 list-body-id)
-      (define parent-list (send insertion-list-node get-parent))
-      (define parent-list-body-id (get-list-body-id* parent-list))
-      (assert (format "~a's parent is not a valid list: ~a" insertion-list-node parent-list-body-id) ((conjoin identity (negate (curry = 0))) parent-list-body-id))
-      (define sublist-id (list-ref (get-cdrs parent-list-body-id) (find-node-index parent-list insertion-list-node)))
-      (nil-list->real-list*! (get-row-loc sublist-id) "car_id" new-node-id)
-    ]
-    [else
-      (insert-at-beginning-of-non-nil-list*! list-body-id new-node-id)
-    ]
+(define (nth-list-insertion-point* list-start-id index)
+  (if (zero? index)
+    list-start-id
+    (nth-list-insertion-point* (get-cell list-start-id "cdr_id") (sub1 index))
   )
 )
 
-(define (maybe-insert-new-node! selected-prog-tree-item)
-  (cond [selected-prog-tree-item
-    (define list-body-id (get-list-body-id* selected-prog-tree-item))
-    (define handler (request-new-node-handler*))
-    (cond [(and list-body-id handler)
-      (define new-node-id (handler selected-prog-tree-item))
-      (cond [new-node-id
-        ; the ref-count of new-node-id has already been updated, so we must ensure we successfully insert
-        (insert-new-node*! selected-prog-tree-item list-body-id new-node-id)
-        (refresh-prog-tree)
-      ])
-    ])
-  ])
+(define (insert-new-list-node*! list-header-id index)
+  (define insertion-point (nth-list-insertion-point* list-header-id index))
+  (define insertion-row-loc (get-row-loc insertion-point))
+  (define old-cdr (get-cell insertion-row-loc "cdr_id"))
+  ; We've captured the original cdr_id, and will soon move it to the newly created node, so we can safely replace this node's cdr
+  (set-cell-dangerous*! insertion-row-loc "cdr_id" UNASSIGNED-ID)
+  (define new-node-row-loc (get-row-loc (create-list*! list-header-id insertion-row-loc)))
+  (set-id*! new-node-row-loc "cdr_id" old-cdr)
+  new-node-row-loc 
 )
 
-(define (append-new-node! selected-prog-tree-item)
-  ; TODO
-  #f
+(define (maybe-add-item-to-list! selected before/after far/near)
+  (assert (format "before/after must be 'before or 'after, but is ~a" before/after) (member before/after '(before after)))
+  (assert (format "far/near must be 'near or 'far, but is ~a" far/near) (member far/near '(far near)))
+  (define is-far (equal? far/near 'far))
+  (define is-before (equal? before/after 'before))
+  (cond [selected
+    (define creator! (request-new-item-creator*))
+    (cond [creator!
+      (define selected-id (get-item-id selected))
+      (define selected-type (row-loc->table (get-row-loc selected-id)))
+      (define list-to-augment
+        (if (and is-far (equal? selected-type "list_headers"))
+          selected
+          (send selected get-parent)
+        )
+      )
+      (define index-to-insert-at
+        (if is-far
+          (if is-before 0 (length (send list-to-augment get-items)))
+          (+ (find-item-index list-to-augment selected) (if is-before 0 1))
+        )
+      )
+      (define new-list-node-row-loc (insert-new-list-node*! (get-item-id list-to-augment) index-to-insert-at))
+      ; TODO looks like maybe the creator should not take a column, and just shove into "car_id".
+      ; will we use the same creators for non-list creations?
+      (creator! new-list-node-row-loc "car_id")
+      (refresh-prog-tree)
+    ])
+  ])
 )
 
 (define logic-hierarchy%
@@ -588,8 +584,10 @@
         [(#\k) (send this select-prev)]
         [(#\h) (send this select-out)]
         [(#\l) (send this select-in)]
-        [(#\a) (append-new-node! selected)]
-        [(#\i) (maybe-insert-new-node! selected)]
+        [(#\a) (maybe-add-item-to-list! selected 'after 'near)]
+        [(#\A) (maybe-add-item-to-list! selected 'after 'far)]
+        [(#\i) (maybe-add-item-to-list! selected 'before 'near)]
+        [(#\I) (maybe-add-item-to-list! selected 'before 'far)]
       )
       (super on-char key-event)
     )
@@ -622,21 +620,16 @@
   (let ([sl (send hier new-list)]) (send sl open) sl)
 )
 
-(define (add-nil-to-prog-tree* prog-tree)
-  (new-prog-tree-item prog-tree "()" 0)
-)
-
+; TODO Currently, the params aren't modeled at all. This may need to change in the future
 (define (add-lambda-to-prog-tree* prog-tree id short-desc long-desc arity positions->param-ids body-id)
-  (define lambda-text (sql:// short-desc
-    (string-join
-      (map-params (curryr get-short-desc-or "<?>") (const "¯\\_(ツ)_/¯") arity positions->param-ids)
-      ", "
-      #:before-first "λ "
-      #:after-last (format " -> ~a" (get-short-desc-or body-id "..."))
-    )
-  ))
-  (define lambda-tree (new-prog-tree-list prog-tree (sql:// short-desc (format "λ ")) id))
-  (add-all-to-prog-tree* lambda-tree body-id)
+  (define params-text
+    (string-join (map-params (curryr get-short-desc-or "<?>") (const "¯\\_(ツ)_/¯") arity positions->param-ids) ", ")
+  )
+  (define lambda-text
+    (sql:// short-desc (format "λ ~a -> ~a" params-text (get-short-desc-or body-id "...")))
+  )
+  (define lambda-tree (new-prog-tree-list prog-tree lambda-text id))
+  (add-to-prog-tree lambda-tree body-id)
 )
 
 (define (add-define-to-prog-tree* prog-tree id short-desc long-desc definition-id expr-id)
@@ -656,6 +649,10 @@
   name
 )
 
+(define (list-header->short-text* data id short-desc long-desc item-ids)
+  (sql:// short-desc (if (null? item-ids) "()" "(...)"))
+)
+
 (define (list-item->text* id)
   (define (short-desc-or* alt)
     (lambda (data id . etc)
@@ -666,30 +663,29 @@
     (format "{~a}" (define->short-text* short-desc expr-id))
   )
   (define visitors (hash
-    "nil" (const "()")
     "lambdas" (short-desc-or* "λ...")
     "params" (short-desc-or* "<no desc>")
     "definitions" (short-desc-or* "<no desc>")
     "defines" define->short-text**
-    "lists" (short-desc-or* "(...)")
+    "list_headers" list-header->short-text* 
     "atoms" atom->short-text*
     "legacies" legacy-link->short-text*
   ))
   (visit-id visitors #f id)
 )
 
-(define (list->text* list-id)
+(define (list->text* item-ids)
   (string-join
-    (map list-item->text* (get-cars list-id))
+    (map list-item->text* item-ids)
     ", "
     #:before-first "("
     #:after-last ")"
   )
 )
 
-(define (add-list-to-prog-tree* prog-tree id short-desc long-desc car-id cdr-id)
-  (define list-tree (new-prog-tree-list prog-tree (sql:// short-desc (list->text* id)) id))
-  (add-all-to-prog-tree* list-tree id)
+(define (add-list-header-to-prog-tree* prog-tree id short-desc long-desc item-ids)
+  (define list-tree (new-prog-tree-list prog-tree (sql:// short-desc (list->text* item-ids)) id))
+  (for-each (curry add-to-prog-tree list-tree) item-ids)
 )
 
 (define (add-atom-to-prog-tree* prog-tree id short-desc long-desc type value)
@@ -700,20 +696,15 @@
   (new-prog-tree-item prog-tree (legacy-link->short-text* prog-tree id library name) id)
 )
 
-(define (add-all-to-prog-tree* prog-tree list-id)
-  (for-each (curry add-to-prog-tree prog-tree) (get-cars list-id))
-)
-
 (define (add-to-prog-tree prog-tree id)
   (define (just-short-desc* pt id . etc) (new-prog-tree-item prog-tree (get-short-desc-or id "<no desc>") id))
 
   (define prog-tree-visitors (hash
-    "nil" add-nil-to-prog-tree*
     "lambdas" add-lambda-to-prog-tree*
     "params" just-short-desc*
     "definitions" just-short-desc*
     "defines" add-define-to-prog-tree*
-    "lists" add-list-to-prog-tree*
+    "list_headers" add-list-header-to-prog-tree*
     "atoms" add-atom-to-prog-tree*
     "legacies" add-legacy-link-to-prog-tree*
   ))
@@ -723,29 +714,33 @@
 
 ; GUI CONSTANTS
 
-(define FRIENDLY-LITERAL-TYPE->HANDLER (hash
-  "list" maybe-create-new-list!
-  "number" maybe-create-new-number!
-  "character" maybe-create-new-character!
-  "string" maybe-create-new-string!
-  "boolean" maybe-create-new-boolean!
+(define FRIENDLY-LITERAL-TYPE->CREATOR (hash
+  "list" new-list-creator
+  "number" new-number-creator
+  "character" new-character-creator
+  "string" new-string-creator
+  "boolean" new-boolean-creator
 ))
 
-(define FRIENDLY-TYPE->HANDLER (hash-union FRIENDLY-LITERAL-TYPE->HANDLER (hash
-  "define function" maybe-create-new-function!
-  "anonymous function" maybe-create-new-lambda!
-  "define value" maybe-create-new-value-definition!
-  "read definition" maybe-create-new-value-read!
+(define FRIENDLY-TYPE->CREATOR (hash-union FRIENDLY-LITERAL-TYPE->CREATOR (hash
+  "define function" new-function-creator
+  "anonymous function" new-lambda-creator
+  "define value" new-value-definition-creator
+  "read definition" new-value-read-creator
 )))
 
 ; PROGRAM
 
+; (init-db!)
+; (build-scheme-code)
+
 (define main-window (new frame% [label "Veme"]))
+(define main-prog-tree (new logic-hierarchy% [parent main-window]))
+; dummy item
+(send main-prog-tree new-item)
 (define (refresh-prog-tree)
-  (define prog-tree (new logic-hierarchy% [parent main-window]))
-  (add-to-prog-tree prog-tree PROG-START-ID)
+  (send main-prog-tree delete-item (car (send main-prog-tree get-items)))
+  (add-to-prog-tree main-prog-tree PROG-START-ID)
 )
 (refresh-prog-tree)
 (send main-window show #t)
-
-(build-scheme-code)
