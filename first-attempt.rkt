@@ -8,14 +8,10 @@
 ; for list-index
 (require srfi/1)
 
-; TODO: cond -> when?
-
 ; MACROS
 
 (define-syntax-rule (assert msg bool)
-  (cond
-    [(not bool) (error msg)]
-  )
+  (unless bool (error msg))
 )
 
 ; All indexed db queries must check that id is real first. higher-level stuff need not check directly
@@ -108,18 +104,18 @@
 )
 
 ; WARNING: do not use this on id columns unless ref-counts have already been updated
-; WARNING: set-id*! ensures that you don't orphan something, by only allowing you to set the cell if it's unassigned
-;          set-cell-dangerous*! can orphan an id so use sparingly and document why each use is safe
-(define (set-cell-dangerous*! row-loc col value)
+; WARNING: set-id*!! ensures that you don't orphan something, by only allowing you to set the cell if it's unassigned
+;          set-cell-dangerous*!! can orphan an id so use sparingly and document why each use is safe
+(define (set-cell-dangerous*!! row-loc col value)
   (assert-exists row-loc)
   (q* query-exec (format "UPDATE ~~a SET ~a = ?2 WHERE id = ?1" col) row-loc value)
 )
 
 ; WARNING: do not use this on id columns unless ref-counts have already been updated
-(define (set-id*! row-loc col id)
+(define (set-id*!! row-loc col id)
   (assert (format "destination column does not end in '_id': ~a" col) (string-suffix? "_id" col))
   (assert-unassigned row-loc col)
-  (set-cell-dangerous*! row-loc col id)
+  (set-cell-dangerous*!! row-loc col id)
 )
 
 (define (query-prog-start* q-proc query)
@@ -127,24 +123,24 @@
 )
 
 ; the program start is at id 1 in the list_headers table.
-(define (init-db!)
+(define (init-db!!)
   (assert "PROTO db is already init'd" (null? (query-prog-start* query-rows "SELECT * FROM ~a WHERE id = ?1")))
-  (define first-id (create-something! "list_headers(id, short_desc, long_desc, cdr_id)" (list "Main Program" "" UNASSIGNED-ID)))
+  (define first-id (create-something!! "list_headers(id, short_desc, long_desc, cdr_id)" (list "Main Program" "" UNASSIGNED-ID)))
   (assert
     (format "first created item should have id ~a but has id ~a" PROG-START-ID)
     (= PROG-START-ID first-id)
   )
-  (define first-list-node-row-loc (get-row-loc (create-list*! first-id)))
-  (legacy-link! first-list-node-row-loc "car_id" DEFAULT-LIBRARY "begin")
+  (define first-list-node-row-loc (get-row-loc (create-list*!! first-id)))
+  (legacy-link!! first-list-node-row-loc "car_id" DEFAULT-LIBRARY "begin")
   ; TODO later, we may delete end-list in favor of a wholesale list creation thing
-  (end-list*! first-list-node-row-loc)
+  (end-list*!! first-list-node-row-loc)
 )
 
 (define (get-next-id)
   (add1 (apply max (map (lambda (t) (sql:// (query-value PROTO (format "SELECT MAX(id) FROM ~a" t)) (sub1 PROG-START-ID))) TABLES)))
 )
 
-(define (create-something-build-string*! table-with-cols)
+(define (create-something-build-string* table-with-cols)
   (string-join
     (build-list (length (string-split table-with-cols ",")) (lambda (n) (format "?~a" (add1 n))))
     ", "
@@ -155,42 +151,42 @@
 
 ; in table-with-cols, id must be first. e.g. "list_headers(id, short_desc, long_desc, cdr_id)"
 ; non-id-values are the values for ?2, ?3, ?4 .... as a list
-(define (create-something! table-with-cols non-id-values [dest-row-loc #f] [dest-col #f])
+(define (create-something!! table-with-cols non-id-values [dest-row-loc #f] [dest-col #f])
   (assert "you must specify both dest-col and dest-row-loc, or neither" (not (xor dest-row-loc dest-col)))
   (let (
     [id (get-next-id)])
-    (cond [dest-row-loc (set-id*! dest-row-loc dest-col id)])
-    (apply q* query-exec (create-something-build-string*! table-with-cols) (make-row-loc table-with-cols id) non-id-values)
+    (when dest-row-loc (set-id*!! dest-row-loc dest-col id))
+    (apply q* query-exec (create-something-build-string* table-with-cols) (make-row-loc table-with-cols id) non-id-values)
     id
   )
 )
 
 ; the params will be created lazily
-(define (create-lambda! arity dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
+(define (create-lambda!! arity dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
   (assert (format "negative arity: ~a" arity) (non-negative? arity))
-  (create-something! "lambdas(id, short_desc, long_desc, arity, body_id)" (list short-desc long-desc arity UNASSIGNED-ID) dest-row-loc dest-col)
+  (create-something!! "lambdas(id, short_desc, long_desc, arity, body_id)" (list short-desc long-desc arity UNASSIGNED-ID) dest-row-loc dest-col)
 )
 
 ; TODO probably we should just have something that creates the list wholesale
-(define (end-list*! dest-row-loc)
-  (set-id*! dest-row-loc "cdr_id" NIL-LIST-ID)
+(define (end-list*!! dest-row-loc)
+  (set-id*!! dest-row-loc "cdr_id" NIL-LIST-ID)
 )
 
-(define (create-list*! owner-id [dest-row-loc (get-row-loc owner-id)])
-  (create-something! "lists(id, owner_id, car_id, cdr_id)" (list owner-id UNASSIGNED-ID UNASSIGNED-ID) dest-row-loc "cdr_id")
+(define (create-list*!! owner-id [dest-row-loc (get-row-loc owner-id)])
+  (create-something!! "lists(id, owner_id, car_id, cdr_id)" (list owner-id UNASSIGNED-ID UNASSIGNED-ID) dest-row-loc "cdr_id")
 )
 
-(define (create-list-header*! dest-row-loc dest-col short-desc long-desc cdr-id)
-  (create-something! "list_headers(id, short_desc, long_desc, cdr_id)" (list short-desc long-desc cdr-id) dest-row-loc dest-col)
+(define (create-list-header*!! dest-row-loc dest-col short-desc long-desc cdr-id)
+  (create-something!! "list_headers(id, short_desc, long_desc, cdr_id)" (list short-desc long-desc cdr-id) dest-row-loc dest-col)
 )
 
-(define (create-unassigned-list-header! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
-  (create-list-header*! dest-row-loc dest-col short-desc long-desc UNASSIGNED-ID)
+(define (create-unassigned-list-header!! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
+  (create-list-header*!! dest-row-loc dest-col short-desc long-desc UNASSIGNED-ID)
 )
 
-; TODO probably delete. We should just use the unassigned version, and then set-id*! to NIL-LIST-ID
-(define (create-nil-list-header! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
-  (create-list-header*! dest-row-loc dest-col short-desc long-desc NIL-LIST-ID)
+; TODO probably delete. We should just use the unassigned version, and then set-id*!! to NIL-LIST-ID
+(define (create-nil-list-header!! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
+  (create-list-header*!! dest-row-loc dest-col short-desc long-desc NIL-LIST-ID)
 )
 
 ; returns #f if there is no param
@@ -198,7 +194,7 @@
   (query-maybe-value PROTO "SELECT id FROM params WHERE lambda_id = ?1 AND position = ?2" lambda-id position)
 )
 
-(define (create-param*! lambda-id position [short-desc sql-null] [long-desc sql-null])
+(define (create-param*!! lambda-id position [short-desc sql-null] [long-desc sql-null])
   (let (
     [lambda-row-loc (make-row-loc "lambdas" lambda-id)])
     (assert-exists lambda-row-loc)
@@ -211,41 +207,41 @@
     )
   )
   (assert (format "~ath param for lambda ~a is already defined" position lambda-id) (not (get-param lambda-id position)))
-  (create-something! "params(id, short_desc, long_desc, ref_count, lambda_id, position)" (list short-desc long-desc 0 lambda-id position))
+  (create-something!! "params(id, short_desc, long_desc, ref_count, lambda_id, position)" (list short-desc long-desc 0 lambda-id position))
 )
 
-(define (create-atom! type value dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
+(define (create-atom!! type value dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
   ; TODO: check that the value is valid for this type
   (let (
     [type-char (hash-ref ATOM-TYPE->ATOM-TYPE-CHAR type #f)])
     (assert (format "Invalid type: ~a" type) type-char)
-    (create-something! "atoms(id, short_desc, long_desc, type, value)" (list short-desc long-desc type-char value) dest-row-loc dest-col)
+    (create-something!! "atoms(id, short_desc, long_desc, type, value)" (list short-desc long-desc type-char value) dest-row-loc dest-col)
   )
 )
 
 ; returns the id of the definition, not the define
-(define (create-define! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
+(define (create-define!! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
   (let (
-    [define-id (create-something! "defines(id, short_desc, long_desc, expr_id)" (list short-desc long-desc UNASSIGNED-ID) dest-row-loc dest-col)])
-    (create-something! "definitions(id, ref_count, define_id)" (list 0 define-id))
+    [define-id (create-something!! "defines(id, short_desc, long_desc, expr_id)" (list short-desc long-desc UNASSIGNED-ID) dest-row-loc dest-col)])
+    (create-something!! "definitions(id, ref_count, define_id)" (list 0 define-id))
   )
 )
 
 ; library and public-id must be vetted before calling this function
-(define (get-or-create-legacy-link! library name)
+(define (get-or-create-legacy-link!! library name)
   (or
     (query-maybe-value PROTO "SELECT id FROM legacies WHERE library = ?1 AND name = ?2" library name)
-    (create-something! "legacies(id, ref_count, library, name)" (list 0 library name))
+    (create-something!! "legacies(id, ref_count, library, name)" (list 0 library name))
   )
 )
 
-(define (legacy-link! dest-row-loc dest-col library name)
-  (define link-id (get-or-create-legacy-link! library name))
-  (inc-ref-count! (make-row-loc "legacies" link-id))
-  (set-id*! dest-row-loc dest-col link-id)
+(define (legacy-link!! dest-row-loc dest-col library name)
+  (define link-id (get-or-create-legacy-link!! library name))
+  (inc-ref-count!! (make-row-loc "legacies" link-id))
+  (set-id*!! dest-row-loc dest-col link-id)
 )
 
-(define (inc-ref-count! dest-row-loc)
+(define (inc-ref-count!! dest-row-loc)
   (define old-ref-count (get-cell dest-row-loc "ref_count"))
   (q* query "UPDATE ~a SET ref_count = ?2 WHERE id = ?1" dest-row-loc (add1 old-ref-count))
 )
@@ -465,12 +461,12 @@
 ; The returned creator is destructive and must succeed
 (define (new-list-creator)
   ; TODO "dog"?
-  (lambda (dest-row-loc dest-col) (create-nil-list-header! dest-row-loc dest-col "dog"))
+  (lambda (dest-row-loc dest-col) (create-nil-list-header!! dest-row-loc dest-col "dog"))
 )
 
 (define (new-number-creator)
   ; TODO 3?
-  (lambda (dest-row-loc dest-col) (create-atom! "number" "3" dest-row-loc dest-col))
+  (lambda (dest-row-loc dest-col) (create-atom!! "number" "3" dest-row-loc dest-col))
 )
 
 (define (new-character-creator)
@@ -535,25 +531,25 @@
   )
 )
 
-(define (insert-new-list-node*! list-header-id index)
+(define (insert-new-list-node*!! list-header-id index)
   (define insertion-point (nth-list-insertion-point* list-header-id index))
   (define insertion-row-loc (get-row-loc insertion-point))
   (define old-cdr (get-cell insertion-row-loc "cdr_id"))
   ; We've captured the original cdr_id, and will soon move it to the newly created node, so we can safely replace this node's cdr
-  (set-cell-dangerous*! insertion-row-loc "cdr_id" UNASSIGNED-ID)
-  (define new-node-row-loc (get-row-loc (create-list*! list-header-id insertion-row-loc)))
-  (set-id*! new-node-row-loc "cdr_id" old-cdr)
+  (set-cell-dangerous*!! insertion-row-loc "cdr_id" UNASSIGNED-ID)
+  (define new-node-row-loc (get-row-loc (create-list*!! list-header-id insertion-row-loc)))
+  (set-id*!! new-node-row-loc "cdr_id" old-cdr)
   new-node-row-loc 
 )
 
-(define (maybe-add-item-to-list! selected-gui before/after far/near)
+(define (maybe-add-item-to-list!! selected-gui before/after far/near)
   (assert (format "before/after must be 'before or 'after, but is ~a" before/after) (member before/after '(before after)))
   (assert (format "far/near must be 'near or 'far, but is ~a" far/near) (member far/near '(far near)))
   (define is-far (equal? far/near 'far))
   (define is-before (equal? before/after 'before))
-  (cond [selected-gui
-    (define creator! (request-new-item-creator*))
-    (cond [creator!
+  (when selected-gui
+    (define creator!! (request-new-item-creator*))
+    (when creator!!
       (define selected-model (get-model selected-gui))
       (define list-to-augment
         (if (and is-far (is-a? selected-model lite-model-list-item%))
@@ -567,14 +563,14 @@
           (+ (find-item-index list-to-augment selected-model) (if is-before 0 1))
         )
       )
-      (define new-list-node-row-loc (insert-new-list-node*! (send list-to-augment get-backing-id) index-to-insert-at))
+      (define new-list-node-row-loc (insert-new-list-node*!! (send list-to-augment get-backing-id) index-to-insert-at))
       ; TODO looks like maybe the creator should not take a column, and just shove into "car_id".
       ; will we use the same creators for non-list creations?
-      (define inserted-id (creator! new-list-node-row-loc "car_id"))
-      (define new-item-model (send list-to-augment insert inserted-id index-to-insert-at))
-      (send new-item-model select)
-    ])
-  ])
+      (define inserted-id (creator!! new-list-node-row-loc "car_id"))
+      (define new-item-model (send list-to-augment insert! inserted-id index-to-insert-at))
+      (send new-item-model select!)
+    )
+  )
 )
 
 ; LITE MODEL
@@ -609,16 +605,16 @@
       gui-item*
     )
 
-    (define/public (create-gui)
+    (define/public (create-gui!)
       (assert (format "You must delete-gui before using create-gui: id ~a" backing-id*) (not gui-item*))
       (define parent-gui-item (get-parent-gui-item*))
       (set! gui-item* (new-gui-item parent-gui-item))
       (send gui-item* user-data this)
-      (change-text* (id->short-text* backing-id*))
-      (when (is-selected*?) (select))
+      (change-text*! (id->short-text* backing-id*))
+      (when (is-selected*?) (select!))
     )
 
-    (define/public (delete-gui)
+    (define/public (delete-gui!)
       (when gui-item*
         (define parent-gui-item (get-parent-gui-item*))
         (send parent-gui-item delete-item gui-item*)
@@ -633,7 +629,7 @@
       (send parent-gui-item new-item)
     )
 
-    (define/public (select)
+    (define/public (select!)
       (send top-level* select gui-item*)
     )
 
@@ -653,7 +649,7 @@
     )
 
     ; lots of code liberally stolen from mred-designer
-    (define/private (change-text* new-text)
+    (define/private (change-text*! new-text)
       (define ed (send gui-item* get-editor))
       (send ed erase)
       (send ed insert new-text)
@@ -668,9 +664,9 @@
       (send parent-gui-item new-list)
     )
 
-    (define/override (create-gui)
-      (super create-gui)
-      (create-gui-items*)
+    (define/override (create-gui!)
+      (super create-gui!)
+      (create-gui-items*!)
       (define gui-item (send this get-gui-item))
       (if is-open*
         (send gui-item open)
@@ -678,9 +674,9 @@
       )
     )
 
-    (define/override (delete-gui)
-      (delete-gui-items*)
-      (super delete-gui)
+    (define/override (delete-gui!)
+      (delete-gui-items*!)
+      (super delete-gui!)
     )
 
     (super-new)
@@ -694,13 +690,13 @@
       is-open*
     )
 
-    (define/public (open)
+    (define/public (open!)
       (set! is-open* #t)
       (define gui-item (send this get-gui-item))
       (when gui-item (send gui-item open))
     )
 
-    (define/public (close)
+    (define/public (close!)
       (set! is-open* #f)
       (define gui-item (send this get-gui-item))
       (when gui-item (send gui-item close))
@@ -710,23 +706,23 @@
       items*
     )
 
-    (define/public (insert new-id index)
+    (define/public (insert! new-id index)
       ; TODO define-values w/ split-at is more elegant, but we have to figure out about the Great Transitioning
       (define before (take items* index))
       (define after (drop items* index))
       (define new-item (create-item* new-id))
       (set! items* (append before (cons new-item after)))
-      (delete-gui-items*)
-      (create-gui-items*)
+      (delete-gui-items*!)
+      (create-gui-items*!)
       new-item
     )
 
-    (define/private (create-gui-items*)
-      (for-each (lambda (item) (send item create-gui)) items*)
+    (define/private (create-gui-items*!)
+      (for-each (lambda (item) (send item create-gui!)) items*)
     )
 
-    (define/private (delete-gui-items*)
-      (for-each (lambda (item) (send item delete-gui)) items*)
+    (define/private (delete-gui-items*!)
+      (for-each (lambda (item) (send item delete-gui!)) items*)
     )
   )
 )
@@ -772,6 +768,32 @@
   (visit-id model-visitors #f id)
 )
 
+(define (move-down! model-item)
+  (define top-level (send model-item get-top-level))
+  (define parent (send model-item get-parent))
+  (cond
+    [(send model-item is-root?) (send top-level select-in)]
+    [(eq? model-item (last (send parent get-items)))
+      (if (and (is-a? model-item lite-model-list-item%) (pair? (send model-item get-items)))
+        (send top-level select-in)
+        (begin (send parent select!) (move-down! parent))
+      )
+    ]
+    [else (send top-level select-next)]
+  )
+)
+
+(define (move-up! selected-model)
+  (unless (send selected-model is-root?)
+    (define parent-model (send selected-model get-parent))
+    (define top-level (send selected-model get-top-level))
+    (if (eq? selected-model (car (send parent-model get-items)))
+      (send top-level select-out)
+      (send top-level select-prev)
+    )
+  )
+)
+
 (define logic-hierarchy%
   (class hierarchical-list%
 
@@ -783,27 +805,27 @@
     (define/override (on-item-opened gui-item)
       (super on-item-opened gui-item)
       (define model (get-model gui-item))
-      (unless (send model is-open?) (send model open))
+      (unless (send model is-open?) (send model open!))
     )
 
     (define/override (on-item-closed gui-item)
       (super on-item-closed gui-item)
       (define model (get-model gui-item))
-      (when (send model is-open?) (send model close))
+      (when (send model is-open?) (send model close!))
     )
 
     (define/override (on-char key-event)
-      (define selected (send this get-selected))
+      (define selected-gui (send this get-selected))
+      (define selected-model (get-model selected-gui))
       (case (send key-event get-key-code)
-        ; TODO j and k should also move left or right as appropriate
-        [(#\j) (send this select-next)]
-        [(#\k) (send this select-prev)]
+        [(#\j) (move-down! selected-model)]
+        [(#\k) (move-up! selected-model)]
         [(#\h) (send this select-out)]
         [(#\l) (send this select-in)]
-        [(#\a) (maybe-add-item-to-list! selected 'after 'near)]
-        [(#\A) (maybe-add-item-to-list! selected 'after 'far)]
-        [(#\i) (maybe-add-item-to-list! selected 'before 'near)]
-        [(#\I) (maybe-add-item-to-list! selected 'before 'far)]
+        [(#\a) (maybe-add-item-to-list!! selected-gui 'after 'near)]
+        [(#\A) (maybe-add-item-to-list!! selected-gui 'after 'far)]
+        [(#\i) (maybe-add-item-to-list!! selected-gui 'before 'near)]
+        [(#\I) (maybe-add-item-to-list!! selected-gui 'before 'far)]
       )
       (super on-char key-event)
     )
@@ -813,15 +835,9 @@
     (init prog-start-backing-id)
     (define tree-root*
       (create-lite-model-item this this prog-start-backing-id)
-      ;(new lite-model-list-item%
-      ;  [backing-id prog-start-backing-id]
-      ;  [parent this]
-      ;  [top-level this]
-      ;  ;[item-ids ]
-      ;)
     )
     (define selected-model* tree-root*)
-    (send tree-root* create-gui)
+    (send tree-root* create-gui!)
 
     (define/public (get-root)
       tree-root*
@@ -922,7 +938,7 @@
 
 ; PROGRAM
 
-; (init-db!)
+; (init-db!!)
 ; (build-scheme-code)
 
 (define main-window (new frame% [label "Veme"]))
