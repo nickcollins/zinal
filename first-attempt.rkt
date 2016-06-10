@@ -768,15 +768,19 @@
   (visit-id model-visitors #f id)
 )
 
-(define (move-down! model-item)
+(define (is-last-in-list* model-item parent-list)
+  (eq? model-item (last (send parent-list get-items)))
+)
+
+(define (move-down! model-item [can-go-in #t])
   (define top-level (send model-item get-top-level))
   (define parent (send model-item get-parent))
   (cond
     [(send model-item is-root?) (send top-level select-in)]
-    [(eq? model-item (last (send parent get-items)))
-      (if (and (is-a? model-item lite-model-list-item%) (pair? (send model-item get-items)))
+    [(is-last-in-list* model-item parent)
+      (if (and can-go-in (is-a? model-item lite-model-list-item%) (pair? (send model-item get-items)))
         (send top-level select-in)
-        (begin (send parent select!) (move-down! parent))
+        (begin (send parent select!) (move-down! parent #f))
       )
     ]
     [else (send top-level select-next)]
@@ -944,3 +948,5 @@
 (define main-window (new frame% [label "Veme"]))
 (define main-prog-tree (new logic-hierarchy% [parent main-window] [prog-start-backing-id PROG-START-ID]))
 (send main-window show #t)
+(send main-window maximize #t)
+(send main-prog-tree focus)
