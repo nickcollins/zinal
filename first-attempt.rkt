@@ -837,33 +837,6 @@
   (send gui-item user-data)
 )
 
-; TODO delete
-;(define (insert-prog-tree-item parent id index)
-;  (add-to-prog-tree parent id)
-;
-;  (define items (list->vector (send parent get-items)))
-;  (define num-items (vector-length items))
-;  (define new-item-index (sub1 num-items))
-;  (define (assoc-for-index i)
-;    (define new-index 
-;      (cond
-;        [(< i index) i]
-;        [(= i index) new-item-index]
-;        [else (sub1 i)]
-;      )
-;    )
-;    (list (vector-ref items new-index) i)
-;  )
-;
-;  (define item-order (make-immutable-hash (build-list num-items assoc-for-index)))
-;  (define (less-than? a b)
-;    (< (hash-ref item-order a) (hash-ref item-order b))
-;  )
-;
-;  ; dirty hack, don't know a better way to rearrange items in the prog-tree list without changing which things are opened and closed
-;  (send parent sort less-than? #f)
-;)
-
 (define (lambda->short-text* data id short-desc long-desc arity positions->param-ids body-id)
   (define params-text
     (string-join (map-params (curryr get-short-desc-or "<?>") (const "¯\\_(ツ)_/¯") arity positions->param-ids) ", ")
