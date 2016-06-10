@@ -8,6 +8,8 @@
 ; for list-index
 (require srfi/1)
 
+; TODO: cond -> when?
+
 ; MACROS
 
 (define-syntax-rule (assert msg bool)
@@ -292,11 +294,10 @@
   (list-header-visitor data id short-desc long-desc item-ids)
 )
 
-; TODO get-cars* should become a more internal method only being used by list-header internals and not accessible to general stuff
-(define (get-cars* list-id)
-  (if (is-nil*? list-id)
+(define (get-cars* list-node-id)
+  (if (is-nil*? list-node-id)
     '()
-    (cons (get-cell list-id "car_id") (get-cars* (get-cell list-id "cdr_id")))
+    (cons (get-cell list-node-id "car_id") (get-cars* (get-cell list-node-id "cdr_id")))
   )
 )
 
@@ -453,12 +454,13 @@
 
 ; GUI
 
+; TODO Delete. the data field is going to point to the model, not the id directly
 (define (get-item-id prog-tree-item)
   (send prog-tree-item user-data)
 )
 
 ; new-blah-creator is a function of form
-; <nil> => (dest-row-loc, dest-col => <nil>) OR #f
+; <nil> => (dest-row-loc, dest-col => id) OR #f
 ; If it returns #f, it means no operation should be performed
 ; The returned creator is destructive and must succeed
 (define (new-list-creator)
@@ -468,7 +470,7 @@
 
 (define (new-number-creator)
   ; TODO 3?
-  (lambda (dest-row-loc dest-col) (create-atom! "number" "3" dest-row-loc dest-col "cat"))
+  (lambda (dest-row-loc dest-col) (create-atom! "number" "3" dest-row-loc dest-col))
 )
 
 (define (new-character-creator)
@@ -507,8 +509,8 @@
 )
 
 ; TODO minor cleanup of this comment along with the prior one about creators
-; <nil> => (dest-row-loc, dest-col => <nil>)
-; Returned creator will, when called, create a new item (if necessary) and update ref-counts (if necessary)
+; <nil> => (dest-row-loc, dest-col => id)
+; Returned creator will, when called, create a new item (if necessary), update ref-counts (if necessary), and return the id that is inserted
 ; The returned creator is not allowed to fail. A failure of this function should return #f instead of a creator
 (define (request-new-item-creator*)
   (define friendly-types (hash-keys FRIENDLY-TYPE->CREATOR))
@@ -522,8 +524,8 @@
   )
 )
 
-(define (find-item-index compound-item item-to-find)
-  (list-index (curry eq? item-to-find) (send compound-item get-items))
+(define (find-item-index list-item item-to-find)
+  (list-index (curry eq? item-to-find) (send list-item get-items))
 )
 
 (define (nth-list-insertion-point* list-start-id index)
@@ -544,42 +546,256 @@
   new-node-row-loc 
 )
 
-(define (maybe-add-item-to-list! selected before/after far/near)
+(define (maybe-add-item-to-list! selected-gui before/after far/near)
   (assert (format "before/after must be 'before or 'after, but is ~a" before/after) (member before/after '(before after)))
   (assert (format "far/near must be 'near or 'far, but is ~a" far/near) (member far/near '(far near)))
   (define is-far (equal? far/near 'far))
   (define is-before (equal? before/after 'before))
-  (cond [selected
+  (cond [selected-gui
     (define creator! (request-new-item-creator*))
     (cond [creator!
-      (define selected-id (get-item-id selected))
-      (define selected-type (row-loc->table (get-row-loc selected-id)))
+      (define selected-model (get-model selected-gui))
       (define list-to-augment
-        (if (and is-far (equal? selected-type "list_headers"))
-          selected
-          (send selected get-parent)
+        (if (and is-far (is-a? selected-model lite-model-list-item%))
+          selected-model
+          (send selected-model get-parent)
         )
       )
       (define index-to-insert-at
         (if is-far
           (if is-before 0 (length (send list-to-augment get-items)))
-          (+ (find-item-index list-to-augment selected) (if is-before 0 1))
+          (+ (find-item-index list-to-augment selected-model) (if is-before 0 1))
         )
       )
-      (define new-list-node-row-loc (insert-new-list-node*! (get-item-id list-to-augment) index-to-insert-at))
+      (define new-list-node-row-loc (insert-new-list-node*! (send list-to-augment get-backing-id) index-to-insert-at))
       ; TODO looks like maybe the creator should not take a column, and just shove into "car_id".
       ; will we use the same creators for non-list creations?
-      (creator! new-list-node-row-loc "car_id")
-      (refresh-prog-tree)
+      (define inserted-id (creator! new-list-node-row-loc "car_id"))
+      (define new-item-model (send list-to-augment insert inserted-id index-to-insert-at))
+      (send new-item-model select)
     ])
   ])
 )
 
+; LITE MODEL
+; The lite model was introduced so we could save state about the gui, which frequently has to be rebuilt. In
+; the future, we will likely have a proper model that is a true layer of abstraction between the gui and storage,
+; but for now the model will be simple and do the bare minimum
+
+(define lite-model-item%
+  (class object%
+
+    (super-new)
+
+    (init backing-id parent top-level)
+    (define backing-id* backing-id)
+    (define parent* parent)
+    (define top-level* top-level)
+    (define gui-item* #f)
+
+    (define/public (get-backing-id)
+      backing-id*
+    )
+
+    (define/public (get-parent)
+      parent*
+    )
+
+    (define/public (get-top-level)
+      top-level*
+    )
+
+    (define/public (get-gui-item)
+      gui-item*
+    )
+
+    (define/public (create-gui)
+      (assert (format "You must delete-gui before using create-gui: id ~a" backing-id*) (not gui-item*))
+      (define parent-gui-item (get-parent-gui-item*))
+      (set! gui-item* (new-gui-item parent-gui-item))
+      (send gui-item* user-data this)
+      (change-text* (id->short-text* backing-id*))
+      (when (is-selected*?) (select))
+    )
+
+    (define/public (delete-gui)
+      (when gui-item*
+        (define parent-gui-item (get-parent-gui-item*))
+        (send parent-gui-item delete-item gui-item*)
+        (set! gui-item* #f)
+      )
+    )
+
+    ; The racket-y way to do this seems to be using augment, but let's not mess with a lot of weird stuff
+    ; that'll make it harder to do the Great Transitioning
+    ; TODO this should be protected. After the Great Transitioning make it so
+    (define/public (new-gui-item parent-gui-item)
+      (send parent-gui-item new-item)
+    )
+
+    (define/public (select)
+      (send top-level* select gui-item*)
+    )
+
+    (define/public (is-root?)
+      (eq? parent* top-level*)
+    )
+
+    (define/private (get-parent-gui-item*)
+      (if (is-root?)
+        parent*
+        (send parent* get-gui-item)
+      )
+    )
+
+    (define/private (is-selected*?)
+      (eq? this (send top-level* get-selected-model))
+    )
+
+    ; lots of code liberally stolen from mred-designer
+    (define/private (change-text* new-text)
+      (define ed (send gui-item* get-editor))
+      (send ed erase)
+      (send ed insert new-text)
+    )
+  )
+)
+
+(define lite-model-list-item%
+  (class lite-model-item%
+
+    (define/override (new-gui-item parent-gui-item)
+      (send parent-gui-item new-list)
+    )
+
+    (define/override (create-gui)
+      (super create-gui)
+      (create-gui-items*)
+      (define gui-item (send this get-gui-item))
+      (if is-open*
+        (send gui-item open)
+        (send gui-item close)
+      )
+    )
+
+    (define/override (delete-gui)
+      (delete-gui-items*)
+      (super delete-gui)
+    )
+
+    (super-new)
+
+    (init item-ids [is-open #t])
+    (define is-open* is-open)
+    (define create-item* (curry create-lite-model-item this (send this get-top-level)))
+    (define items* (map create-item* item-ids))
+
+    (define/public (is-open?)
+      is-open*
+    )
+
+    (define/public (open)
+      (set! is-open* #t)
+      (define gui-item (send this get-gui-item))
+      (when gui-item (send gui-item open))
+    )
+
+    (define/public (close)
+      (set! is-open* #f)
+      (define gui-item (send this get-gui-item))
+      (when gui-item (send gui-item close))
+    )
+
+    (define/public (get-items)
+      items*
+    )
+
+    (define/public (insert new-id index)
+      ; TODO define-values w/ split-at is more elegant, but we have to figure out about the Great Transitioning
+      (define before (take items* index))
+      (define after (drop items* index))
+      (define new-item (create-item* new-id))
+      (set! items* (append before (cons new-item after)))
+      (delete-gui-items*)
+      (create-gui-items*)
+      new-item
+    )
+
+    (define/private (create-gui-items*)
+      (for-each (lambda (item) (send item create-gui)) items*)
+    )
+
+    (define/private (delete-gui-items*)
+      (for-each (lambda (item) (send item delete-gui)) items*)
+    )
+  )
+)
+
+(define (create-lite-model-item parent-model top-level id)
+
+  (define (create-simple-item* data id . etc)
+    (new lite-model-item%
+      [backing-id id]
+      [parent parent-model]
+      [top-level top-level]
+    )
+  )
+  (define (create-layered-item* sublist-ids)
+    ; Ugh - looks like there's no simple way to do '(apply new ...)'
+    (new lite-model-list-item%
+      [backing-id id]
+      [parent parent-model]
+      [top-level top-level]
+      [item-ids sublist-ids]
+    )
+  )
+  (define (create-list-model* data id s l item-ids)
+    (create-layered-item* item-ids)
+  )
+  (define (create-lambda-model* data id s l a p body-id)
+    (create-layered-item* (list body-id))
+  )
+  (define (create-define-model* data id s l d expr-id)
+    (create-layered-item* (list expr-id))
+  )
+
+  (define model-visitors (hash
+    "lambdas" create-lambda-model*
+    "params" create-simple-item*
+    "definitions" create-simple-item*
+    "defines" create-define-model* 
+    "list_headers" create-list-model*
+    "atoms" create-simple-item*
+    "legacies" create-simple-item*
+  ))
+
+  (visit-id model-visitors #f id)
+)
+
 (define logic-hierarchy%
   (class hierarchical-list%
+
+    (define/override (on-select gui-item)
+      (super on-select gui-item)
+      (set! selected-model* (get-model gui-item))
+    )
+
+    (define/override (on-item-opened gui-item)
+      (super on-item-opened gui-item)
+      (define model (get-model gui-item))
+      (unless (send model is-open?) (send model open))
+    )
+
+    (define/override (on-item-closed gui-item)
+      (super on-item-closed gui-item)
+      (define model (get-model gui-item))
+      (when (send model is-open?) (send model close))
+    )
+
     (define/override (on-char key-event)
       (define selected (send this get-selected))
       (case (send key-event get-key-code)
+        ; TODO j and k should also move left or right as appropriate
         [(#\j) (send this select-next)]
         [(#\k) (send this select-prev)]
         [(#\h) (send this select-out)]
@@ -591,53 +807,71 @@
       )
       (super on-char key-event)
     )
+
     (super-new)
+
+    (init prog-start-backing-id)
+    (define tree-root*
+      (create-lite-model-item this this prog-start-backing-id)
+      ;(new lite-model-list-item%
+      ;  [backing-id prog-start-backing-id]
+      ;  [parent this]
+      ;  [top-level this]
+      ;  ;[item-ids ]
+      ;)
+    )
+    (define selected-model* tree-root*)
+    (send tree-root* create-gui)
+
+    (define/public (get-root)
+      tree-root*
+    )
+
+    (define/public (get-selected-model)
+      selected-model*
+    )
   )
 )
 
-; lots of code liberally stolen from mred-designer
-(define (change-text hier new-text)
-  (define ed (send hier get-editor))
-  (send ed erase)
-  (send ed insert new-text)
+(define (get-model gui-item)
+  (send gui-item user-data)
 )
 
-(define (init-prog-tree-item* item text id)
-  (change-text item text)
-  (send item user-data id)
-  item
-)
+; TODO delete
+;(define (insert-prog-tree-item parent id index)
+;  (add-to-prog-tree parent id)
+;
+;  (define items (list->vector (send parent get-items)))
+;  (define num-items (vector-length items))
+;  (define new-item-index (sub1 num-items))
+;  (define (assoc-for-index i)
+;    (define new-index 
+;      (cond
+;        [(< i index) i]
+;        [(= i index) new-item-index]
+;        [else (sub1 i)]
+;      )
+;    )
+;    (list (vector-ref items new-index) i)
+;  )
+;
+;  (define item-order (make-immutable-hash (build-list num-items assoc-for-index)))
+;  (define (less-than? a b)
+;    (< (hash-ref item-order a) (hash-ref item-order b))
+;  )
+;
+;  ; dirty hack, don't know a better way to rearrange items in the prog-tree list without changing which things are opened and closed
+;  (send parent sort less-than? #f)
+;)
 
-(define (new-prog-tree-item parent text id)
-  (init-prog-tree-item* (send parent new-item) text id)
-)
-
-(define (new-prog-tree-list parent text id)
-  (init-prog-tree-item* (new-opened-sublist parent) text id)
-)
-
-(define (new-opened-sublist hier)
-  (let ([sl (send hier new-list)]) (send sl open) sl)
-)
-
-; TODO Currently, the params aren't modeled at all. This may need to change in the future
-(define (add-lambda-to-prog-tree* prog-tree id short-desc long-desc arity positions->param-ids body-id)
+(define (lambda->short-text* data id short-desc long-desc arity positions->param-ids body-id)
   (define params-text
     (string-join (map-params (curryr get-short-desc-or "<?>") (const "¯\\_(ツ)_/¯") arity positions->param-ids) ", ")
   )
-  (define lambda-text
-    (sql:// short-desc (format "λ ~a -> ~a" params-text (get-short-desc-or body-id "...")))
-  )
-  (define lambda-tree (new-prog-tree-list prog-tree lambda-text id))
-  (add-to-prog-tree lambda-tree body-id)
+  (sql:// short-desc (format "λ ~a -> ~a" params-text (get-short-desc-or body-id "...")))
 )
 
-(define (add-define-to-prog-tree* prog-tree id short-desc long-desc definition-id expr-id)
-  (define define-tree (new-prog-tree-list prog-tree (define->short-text* short-desc expr-id) id))
-  (add-to-prog-tree define-tree expr-id)
-)
-
-(define (define->short-text* short-desc expr-id)
+(define (define->short-text* data id short-desc long-desc expr-id)
   (format "~a = ~a" (sql:// short-desc "<no desc>") (get-short-desc-or expr-id "..."))
 )
 
@@ -645,71 +879,55 @@
   (sql:// short-desc (~a (atom-data->scheme data id short-desc long-desc type value)))
 )
 
-(define (legacy-link->short-text* data id library name)
-  name
+(define (list-header->short-text* data id short-desc long-desc item-ids)
+  (sql://
+    short-desc
+    (string-join
+      (map list-item->text* item-ids)
+      ", "
+      #:before-first "("
+      #:after-last ")"
+    )
+  )
 )
 
-(define (list-header->short-text* data id short-desc long-desc item-ids)
-  (sql:// short-desc (if (null? item-ids) "()" "(...)"))
+(define (get-short-desc-visitor* alt)
+  (lambda (data id . etc)
+    (get-short-desc-or id alt)
+  )
 )
 
 (define (list-item->text* id)
-  (define (short-desc-or* alt)
-    (lambda (data id . etc)
-      (get-short-desc-or id alt)
-    )
-  )
+  ; TODO use composition somehow?
   (define (define->short-text** data id short-desc long-desc definition-id expr-id)
-    (format "{~a}" (define->short-text* short-desc expr-id))
+    (format "{~a}" (define->short-text* data id short-desc long-desc expr-id))
+  )
+  (define (list-header->short-text** data id short-desc long-desc item-ids)
+    (sql:// short-desc (if (null? item-ids) "()" "(...)"))
   )
   (define visitors (hash
-    "lambdas" (short-desc-or* "λ...")
-    "params" (short-desc-or* "<no desc>")
-    "definitions" (short-desc-or* "<no desc>")
+    "lambdas" (get-short-desc-visitor* "λ...")
+    "params" (get-short-desc-visitor* "<no desc>")
+    "definitions" (get-short-desc-visitor* "<no desc>")
     "defines" define->short-text**
-    "list_headers" list-header->short-text* 
+    "list_headers" list-header->short-text**
     "atoms" atom->short-text*
-    "legacies" legacy-link->short-text*
+    "legacies" (get-short-desc-visitor* "<no name>")
   ))
   (visit-id visitors #f id)
 )
 
-(define (list->text* item-ids)
-  (string-join
-    (map list-item->text* item-ids)
-    ", "
-    #:before-first "("
-    #:after-last ")"
-  )
-)
-
-(define (add-list-header-to-prog-tree* prog-tree id short-desc long-desc item-ids)
-  (define list-tree (new-prog-tree-list prog-tree (sql:// short-desc (list->text* item-ids)) id))
-  (for-each (curry add-to-prog-tree list-tree) item-ids)
-)
-
-(define (add-atom-to-prog-tree* prog-tree id short-desc long-desc type value)
-  (new-prog-tree-item prog-tree (atom->short-text* prog-tree id short-desc long-desc type value) id)
-)
-
-(define (add-legacy-link-to-prog-tree* prog-tree id library name)
-  (new-prog-tree-item prog-tree (legacy-link->short-text* prog-tree id library name) id)
-)
-
-(define (add-to-prog-tree prog-tree id)
-  (define (just-short-desc* pt id . etc) (new-prog-tree-item prog-tree (get-short-desc-or id "<no desc>") id))
-
-  (define prog-tree-visitors (hash
-    "lambdas" add-lambda-to-prog-tree*
-    "params" just-short-desc*
-    "definitions" just-short-desc*
-    "defines" add-define-to-prog-tree*
-    "list_headers" add-list-header-to-prog-tree*
-    "atoms" add-atom-to-prog-tree*
-    "legacies" add-legacy-link-to-prog-tree*
+(define (id->short-text* id)
+  (define short-text-visitors (hash
+    "lambdas" lambda->short-text*
+    "params" (get-short-desc-visitor* "<no desc>")
+    "definitions" (get-short-desc-visitor* "<no desc>")
+    "defines" define->short-text*
+    "list_headers" list-header->short-text*
+    "atoms" atom->short-text*
+    "legacies" (get-short-desc-visitor* "<no name>")
   ))
-
-  (visit-id prog-tree-visitors prog-tree id)
+  (visit-id short-text-visitors #f id)
 )
 
 ; GUI CONSTANTS
@@ -735,12 +953,5 @@
 ; (build-scheme-code)
 
 (define main-window (new frame% [label "Veme"]))
-(define main-prog-tree (new logic-hierarchy% [parent main-window]))
-; dummy item
-(send main-prog-tree new-item)
-(define (refresh-prog-tree)
-  (send main-prog-tree delete-item (car (send main-prog-tree get-items)))
-  (add-to-prog-tree main-prog-tree PROG-START-ID)
-)
-(refresh-prog-tree)
+(define main-prog-tree (new logic-hierarchy% [parent main-window] [prog-start-backing-id PROG-START-ID]))
 (send main-window show #t)
