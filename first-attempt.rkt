@@ -353,7 +353,7 @@
 )
 
 (define (define-data->scheme data id short-desc long-desc definition-id expr-id)
-  (append (list 'define (id->scheme definition-id)) (id->scheme expr-id))
+  (list 'define (id->scheme definition-id) (id->scheme expr-id))
 )
 
 (define (atom-data->scheme data id short-desc long-desc type value)
@@ -746,7 +746,8 @@
     (create-layered-item* item-ids)
   )
   (define (create-lambda-model* data id s l a p body-id)
-    (create-layered-item* (list body-id))
+    ; This works because create-layered-item* takes its id not from the visitor but from the closure
+    (visit-id model-visitors #f body-id)
   )
   (define (create-define-model* data id s l d expr-id)
     (create-layered-item* (list expr-id))
@@ -862,7 +863,7 @@
 )
 
 (define (define->short-text* data id short-desc long-desc expr-id)
-  (format "~a = ~a" (sql:// short-desc "<no desc>") (get-short-desc-or expr-id "..."))
+  (format "~a = ~a" (sql:// short-desc "<no name>") (get-short-desc-or expr-id "..."))
 )
 
 (define (atom->short-text* data id short-desc long-desc type value)
