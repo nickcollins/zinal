@@ -939,7 +939,15 @@
 
 ; PROGRAM
 
-; (init-db!!)
+; TODO this probably shouldn't exist in the long run
+(define (bomb)
+  (for-each
+    (lambda (table) (query-exec PROTO (format "DELETE FROM ~a" table)))
+    TABLES
+  )
+  (init-db!!)
+)
+; (bomb)
 ; (build-scheme-code)
 
 (define main-window (new frame% [label "Veme"]))
