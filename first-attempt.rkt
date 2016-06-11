@@ -19,6 +19,8 @@
   (assert "id was non-positive" (positive? id))
 )
 
+; TODO Not sure if it's better for this to be a macro, but if we make it a function, we can use compose
+; to make some things way elegant
 (define-syntax-rule (sql:// a b)
   (if (sql-null? a) b a)
 )
@@ -449,11 +451,6 @@
 (define PROG-START-ROW-LOC (make-row-loc "list_headers" PROG-START-ID))
 
 ; GUI
-
-; TODO Delete. the data field is going to point to the model, not the id directly
-(define (get-item-id prog-tree-item)
-  (send prog-tree-item user-data)
-)
 
 ; new-blah-creator is a function of form
 ; <nil> => (dest-row-loc, dest-col => id) OR #f
@@ -891,9 +888,8 @@
 )
 
 (define (list-item->text* id)
-  ; TODO use composition somehow?
-  (define (define->short-text** data id short-desc long-desc definition-id expr-id)
-    (format "{~a}" (define->short-text* data id short-desc long-desc expr-id))
+  (define define->short-text**
+    (compose (curry format "{~a}") define->short-text*)
   )
   (define (list-header->short-text** data id short-desc long-desc item-ids)
     (sql:// short-desc (if (null? item-ids) "()" "(...)"))
