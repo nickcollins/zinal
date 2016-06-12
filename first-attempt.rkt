@@ -481,7 +481,7 @@
   ; TODO
 )
 
-(define (new-function-creator)
+(define (new-define-creator)
   #f
   ; TODO
 )
@@ -491,14 +491,113 @@
   ; TODO
 )
 
-(define (new-value-definition-creator)
+(define (new-value-read-creator)
   #f
   ; TODO
 )
 
-(define (new-value-read-creator)
+(define (new-legacy-creator)
   #f
   ; TODO
+)
+
+(define choice-dialog%
+  (class dialog%
+
+    (define keyboard-choice%
+      (class choice%
+        (define/override (on-subwindow-char receiver key-event)
+          (define current-selection (send this get-selection))
+          (define key-code (send key-event get-key-code))
+          (define (reset-chars!) (set! chars ""))
+          (case key-code
+            [(#\j)
+              (reset-chars!)
+              (unless (= current-selection (sub1 num-choices*))
+                (send this set-selection (add1 current-selection))
+              )
+              #t
+            ]
+            [(#\k)
+              (reset-chars!)
+              (unless (= current-selection 0)
+                (send this set-selection (sub1 current-selection))
+              )
+              #t
+            ]
+            [else
+              (cond
+                [(and (char? key-code) (char-alphabetic? key-code))
+                  (define char (char-downcase key-code))
+                  (set! chars (string-append chars (string char)))
+                  (define candidate (findf (curryr string-prefix? chars) choices*))
+                  (if candidate
+                    (send this set-string-selection candidate)
+                    (reset-chars!)
+                  )
+                  #t
+                ]
+                [else #f]
+              )
+            ]
+          )
+        )
+  
+        (super-new)
+
+        (define chars "")
+      )
+    )
+
+    (define/override (on-subwindow-char receiver key-event)
+      (cond
+        [(equal? (send key-event get-key-code) #\return)
+          (send this on-close)
+          (send this show #f)
+          #t
+        ]
+        [else (super on-subwindow-char receiver key-event)]
+      )
+    )
+
+    (define/override (on-activate activated?)
+      (super on-activate activated?)
+      ; TODO this is a dirty dirty hack to force the choice% to focus against its will
+      ; TODO see https://groups.google.com/forum/#!msg/racket-users/ph2nfGslyuA/AjAM6wMMAwAJ
+      (send this on-subwindow-char this (new key-event% [key-code #\tab]))
+    )
+
+    (define (on-close)
+      (set! chosen* (send choice* get-selection))
+    )
+    (augment on-close)
+
+    (init title message choices)
+
+    (super-new [label title])
+
+    (define chosen* #f)
+    (define choices* choices)
+    (define num-choices* (length choices))
+    (define choice*
+      (new keyboard-choice%
+        [label message]
+        [choices choices]
+        [parent this]
+        [style '(vertical-label)]
+      )
+    )
+
+    (define/public (get-choice)
+      chosen*
+    )
+  )
+)
+
+(define (get-choice-from-user title message choices)
+  (define dialog (new choice-dialog% [title title] [message message] [choices choices]))
+  (send dialog show #t)
+  (send dialog get-choice)
 )
 
 ; TODO minor cleanup of this comment along with the prior one about creators
@@ -507,13 +606,10 @@
 ; The returned creator is not allowed to fail. A failure of this function should return #f instead of a creator
 (define (request-new-item-creator*)
   (define friendly-types (hash-keys FRIENDLY-TYPE->CREATOR))
-  (define choices (get-choices-from-user "Create new AST node" "Choose the node's type:" friendly-types))
-  (cond
-    [choices
-      (assert (format "Multiple types chosen: ~a" choices) (= 1 (length choices)))
-      ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref friendly-types (car choices))))
-    ]
-    [else #f]
+  (define choice (get-choice-from-user "Choose the new node's type:" "Choose the node's type:" friendly-types))
+  (if choice
+    ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref friendly-types choice)))
+    #f
   )
 )
 
@@ -931,10 +1027,10 @@
 ))
 
 (define FRIENDLY-TYPE->CREATOR (hash-union FRIENDLY-LITERAL-TYPE->CREATOR (hash
-  "define function" new-function-creator
-  "anonymous function" new-lambda-creator
-  "define value" new-value-definition-creator
-  "read definition" new-value-read-creator
+  "define" new-define-creator
+  "lambda" new-lambda-creator
+  "reference" new-value-read-creator
+  "legacy" new-legacy-creator
 )))
 
 ; PROGRAM
