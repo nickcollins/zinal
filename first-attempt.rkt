@@ -457,8 +457,7 @@
 ; If it returns #f, it means no operation should be performed
 ; The returned creator is destructive and must succeed
 (define (new-list-creator)
-  ; TODO "dog"?
-  (lambda (dest-row-loc dest-col) (create-nil-list-header!! dest-row-loc dest-col "dog"))
+  (lambda (dest-row-loc dest-col) (create-nil-list-header!! dest-row-loc dest-col))
 )
 
 (define (new-number-creator)
