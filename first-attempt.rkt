@@ -531,7 +531,7 @@
             ]
             [(#\k)
               (reset-chars!)
-              (unless (= current-selection 0)
+              (unless (zero? current-selection)
                 (send this set-selection (sub1 current-selection))
               )
               #t
