@@ -471,7 +471,7 @@
       #:validate string->number
     )
   )
-  (if (string->number result)
+  (if (and result (string->number result))
     (lambda (dest-row-loc dest-col) (create-atom!! "number" result dest-row-loc dest-col))
     #f
   )
