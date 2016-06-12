@@ -462,8 +462,20 @@
 )
 
 (define (new-number-creator)
-  ; TODO 3?
-  (lambda (dest-row-loc dest-col) (create-atom!! "number" "3" dest-row-loc dest-col))
+  (define result
+    (get-text-from-user
+      "Enter a number"
+      "Seriously, do it"
+      #f
+      ""
+      '(disallow-invalid)
+      #:validate string->number
+    )
+  )
+  (if (string->number result)
+    (lambda (dest-row-loc dest-col) (create-atom!! "number" result dest-row-loc dest-col))
+    #f
+  )
 )
 
 (define (new-character-creator)
