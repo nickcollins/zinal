@@ -714,7 +714,7 @@
       (define parent-gui-item (get-parent-gui-item*))
       (set! gui-item* (new-gui-item parent-gui-item))
       (send gui-item* user-data this)
-      (change-text*! (id->short-text* backing-id*))
+      (update-text*!)
       (when (is-selected*?) (select!))
     )
 
@@ -724,6 +724,10 @@
         (send parent-gui-item delete-item gui-item*)
         (set! gui-item* #f)
       )
+    )
+
+    (define/public (update-gui!)
+      (update-text*!)
     )
 
     ; The racket-y way to do this seems to be using augment, but let's not mess with a lot of weird stuff
@@ -753,10 +757,10 @@
     )
 
     ; lots of code liberally stolen from mred-designer
-    (define/private (change-text*! new-text)
+    (define/private (update-text*!)
       (define ed (send gui-item* get-editor))
       (send ed erase)
-      (send ed insert new-text)
+      (send ed insert (id->short-text* backing-id*))
     )
   )
 )
@@ -818,6 +822,8 @@
       (set! items* (append before (cons new-item after)))
       (delete-gui-items*!)
       (create-gui-items*!)
+      (send this update-gui!)
+      (unless (send this is-root?) (send (send this get-parent) update-gui!))
       new-item
     )
 
