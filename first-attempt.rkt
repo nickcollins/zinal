@@ -229,7 +229,7 @@
   )
 )
 
-; library and public-id must be vetted before calling this function
+; library and name must be vetted before calling this function
 (define (get-or-create-legacy-link!! library name)
   (or
     (query-maybe-value PROTO "SELECT id FROM legacies WHERE library = ?1 AND name = ?2" library name)
@@ -241,6 +241,7 @@
   (define link-id (get-or-create-legacy-link!! library name))
   (inc-ref-count!! (make-row-loc "legacies" link-id))
   (set-id*!! dest-row-loc dest-col link-id)
+  link-id
 )
 
 (define (inc-ref-count!! dest-row-loc)
@@ -538,8 +539,18 @@
 )
 
 (define (new-legacy-creator)
-  #f
-  ; TODO
+  (define result
+    (get-text-from-user
+      "Enter the standard library identifier"
+      "Enter the standard library identifier"
+      ; TODO perhaps add a reflective validator
+      #:validate (const #t)
+    )
+  )
+  (if result
+    (lambda (dest-row-loc dest-col) (legacy-link!! dest-row-loc dest-col DEFAULT-LIBRARY result))
+    #f
+  )
 )
 
 (define choice-dialog%
