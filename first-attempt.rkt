@@ -362,7 +362,7 @@
     [("c")
       (define int-value (string->number value))
       (assert
-        (format "Character ~a must either be the integer value of the desired character" value)
+        (format "Character ~a must be the integer value of the desired character" value)
         (and int-value (exact-positive-integer? int-value))
       )
       (integer->char int-value)
@@ -478,18 +478,48 @@
 )
 
 (define (new-character-creator)
-  #f
-  ; TODO
+  (define validate-char (compose (curry = 1) string-length))
+  (define result
+    (get-text-from-user
+      "Enter a character"
+      "Seriously, do it"
+      #f
+      ""
+      '(disallow-invalid)
+      #:validate validate-char
+    )
+  )
+  (cond
+    [(and result (validate-char result))
+      ; If you look at atom-data->scheme , you'll see that internal chars are stored as integer codes
+      (define result-code (number->string (char->integer (string-ref result 0))))
+      (lambda (dest-row-loc dest-col) (create-atom!! "character" result-code dest-row-loc dest-col))
+    ]
+    [else #f]
+  )
 )
 
 (define (new-string-creator)
-  #f
-  ; TODO
+  (define result
+    (get-text-from-user
+      "Enter a string"
+      "Seriously, do it"
+      #:validate (const #t)
+    )
+  )
+  (if result
+    (lambda (dest-row-loc dest-col) (create-atom!! "string" result dest-row-loc dest-col))
+    #f
+  )
 )
 
 (define (new-boolean-creator)
-  #f
-  ; TODO
+  (define choices '("t" "f"))
+  (define result (list-ref choices (get-choice-from-user "To be or not to be?" "That's the fuckin question" choices)))
+  (if result
+    (lambda (dest-row-loc dest-col) (create-atom!! "boolean" result dest-row-loc dest-col))
+    #f
+  )
 )
 
 (define (new-define-creator)
