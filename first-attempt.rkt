@@ -19,6 +19,10 @@
   (assert "id was non-positive" (positive? id))
 )
 
+(define-syntax-rule (assert-real-or-unassigned-id id)
+  (or (= id UNASSIGNED-ID) (assert-real-id id))
+)
+
 ; TODO Not sure if it's better for this to be a macro, but if we make it a function, we can use compose
 ; to make some things way elegant
 (define-syntax-rule (sql:// a b)
@@ -251,6 +255,14 @@
 
 ; can't be used on list nodes
 (define (visit-id visitors data id)
+  (assert-real-or-unassigned-id id)
+  (if (= id UNASSIGNED-ID)
+    ((hash-ref visitors "unassigned") data)
+    (visit-real-id* visitors data id)
+  )
+)
+
+(define (visit-real-id* visitors data id)
   (assert-real-id id)
   (define row-loc (get-row-loc id))
   (define type (row-loc->table row-loc))
@@ -311,6 +323,7 @@
     "list_headers" just-short-desc*
     "atoms" just-short-desc*
     "legacies" (lambda (data id library name) name)
+    "unassigned" unassigned-text-visitor
   ))
   (visit-id visitors #f id)
 )
@@ -341,6 +354,7 @@
     "list_headers" list-header-data->scheme
     "atoms" atom-data->scheme
     "legacies" legacy-link-data->scheme
+    "unassigned" (thunk* (error 'id->scheme "Cannot generate scheme code if some nodes are unassigned"))
   ))
   (visit-id visitors #f id)
 )
@@ -880,7 +894,8 @@
 
 (define (create-lite-model-item parent-model top-level id)
 
-  (define (create-simple-item* data id . etc)
+  ; Uses the closed id instead of the passed one so that the unassigned case will work
+  (define (create-simple-item* data . etc)
     (new lite-model-item%
       [backing-id id]
       [parent parent-model]
@@ -915,6 +930,7 @@
     "list_headers" create-list-model*
     "atoms" create-simple-item*
     "legacies" create-simple-item*
+    "unassigned" create-simple-item*
   ))
 
   (visit-id model-visitors #f id)
@@ -1011,7 +1027,7 @@
 
 (define (lambda->short-text* data id short-desc long-desc arity positions->param-ids body-id)
   (define params-text
-    (string-join (map-params (curryr get-short-desc-or "<?>") (const "¯\\_(ツ)_/¯") arity positions->param-ids) ", ")
+    (string-join (map-params (curryr get-short-desc-or "<no desc>") (const "¯\\_(ツ)_/¯") arity positions->param-ids) ", ")
   )
   (sql:// short-desc (format "λ ~a -> ~a" params-text (get-short-desc-or body-id "...")))
 )
@@ -1042,6 +1058,8 @@
   )
 )
 
+(define unassigned-text-visitor (const "<?>"))
+
 (define (list-item->text* id)
   (define define->short-text**
     (compose (curry format "{~a}") define->short-text*)
@@ -1057,6 +1075,7 @@
     "list_headers" list-header->short-text**
     "atoms" atom->short-text*
     "legacies" (get-short-desc-visitor* "<no name>")
+    "unassigned" unassigned-text-visitor
   ))
   (visit-id visitors #f id)
 )
@@ -1070,6 +1089,7 @@
     "list_headers" list-header->short-text*
     "atoms" atom->short-text*
     "legacies" (get-short-desc-visitor* "<no name>")
+    "unassigned" unassigned-text-visitor
   ))
   (visit-id short-text-visitors #f id)
 )
