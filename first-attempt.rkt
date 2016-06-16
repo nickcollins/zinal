@@ -127,6 +127,7 @@
 ; the program start is at id 1 in the list_headers table.
 (define (init-db!!)
   (assert "PROTO db is already init'd" (null? (query-prog-start* query-rows "SELECT * FROM ~a WHERE id = ?1")))
+  ; TODO I think we should just make it NIL-ID. Then we can use regular insertion for 'begin and delete the end-list*!! function
   (define first-id (create-something!! "list_headers(id, short_desc, long_desc, cdr_id)" (list "Main Program" "" UNASSIGNED-ID)))
   (assert
     (format "first created item should have id ~a but has id ~a" PROG-START-ID)
@@ -134,7 +135,6 @@
   )
   (define first-list-node-row-loc (get-row-loc (create-list*!! first-id)))
   (legacy-link!! first-list-node-row-loc "car_id" DEFAULT-LIBRARY "begin")
-  ; TODO later, we may delete end-list in favor of a wholesale list creation thing
   (end-list*!! first-list-node-row-loc)
 )
 
@@ -169,7 +169,7 @@
   (create-something!! "lambdas(id, short_desc, long_desc, arity, body_id)" (list short-desc long-desc arity UNASSIGNED-ID) dest-row-loc dest-col)
 )
 
-; TODO probably we should just have something that creates the list wholesale
+; TODO probably delete
 (define (end-list*!! dest-row-loc)
   (set-id*!! dest-row-loc "cdr_id" NIL-LIST-ID)
 )
@@ -182,11 +182,11 @@
   (create-something!! "list_headers(id, short_desc, long_desc, cdr_id)" (list short-desc long-desc cdr-id) dest-row-loc dest-col)
 )
 
+; TODO probably delete. We should probably just use the nil version, with insertion
 (define (create-unassigned-list-header!! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
   (create-list-header*!! dest-row-loc dest-col short-desc long-desc UNASSIGNED-ID)
 )
 
-; TODO probably delete. We should just use the unassigned version, and then set-id*!! to NIL-LIST-ID
 (define (create-nil-list-header!! dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
   (create-list-header*!! dest-row-loc dest-col short-desc long-desc NIL-LIST-ID)
 )
@@ -543,7 +543,7 @@
     (get-text-from-user
       "Enter the standard library identifier"
       "Enter the standard library identifier"
-      ; TODO perhaps add a reflective validator
+      ; TODO we need to add a reflective validator
       #:validate (const #t)
     )
   )
