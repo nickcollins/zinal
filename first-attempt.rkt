@@ -546,8 +546,17 @@
 )
 
 (define (new-define-creator)
-  #f
-  ; TODO
+  (define result
+    (get-text-from-user
+      "Enter the new definition's short descriptor"
+      "A short descriptor, one or a few words, to identify this variable"
+      #:validate (const #t)
+    )
+  )
+  (if result
+    (lambda (dest-row-loc dest-col) (create-define!! dest-row-loc dest-col result))
+    #f
+  )
 )
 
 (define (new-lambda-creator)
@@ -691,6 +700,10 @@
   (list-index (curry eq? item-to-find) (send list-item get-items))
 )
 
+(define (nth-list-id list-header-id index)
+  (nth-list-insertion-point* list-header-id (add1 index))
+)
+
 (define (nth-list-insertion-point* list-start-id index)
   (if (zero? index)
     list-start-id
@@ -709,25 +722,37 @@
   new-node-row-loc 
 )
 
-(define (maybe-add-item-to-list!! selected-gui before/after far/near)
+(define (maybe-add-item-to-list!! selected-model before/after far/near)
   (assert (format "before/after must be 'before or 'after, but is ~a" before/after) (member before/after '(before after)))
   (assert (format "far/near must be 'near or 'far, but is ~a" far/near) (member far/near '(far near)))
-  (define is-far (equal? far/near 'far))
-  (define is-before (equal? before/after 'before))
-  (when selected-gui
+  (define is-far? (equal? far/near 'far))
+  (define is-before? (equal? before/after 'before))
+
+  (define selected-id (send selected-model get-backing-id))
+  ; TODO we need to clean up this awful casing when we go full model
+  (define is-unassigned? (= UNASSIGNED-ID selected-id))
+  (define is-list? (and (not is-unassigned?) (member (get-type selected-id) '("lambdas" "list_headers"))))
+  (define is-define-expr?
+    (and
+      (not is-list?)
+      (equal? (get-type (send (send selected-model get-parent) get-backing-id)) "defines")
+    )
+  )
+  (define insert-at-extreme? (or is-far? (send selected-model is-root?)))
+
+  (when (or is-list? (not is-define-expr?))
     (define creator!! (request-new-item-creator*))
     (when creator!!
-      (define selected-model (get-model selected-gui))
       (define list-to-augment
-        (if (and is-far (is-a? selected-model lite-model-list-item%))
+        (if (and is-list? insert-at-extreme?)
           selected-model
           (send selected-model get-parent)
         )
       )
       (define index-to-insert-at
-        (if is-far
-          (if is-before 0 (length (send list-to-augment get-items)))
-          (+ (find-item-index list-to-augment selected-model) (if is-before 0 1))
+        (if insert-at-extreme?
+          (if is-before? 0 (length (send list-to-augment get-items)))
+          (+ (find-item-index list-to-augment selected-model) (if is-before? 0 1))
         )
       )
       (define new-list-node-row-loc (insert-new-list-node*!! (send list-to-augment get-backing-id) index-to-insert-at))
@@ -735,6 +760,44 @@
       ; will we use the same creators for non-list creations?
       (define inserted-id (creator!! new-list-node-row-loc "car_id"))
       (define new-item-model (send list-to-augment insert! inserted-id index-to-insert-at))
+      (send new-item-model select!)
+    )
+  )
+)
+
+(define (maybe-replace-item!! selected-model)
+  (define selected-id (send selected-model get-backing-id))
+  ; TODO this restriction will change in the future
+  (when (= selected-id UNASSIGNED-ID)
+    (define creator!! (request-new-item-creator*))
+    (when creator!!
+      (define parent (send selected-model get-parent))
+      (define parent-id (send parent get-backing-id))
+      (define parent-type (get-type parent-id))
+      (define new-item-model
+        ; TODO encapsulation is busted. another thing to fix when going full model
+        (case parent-type
+          [("list_headers" "lambdas")
+            (define index-to-replace (find-item-index parent selected-model))
+            (define list-header-id
+              (if (equal? parent-type "list_headers")
+                parent-id
+                (get-cell parent-id "body_id")
+              )
+            )
+            (define list-node-to-replace-id (nth-list-id list-header-id index-to-replace))
+            (define new-id (creator!! (get-row-loc list-node-to-replace-id) "car_id"))
+            (send parent replace! new-id index-to-replace)
+          ]
+          [("defines")
+            (define new-id (creator!! (get-row-loc parent-id) "expr_id"))
+            (send parent replace! new-id 0)
+          ]
+          [else
+            (error 'maybe-replace-item!! "Parent id ~a has type ~a which doesn't make any sense" parent-id parent-type)
+          ]
+        )
+      )
       (send new-item-model select!)
     )
   )
@@ -877,17 +940,30 @@
       items*
     )
 
+    (define/public (replace! new-id index)
+      (define new-item (create-item* new-id))
+      ; We must delete the gui item of the replaced model before throwing out the model itself
+      (delete-gui-items*!)
+      (set! items* (list-set items* index new-item))
+      (refresh-gui*!)
+      new-item
+    )
+
     (define/public (insert! new-id index)
       ; TODO define-values w/ split-at is more elegant, but we have to figure out about the Great Transitioning
       (define before (take items* index))
       (define after (drop items* index))
       (define new-item (create-item* new-id))
       (set! items* (append before (cons new-item after)))
+      (refresh-gui*!)
+      new-item
+    )
+
+    (define/private (refresh-gui*!)
       (delete-gui-items*!)
       (create-gui-items*!)
       (send this update-gui!)
       (unless (send this is-root?) (send (send this get-parent) update-gui!))
-      new-item
     )
 
     (define/private (create-gui-items*!)
@@ -997,16 +1073,21 @@
 
     (define/override (on-char key-event)
       (define selected-gui (send this get-selected))
-      (define selected-model (get-model selected-gui))
+      (define (maybe* proc . args)
+        (when selected-gui
+          (apply proc (get-model selected-gui) args)
+        )
+      )
       (case (send key-event get-key-code)
-        [(#\j) (move-down! selected-model)]
-        [(#\k) (move-up! selected-model)]
+        [(#\j) (maybe* move-down!)]
+        [(#\k) (maybe* move-up!)]
         [(#\h) (send this select-out)]
         [(#\l) (send this select-in)]
-        [(#\a) (maybe-add-item-to-list!! selected-gui 'after 'near)]
-        [(#\A) (maybe-add-item-to-list!! selected-gui 'after 'far)]
-        [(#\i) (maybe-add-item-to-list!! selected-gui 'before 'near)]
-        [(#\I) (maybe-add-item-to-list!! selected-gui 'before 'far)]
+        [(#\a) (maybe* maybe-add-item-to-list!! 'after 'near)]
+        [(#\A) (maybe* maybe-add-item-to-list!! 'after 'far)]
+        [(#\i) (maybe* maybe-add-item-to-list!! 'before 'near)]
+        [(#\I) (maybe* maybe-add-item-to-list!! 'before 'far)]
+        [(#\s) (maybe* maybe-replace-item!!)]
       )
       (super on-char key-event)
     )
