@@ -175,7 +175,11 @@
 ; the params will be created lazily
 (define (create-lambda!! arity dest-row-loc dest-col [short-desc sql-null] [long-desc sql-null])
   (assert (format "negative arity: ~a" arity) (non-negative? arity))
-  (create-something!! "lambdas(id, short_desc, long_desc, arity, body_id)" (list short-desc long-desc arity UNASSIGNED-ID) dest-row-loc dest-col)
+  (define lambda-id
+    (create-something!! "lambdas(id, short_desc, long_desc, arity, body_id)" (list short-desc long-desc arity UNASSIGNED-ID) dest-row-loc dest-col)
+  )
+  (create-nil-list-header!! (get-row-loc lambda-id) "body_id")
+  lambda-id
 )
 
 ; TODO probably delete
@@ -235,6 +239,7 @@
   (let (
     [define-id (create-something!! "defines(id, short_desc, long_desc, expr_id)" (list short-desc long-desc UNASSIGNED-ID) dest-row-loc dest-col)])
     (create-something!! "definitions(id, ref_count, define_id)" (list 0 define-id))
+    define-id
   )
 )
 
@@ -959,6 +964,7 @@
 )
 
 (define (move-up! selected-model)
+  ; TODO move to last item, once we have a G command
   (unless (send selected-model is-root?)
     (define parent-model (send selected-model get-parent))
     (define top-level (send selected-model get-top-level))
@@ -1035,7 +1041,7 @@
   (sql:// short-desc (format "λ ~a -> ~a" params-text (get-short-desc-or body-id "...")))
 )
 
-(define (define->short-text* data id short-desc long-desc expr-id)
+(define (define->short-text* data id short-desc long-desc definition-id expr-id)
   (format "~a = ~a" (sql:// short-desc "<no name>") (get-short-desc-or expr-id "..."))
 )
 
