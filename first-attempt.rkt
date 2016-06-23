@@ -65,18 +65,22 @@
 )
 
 (define (get-row-loc id)
-  (let* (
-    [tables
-      (filter
-        (lambda (rl) (cons? (q* query-rows "SELECT * FROM ~a WHERE id = ?1" rl)))
-        (map (curryr make-row-loc id) TABLES)
+  (if (= UNASSIGNED-ID id)
+    (make-row-loc "unassigned" UNASSIGNED-ID)
+    (let* (
+      [tables
+        (filter
+          (lambda (rl) (cons? (q* query-rows "SELECT * FROM ~a WHERE id = ?1" rl)))
+          (map (curryr make-row-loc id) TABLES)
+        )
+      ]
+      [num-tables (length tables)])
+      (cond
+        ; TODO #f ??? this is kinda wacky
+        [(< num-tables 1) #f]
+        [(= num-tables 1) (car tables)]
+        [else (error 'get-row-loc "multiple tables with id ~a: ~a" id tables)]
       )
-    ]
-    [num-tables (length tables)])
-    (cond
-      [(< num-tables 1) #f]
-      [(= num-tables 1) (car tables)]
-      [else (error 'get-row-loc "multiple tables with id ~a: ~a" id tables)]
     )
   )
 )
@@ -104,6 +108,7 @@
 
 (define (get-cell row-loc/id col)
   (define row-loc (if (number? row-loc/id) (get-row-loc row-loc/id) row-loc/id))
+  (assert-real-id (row-loc->id row-loc))
   (define result (q* query-maybe-value (format "SELECT ~a FROM ~~a WHERE id = ?1" col) row-loc))
   (assert (format "Could not find cell ~a, ~a" row-loc col) result)
   result
@@ -253,17 +258,14 @@
   (q* query "UPDATE ~a SET ref_count = ?2 WHERE id = ?1" dest-row-loc (add1 old-ref-count))
 )
 
-; can't be used on list nodes
-(define (visit-id visitors data id)
-  (assert-real-or-unassigned-id id)
-  (if (= id UNASSIGNED-ID)
-    ((hash-ref visitors "unassigned") data)
-    (visit-real-id* visitors data id)
-  )
+; TODO this feels redundant with get-row-loc and row-loc->table .
+; When we factor out into classes things should get better
+(define (get-type id)
+  (row-loc->table (get-row-loc id))
 )
 
-(define (visit-real-id* visitors data id)
-  (assert-real-id id)
+(define (visit-id visitors data id)
+  (assert-real-or-unassigned-id id)
   (define row-loc (get-row-loc id))
   (define type (row-loc->table row-loc))
   (define visitor (hash-ref visitors type))
@@ -284,6 +286,7 @@
     [("definitions") (visit* "define_id")]
     [("atoms") (visit* "short_desc" "long_desc" "type" "value")]
     [("legacies") (visit* "library" "name")]
+    [("unassigned") (visitor data)]
     [else (error 'visit-id "id ~a has unvisitable type ~a" id type)]
   )
 )
