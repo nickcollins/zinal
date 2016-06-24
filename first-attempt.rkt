@@ -209,7 +209,7 @@
   (query-maybe-value PROTO "SELECT id FROM params WHERE lambda_id = ?1 AND position = ?2" lambda-id position)
 )
 
-(define (create-param*!! lambda-id position [short-desc sql-null] [long-desc sql-null])
+(define (create-param!! lambda-id position [short-desc sql-null] [long-desc sql-null])
   (let (
     [lambda-row-loc (make-row-loc "lambdas" lambda-id)])
     (assert-exists lambda-row-loc)
@@ -560,8 +560,37 @@
 )
 
 (define (new-lambda-creator)
-  #f
-  ; TODO
+  (define validate-natural (compose (conjoin integer? non-negative?) string->number))
+  (define arity-string
+    (get-text-from-user
+      "Enter the new function's arity"
+      "How many params does it have? Seriously."
+      #f
+      ""
+      '(disallow-invalid)
+      #:validate validate-natural
+    )
+  )
+  (cond
+    [(and arity-string (validate-natural arity-string))
+      (define arity (string->number arity-string))
+      (define param-short-names
+        (build-list arity (lambda (p)
+          (get-text-from-user
+            (format "Enter the short descriptor of the ~ath parameter" p)
+            (format "Param ~a is:" p)
+            #:validate (const #t)
+          )
+        ))
+      )
+      (lambda (dest-row-loc dest-col)
+        (define lambda-id (create-lambda!! arity dest-row-loc dest-col))
+        (build-list arity (lambda (p) (create-param!! lambda-id p (list-ref param-short-names p))))
+        lambda-id
+      )
+    ]
+    [else #f]
+  )
 )
 
 (define (new-value-read-creator)
