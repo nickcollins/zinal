@@ -732,19 +732,20 @@
   ; TODO we need to clean up this awful casing when we go full model
   (define is-unassigned? (= UNASSIGNED-ID selected-id))
   (define is-list? (and (not is-unassigned?) (member (get-type selected-id) '("lambdas" "list_headers"))))
+  (define insert-at-extreme? (or is-far? (send selected-model is-root?)))
+  (define insert-list-extreme? (and is-list? insert-at-extreme?))
   (define is-define-expr?
     (and
-      (not is-list?)
+      (not insert-list-extreme?)
       (equal? (get-type (send (send selected-model get-parent) get-backing-id)) "defines")
     )
   )
-  (define insert-at-extreme? (or is-far? (send selected-model is-root?)))
 
-  (when (or is-list? (not is-define-expr?))
+  (when (not is-define-expr?)
     (define creator!! (request-new-item-creator*))
     (when creator!!
       (define list-to-augment
-        (if (and is-list? insert-at-extreme?)
+        (if insert-list-extreme?
           selected-model
           (send selected-model get-parent)
         )
@@ -755,7 +756,14 @@
           (+ (find-item-index list-to-augment selected-model) (if is-before? 0 1))
         )
       )
-      (define new-list-node-row-loc (insert-new-list-node*!! (send list-to-augment get-backing-id) index-to-insert-at))
+      (define list-to-augment-id (send list-to-augment get-backing-id))
+      (define list-header-id
+        (if (equal? (get-type list-to-augment-id) "list_headers")
+          list-to-augment-id
+          (get-cell list-to-augment-id "body_id")
+        )
+      )
+      (define new-list-node-row-loc (insert-new-list-node*!! list-header-id index-to-insert-at))
       ; TODO looks like maybe the creator should not take a column, and just shove into "car_id".
       ; will we use the same creators for non-list creations?
       (define inserted-id (creator!! new-list-node-row-loc "car_id"))
@@ -1081,6 +1089,7 @@
       (case (send key-event get-key-code)
         [(#\j) (maybe* move-down!)]
         [(#\k) (maybe* move-up!)]
+        ; TODO capital H to contract
         [(#\h) (send this select-out)]
         [(#\l) (send this select-in)]
         [(#\a) (maybe* maybe-add-item-to-list!! 'after 'near)]
