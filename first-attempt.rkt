@@ -269,6 +269,10 @@
   (row-loc->table (get-row-loc id))
 )
 
+(define (get-referable-ids)
+  (append (query-list PROTO "SELECT id FROM definitions") (query-list PROTO "SELECT id FROM params"))
+)
+
 (define (visit-id visitors data id)
   (assert-real-or-unassigned-id id)
   (define row-loc (get-row-loc id))
@@ -501,7 +505,7 @@
 )
 
 (define (new-character-creator)
-  (define validate-char (compose (curry = 1) string-length))
+  (define validate-char (compose1 (curry = 1) string-length))
   (define result
     (get-text-from-user
       "Enter a character"
@@ -560,7 +564,7 @@
 )
 
 (define (new-lambda-creator)
-  (define validate-natural (compose (conjoin integer? non-negative?) string->number))
+  (define validate-natural (compose1 (conjoin integer? non-negative?) string->number))
   (define arity-string
     (get-text-from-user
       "Enter the new function's arity"
@@ -594,8 +598,30 @@
 )
 
 (define (new-value-read-creator)
-  #f
-  ; TODO
+  (define all-referable-ids (get-referable-ids))
+  (cond
+    [(pair? all-referable-ids)
+      (define ids&choices (map (lambda (id) (list id (get-short-desc id))) all-referable-ids))
+      (define dialog
+        (new auto-complete-dialog%
+          [title "What definition or parameter do you want to read?"]
+          [message "Start typing bits and pieces of the desired reference's short descriptor"]
+          [ids&choices ids&choices]
+        )
+      )
+      (send dialog show #t)
+      (define chosen-id (send dialog get-choice))
+      (if chosen-id
+        (lambda (dest-row-loc dest-col)
+          (inc-ref-count!! (get-row-loc chosen-id))
+          (set-id*!! dest-row-loc dest-col chosen-id)
+          chosen-id
+        )
+        #f
+      )
+    ]
+    [else #f]
+  )
 )
 
 (define (new-legacy-creator)
@@ -616,8 +642,187 @@
 (define choice-dialog%
   (class dialog%
 
+    (define/override (on-subwindow-char receiver key-event)
+      (case (send key-event get-key-code)
+        [(#\return)
+          (set! has-been-chosen* #t)
+          (close*!)
+          #t
+        ]
+        [('escape)
+          (set! has-been-chosen* #f)
+          (close*!)
+          #t
+        ]
+        [(#\tab)
+          (super on-subwindow-char receiver key-event)
+          #f
+        ]
+        [else (super on-subwindow-char receiver key-event)]
+      )
+    )
+
+    (define/override (on-activate activated?)
+      (super on-activate activated?)
+      ; TODO this is a dirty dirty hack to force the choice% to focus against its will
+      ; TODO see https://groups.google.com/forum/#!msg/racket-users/ph2nfGslyuA/AjAM6wMMAwAJ
+      (send this on-subwindow-char this (new key-event% [key-code #\tab]))
+    )
+
+    (abstract get-choice-from-ui*)
+
+    (define (on-close)
+      (set! chosen*
+        (if has-been-chosen*
+          (get-choice-from-ui*)
+          #f
+        )
+      )
+    )
+    (augment on-close)
+
+    (super-new)
+
+    (define chosen* #f)
+    (define has-been-chosen* #f)
+
+    (define/public (get-choice)
+      chosen*
+    )
+
+    (define/private (close*!)
+      (send this on-close)
+      (send this show #f)
+    )
+  )
+)
+
+(define auto-complete-dialog%
+  (class choice-dialog%
+
+    (define auto-complete-list-box%
+      (class list-box%
+
+        (define/override (on-subwindow-char receiver key-event)
+          (define cur-selection-cur-index (send this get-selection))
+          (define cur-selection-id (and cur-selection-cur-index (send this get-data cur-selection-cur-index)))
+          (define num-cur-choices (send this get-number))
+          (define key-code (send key-event get-key-code))
+          (case key-code
+            [(#\tab)
+              (send this set-selection
+                (if (= cur-selection-cur-index (sub1 num-cur-choices))
+                  0
+                  (add1 cur-selection-cur-index)
+                )
+              )
+              #t
+            ]
+            [(#\backspace #\rubout)
+              (cond
+                [(pair? chars)
+                  (set! chars (take chars (sub1 (length chars))))
+                  (build-choices*! cur-selection-id)
+                  #t
+                ]
+                [else #f]
+              )
+            ]
+            [else
+              (cond
+                [(char? key-code)
+                  (define char (char-downcase key-code))
+                  (set! chars (append chars (list char)))
+                  (build-choices*! cur-selection-id)
+                  #t
+                ]
+                [else #f]
+              )
+            ]
+          )
+        )
+
+        (super-new)
+
+        (define/private (build-choices*! selection-id)
+          (send this clear)
+          (for-each
+            (lambda (pair)
+              (define id (car pair))
+              (define choice (second pair))
+              (when (subsequence? chars (string->list (string-downcase choice)))
+                (send this append choice id)
+                (define cur-index (sub1 (send this get-number)))
+                (when (equal? selection-id id)
+                  (send this set-selection cur-index)
+                )
+              )
+            )
+            ids&choices*
+          )
+          (when (zero? (send this get-number)) (reset-choices*!))
+          (unless (send this get-selection)
+            (send this set-selection 0)
+          )
+          ; TODO very hacky sizing
+          (send this min-height (+ 60 (* 25 (send this get-number))))
+        )
+
+        (define/private (subsequence? candidate sequence)
+          (cond
+            [(null? candidate)
+              #t
+            ]
+            [(null? sequence)
+              #f
+            ]
+            [(equal? (car candidate) (car sequence))
+              (subsequence? (cdr candidate) (cdr sequence))
+            ]
+            [else
+              (subsequence? candidate (cdr sequence))
+            ]
+          )
+        )
+
+        (define/private (reset-choices*!)
+          (set! chars '())
+          (build-choices*! #f)
+        )
+
+        (define chars '())
+        (reset-choices*!)
+      )
+    )
+
+    (define/override (get-choice-from-ui*)
+      (define cur-index (send chooser* get-selection))
+      (and cur-index (send chooser* get-data cur-index))
+    )
+
+    (init title message ids&choices)
+
+    (super-new [label title])
+
+    (define ids&choices* (sort ids&choices (lambda (a b) (string<? (second a) (second b)))))
+    (define num-all-choices* (length ids&choices))
+    (define chooser*
+      (new auto-complete-list-box%
+        [label message]
+        [choices '()]
+        [parent this]
+        [style '(single vertical-label)]
+      )
+    )
+  )
+)
+
+(define discrete-choice-dialog%
+  (class choice-dialog%
+
     (define keyboard-choice%
       (class choice%
+
         (define/override (on-subwindow-char receiver key-event)
           (define current-selection (send this get-selection))
           (define key-code (send key-event get-key-code))
@@ -661,37 +866,17 @@
       )
     )
 
-    (define/override (on-subwindow-char receiver key-event)
-      (cond
-        [(equal? (send key-event get-key-code) #\return)
-          (send this on-close)
-          (send this show #f)
-          #t
-        ]
-        [else (super on-subwindow-char receiver key-event)]
-      )
+    (define/override (get-choice-from-ui*)
+      (send chooser* get-selection)
     )
-
-    (define/override (on-activate activated?)
-      (super on-activate activated?)
-      ; TODO this is a dirty dirty hack to force the choice% to focus against its will
-      ; TODO see https://groups.google.com/forum/#!msg/racket-users/ph2nfGslyuA/AjAM6wMMAwAJ
-      (send this on-subwindow-char this (new key-event% [key-code #\tab]))
-    )
-
-    (define (on-close)
-      (set! chosen* (send choice* get-selection))
-    )
-    (augment on-close)
 
     (init title message choices)
 
     (super-new [label title])
 
-    (define chosen* #f)
     (define choices* choices)
     (define num-choices* (length choices))
-    (define choice*
+    (define chooser*
       (new keyboard-choice%
         [label message]
         [choices choices]
@@ -699,15 +884,11 @@
         [style '(vertical-label)]
       )
     )
-
-    (define/public (get-choice)
-      chosen*
-    )
   )
 )
 
 (define (get-choice-from-user title message choices)
-  (define dialog (new choice-dialog% [title title] [message message] [choices choices]))
+  (define dialog (new discrete-choice-dialog% [title title] [message message] [choices choices]))
   (send dialog show #t)
   (send dialog get-choice)
 )
@@ -1251,6 +1432,7 @@
 )
 ; (bomb)
 ; (build-scheme-code)
+; (get-program-as-scheme*)
 
 (define main-window (new frame% [label "Veme"]))
 (define main-prog-tree (new logic-hierarchy% [parent main-window] [prog-start-backing-id PROG-START-ID]))
