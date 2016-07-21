@@ -933,6 +933,10 @@
 )
 
 (define (maybe-add-item-to-list!! selected-model before/after far/near)
+  (maybe-add-item-to-list*!! selected-model before/after far/near request-new-item-creator*)
+)
+
+(define (maybe-add-item-to-list*!! selected-model before/after far/near creator-generator)
   (assert (format "before/after must be 'before or 'after, but is ~a" before/after) (member before/after '(before after)))
   (assert (format "far/near must be 'near or 'far, but is ~a" far/near) (member far/near '(far near)))
   (define is-far? (equal? far/near 'far))
@@ -952,8 +956,8 @@
   )
 
   (when (not is-define-expr?)
-    (define creator!! (request-new-item-creator*))
-    (when creator!!
+    (define creator!! (and creator-generator (creator-generator)))
+    (when (implies creator-generator creator!!)
       (define list-to-augment
         (if insert-list-extreme?
           selected-model
@@ -976,7 +980,12 @@
       (define new-list-node-row-loc (insert-new-list-node*!! list-header-id index-to-insert-at))
       ; TODO looks like maybe the creator should not take a column, and just shove into "car_id".
       ; will we use the same creators for non-list creations?
-      (define inserted-id (creator!! new-list-node-row-loc "car_id"))
+      (define inserted-id
+        (if creator-generator
+          (creator!! new-list-node-row-loc "car_id")
+          UNASSIGNED-ID
+        )
+      )
       (define new-item-model (send list-to-augment insert! inserted-id index-to-insert-at))
       (send new-item-model select!)
     )
@@ -1019,6 +1028,10 @@
       (send new-item-model select!)
     )
   )
+)
+
+(define (maybe-append-unassigned-list-item!! selected-model far/near)
+  (maybe-add-item-to-list*!! selected-model 'after far/near #f)
 )
 
 ; LITE MODEL
@@ -1307,6 +1320,8 @@
         [(#\i) (maybe* maybe-add-item-to-list!! 'before 'near)]
         [(#\I) (maybe* maybe-add-item-to-list!! 'before 'far)]
         [(#\s) (maybe* maybe-replace-item!!)]
+        [(#\o) (maybe* maybe-append-unassigned-list-item!! 'near)]
+        [(#\O) (maybe* maybe-append-unassigned-list-item!! 'far)]
       )
       (super on-char key-event)
     )
