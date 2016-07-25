@@ -286,7 +286,7 @@
 )
 
 (define choice-dialog%
-  (class dialog%
+  (class dialog% ; abstract
 
     (define/override (on-subwindow-char receiver key-event)
       (case (send key-event get-key-code)
