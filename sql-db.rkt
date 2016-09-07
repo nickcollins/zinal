@@ -350,7 +350,7 @@
     )
 
     (define db-atom%
-      (class* db-node% (veme:db-atom%%)
+      (class* db-node% (veme:db-atom%%) ; abstract
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -359,38 +359,94 @@
 
         (super-new)
 
-        (define/public (get-type)
+        (define/public (assert-correct-type-and-get-stored-value* expected-type)
           (send this assert-valid)
-          (string->symbol (get-cell* (send this get-id) "type"))
+          (define actual-type (string->symbol (get-cell* (send this get-id) "type")))
+          (assert
+            (format "Invalid db type ~a for handle of type ~a" actual-type expected-type)
+            (equal? expected-type actual-type)
+          )
+          (get-cell* (send this get-id) "value")
         )
 
-        (define/public (get-val)
+        (abstract get-val)
+      )
+    )
+
+    (define db-number%
+      (class* db-atom% (veme:db-number%%)
+
+        (define/override (accept visitor data)
           (send this assert-valid)
-          (define type (get-type))
-          (define value (get-cell* (send this get-id) "value"))
-          (case type
-            [('number)
-              (or (string->number value) (error 'get-val "Number atom ~a cannot be converted to number" value))
-            ]
-            [('character)
-              (define int-value (string->number value))
-              (assert
-                (format "Character ~a must be the integer value of the desired character" value)
-                (and int-value (exact-positive-integer? int-value))
-              )
-              (integer->char int-value)
-            ]
-            [('string)
-              value
-            ]
-            [('boolean)
-              (case value
-                [("f") #f]
-                [("t") #t]
-                [else (error 'get-val "Boolean ~a is neither 'f' nor 't'" value)]
-              )
-            ]
-            [else (error 'get-val "atom ~a has invalid type ~a" value type)]
+          (send visitor visit-number this data)
+        )
+
+        (super-new)
+
+        (define/override (get-val)
+          (define stored-value (assert-correct-type-and-get-stored-value* 'number))
+          (or
+            (string->number stored-value)
+            (error 'get-val "Number ~a cannot be converted to number" stored-value)
+          )
+        )
+      )
+    )
+
+    (define db-char%
+      (class* db-atom% (veme:db-char%%)
+
+        (define/override (accept visitor data)
+          (send this assert-valid)
+          (send visitor visit-char this data)
+        )
+
+        (super-new)
+
+        (define/override (get-val)
+          (define stored-value (assert-correct-type-and-get-stored-value* 'character))
+          (define int-value (string->number stored-value))
+          (assert
+            (format "Character ~a must be the integer value of the desired character" stored-value)
+            (and int-value (exact-positive-integer? int-value))
+          )
+          (integer->char int-value)
+        )
+      )
+    )
+
+    (define db-string%
+      (class* db-atom% (veme:db-string%%)
+
+        (define/override (accept visitor data)
+          (send this assert-valid)
+          (send visitor visit-string this data)
+        )
+
+        (super-new)
+
+        (define/override (get-val)
+          (assert-correct-type-and-get-stored-value* 'string)
+        )
+      )
+    )
+
+    (define db-bool%
+      (class* db-atom% (veme:db-bool%%)
+
+        (define/override (accept visitor data)
+          (send this assert-valid)
+          (send visitor visit-bool this data)
+        )
+
+        (super-new)
+
+        (define/override (get-val)
+          (define stored-value (assert-correct-type-and-get-stored-value* 'boolean))
+          (case stored-value
+            [("f") #f]
+            [("t") #t]
+            [else (error 'get-val "Boolean ~a is neither 'f' nor 't'" stored-value)]
           )
         )
       )
@@ -518,27 +574,23 @@
           (assign-ref*!! (send param-handle get-id))
         )
 
-        (define/public (assign-atom!! type value)
-          (define storage-value
-            (case type
-              [('number)
-                (number->string value)
-              ]
-              [('character)
-                (number->string (char->integer value))
-              ]
-              [('string)
-                value
-              ]
-              [('boolean)
-                (if value "t" "f")
-              ]
-              [else (error 'assign-atom!! "Invalid type: ~a" type)]
-            )
-          )
-          (assign*!! (lambda (loc) (
-            (create-child!! "atoms" loc (list (list "type" (symbol->string type)) (list "value" storage-value)))
-          )))
+        (define/public (assign-number!! value)
+          (assert (format "~a is not a number bruh" value) (number? value))
+          (assign-atom*!! 'number (number->string value))
+        )
+
+        (define/public (assign-char!! value)
+          (assert (format "~a is not a char, bruh" value) (char? value))
+          (assign-atom*!! 'character (number->string (char->integer value)))
+        )
+
+        (define/public (assign-string!! value)
+          (assert (format "~a is not a string, bruh" value) (string? value))
+          (assign-atom*!! 'string value)
+        )
+
+        (define/public (assign-bool!! value)
+          (assign-atom*!! 'boolean (if value "t" "f"))
         )
 
         ; Use #f to specify default library
@@ -558,6 +610,12 @@
             )
             (inc-ref-count!! link-id)
             (set-id!! loc link-id)
+          )))
+        )
+
+        (define/private (assign-atom*!! type storage-value)
+          (assign*!! (lambda (loc) (
+            (create-child!! "atoms" loc (list (list "type" (symbol->string type)) (list "value" storage-value)))
           )))
         )
 
@@ -660,7 +718,16 @@
         [("list_headers") (new db-list% [loc loc])]
         [("params") (new db-param-ref% [loc loc])]
         [("definitions") (new db-def-ref% [loc loc])]
-        [("atoms") (new db-atom% [loc loc])]
+        [("atoms")
+          (define type (string->symbol (get-cell* id "type")))
+          (case type
+            [('number) (new db-number% [loc loc])]
+            [('character) (new db-char% [loc loc])]
+            [('string) (new db-string% [loc loc])]
+            [('boolean) (new db-bool% [loc loc])]
+            [else (error 'get-node-handle* "Invalid atom type ~a for id ~a" type id)]
+          )
+        ]
         [("legacies") (new db-legacy% [loc loc])]
         [("unassigned") (new db-unassigned% [loc loc])]
         [else (error 'create-node-handle*! "cannot create a handle for loc ~a of invalid type ~a" loc table)]
