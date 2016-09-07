@@ -10,68 +10,6 @@
 (require "misc.rkt")
 (require "sql-db.rkt")
 
-; TRANSPILATION
-
-(define (id->string* id)
-  (format "veme:_~a" id)
-)
-
-(define (id->sym id)
-  (string->symbol (id->string* id))
-)
-
-(define (id->scheme id)
-  (define (id->sym* data id . etc) (id->sym id))
-  ; We can't use #hash form, cuz it will interpret (type . proc) as '(type . proc), meaning proc is a symbol, not a proc
-  ; ugh
-  (define visitors (hash
-    "lambdas" lambda-data->scheme
-    "params" id->sym*
-    "definitions" id->sym*
-    "defines" define-data->scheme
-    "list_headers" list-header-data->scheme
-    "atoms" atom-data->scheme
-    "legacies" legacy-link-data->scheme
-    "unassigned" (thunk* (error 'id->scheme "Cannot generate scheme code if some nodes are unassigned"))
-  ))
-  (visit-id visitors #f id)
-)
-
-(define (legacy-link-data->scheme data id library name)
-  (if (equal? library DEFAULT-LIBRARY)
-    (string->symbol name)
-    ; TODO implement this
-    (error 'legacy-link-data->scheme "Support for non-standard libraries not yet implemented: ~a::~a" library name)
-  )
-)
-
-(define (define-data->scheme data id short-desc long-desc definition-id expr-id)
-  (list 'define (id->scheme definition-id) (id->scheme expr-id))
-)
-
-(define (atom-data->scheme data id short-desc long-desc type value)
-  (case type
-    [("n") (or (string->number value) (error 'atom-data->scheme "Number atom ~a cannot be converted to number" value))]
-    [("c")
-      (define int-value (string->number value))
-      (assert
-        (format "Character ~a must be the integer value of the desired character" value)
-        (and int-value (exact-positive-integer? int-value))
-      )
-      (integer->char int-value)
-    ]
-    [("s") value]
-    [("b")
-      (case value
-        [("f") #f]
-        [("t") #t]
-        [else (error 'atom-data->scheme "Boolean ~a is neither 'f' nor 't'" value)]
-      )
-    ]
-    [else (error 'atom-data->scheme "atom ~a has invalid type char ~a" value type)]
-  )
-)
-
 (define (map-params param-visitor unused-param-visitor arity positions->param-ids)
   (build-list arity (lambda (pos)
     (define param-id (hash-ref positions->param-ids pos #f))
@@ -80,28 +18,6 @@
       (unused-param-visitor pos)
     )
   ))
-)
-
-(define (lambda-data->scheme data id short-desc long-desc arity positions->param-ids body-id)
-  (define (unused-param->symbol pos)
-    (string->symbol (format "~a:unused_~a" (id->string* id) pos))
-  )
-  (append
-    (list 'lambda (map-params id->scheme unused-param->symbol arity positions->param-ids))
-    (id->scheme body-id)
-  )
-)
-
-(define (list-header-data->scheme data id short-desc long-desc item-ids)
-  (map id->scheme item-ids)
-)
-
-(define (get-program-as-scheme*)
-  (id->scheme PROG-START-ID)
-)
-
-(define (build-scheme-code)
-  (write (get-program-as-scheme*))
 )
 
 ; GUI
@@ -985,6 +901,7 @@
 )
 
 (define (atom->short-text* data id short-desc long-desc type value)
+  ; TODO atom-data->scheme is now just get-val
   (sql:// short-desc (~a (atom-data->scheme data id short-desc long-desc type value)))
 )
 
@@ -1061,8 +978,6 @@
 )))
 
 ; PROGRAM
-
-; (get-program-as-scheme*)
 
 (define main-window (new frame% [label "Veme"]))
 (define main-prog-tree (new logic-hierarchy% [parent main-window] [prog-start-backing-id PROG-START-ID]))
