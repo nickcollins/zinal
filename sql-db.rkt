@@ -123,7 +123,7 @@
 
         (define/public (accept visitor data)
           (assert-valid)
-          (send visitor visit-element data)
+          (send visitor visit-element this data)
         )
 
         (define/public (equals? other-element)
@@ -157,7 +157,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-node data)
+          (send visitor visit-node this data)
         )
 
         (define/override (invalidate!)
@@ -226,7 +226,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-lambda data)
+          (send visitor visit-lambda this data)
         )
 
         (super-new)
@@ -249,7 +249,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-def data)
+          (send visitor visit-def this data)
         )
 
         (super-new)
@@ -271,7 +271,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-list data)
+          (send visitor visit-list this data)
         )
 
         (super-new)
@@ -312,7 +312,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-param data)
+          (send visitor visit-param this data)
         )
 
         (define/override (invalidate!)
@@ -354,7 +354,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-atom data)
+          (send visitor visit-atom this data)
         )
 
         (super-new)
@@ -401,7 +401,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-legacy-link data)
+          (send visitor visit-legacy-link this data)
         )
 
         (super-new)
@@ -425,7 +425,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-reference data)
+          (send visitor visit-reference this data)
         )
 
         (super-new)
@@ -439,7 +439,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-param-ref data)
+          (send visitor visit-param-ref this data)
         )
 
         (super-new)
@@ -460,7 +460,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-def-ref data)
+          (send visitor visit-def-ref this data)
         )
 
         (super-new)
@@ -482,7 +482,7 @@
 
         (define/override (accept visitor data)
           (send this assert-valid)
-          (send visitor visit-unassigned data)
+          (send visitor visit-unassigned this data)
         )
 
         (super-new)
