@@ -474,6 +474,22 @@
       )
     )
 
+    (define db-symbol%
+      (class* db-atom% (veme:db-symbol%%)
+
+        (define/override (accept visitor data)
+          (send this assert-valid)
+          (send visitor visit-symbol this data)
+        )
+
+        (super-new)
+
+        (define/override (get-val)
+          (string->symbol (assert-correct-type-and-get-stored-value* 'symbol))
+        )
+      )
+    )
+
     (define db-legacy%
       (class* db-node% (veme:db-legacy-link%%)
 
@@ -614,6 +630,11 @@
           (assign-atom*!! 'boolean (if value "t" "f"))
         )
 
+        (define/public (assign-symbol!! value)
+          (assert (format "~a aint no symbol" value) (symbol? value))
+          (assign-atom*!! 'symbol (symbol->string value))
+        )
+
         (define/public (assign-legacy-link!! library name)
           (assert
             (format "Invalid library or identifier: ~a :: ~a" library name)
@@ -745,6 +766,7 @@
             [('character) (new db-char% [loc loc])]
             [('string) (new db-string% [loc loc])]
             [('boolean) (new db-bool% [loc loc])]
+            [('symbol) (new db-symbol% [loc loc])]
             [else (error 'get-node-handle* "Invalid atom type ~a for id ~a" type id)]
           )
         ]

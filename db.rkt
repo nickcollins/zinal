@@ -97,6 +97,7 @@
 (define veme:db-char%% (interface (veme:db-atom%%)))
 (define veme:db-string%% (interface (veme:db-atom%%)))
 (define veme:db-bool%% (interface (veme:db-atom%%)))
+(define veme:db-symbol%% (interface (veme:db-atom%%)))
 
 (define veme:db-list%% (interface (veme:db-node%% veme:db-describable%%)
 
@@ -174,6 +175,7 @@
     assign-char!! ; (value)
     assign-string!! ; (value)
     assign-bool!! ; (value)
+    assign-symbol!! ; (value)
     ; Use #f for library to specify the standard library
     assign-legacy-link!! ; (library name)
   )
@@ -193,6 +195,7 @@
     (define/public (visit-char c data) (visit-atom c data))
     (define/public (visit-string s data) (visit-atom s data))
     (define/public (visit-bool b data) (visit-atom b data))
+    (define/public (visit-symbol s data) (visit-atom s data))
     (define/public (visit-list l data) (visit-node l data))
     (define/public (visit-def d data) (visit-node d data))
     (define/public (visit-def-ref dr data) (visit-reference dr data))
