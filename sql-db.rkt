@@ -79,7 +79,7 @@
       )
     )
 
-    (define/public (get-root-list)
+    (define/public (get-root)
       (get-handle! ROOT-LOC)
     )
 

@@ -10,7 +10,7 @@
 
 (define (transpile db)
   (define referables (send db get-referables))
-  (define root-elem (send db get-root-list))
+  (define root-elem (send db get-root))
   (db-elem->scheme root-elem referables)
 )
 

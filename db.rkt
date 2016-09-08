@@ -7,7 +7,7 @@
 (define veme:db%% (interface ()
 
   ; Returns a veme:db-list%% handle for the root node
-  get-root-list ; ()
+  get-root ; ()
 
   ; Returns a list of all veme:db-referable%% in this db
   get-referables ; ()
