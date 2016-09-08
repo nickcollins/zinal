@@ -285,6 +285,7 @@
         )
 
         (define/public (insert!! index)
+          ; TODO add bounds checking!! probably need to add bounds checking elsewhere in the code too
           (send this assert-valid)
           (define list-header-id (send this get-id))
           (define insertion-point-id (nth-list-insertion-point* list-header-id index))
@@ -462,7 +463,6 @@
 
         (super-new)
 
-        ; Returns #f for the default library
         (define/public (get-library)
           (send this assert-valid)
           (define stored-result (get-cell* (send this get-id) "library"))
@@ -593,7 +593,6 @@
           (assign-atom*!! 'boolean (if value "t" "f"))
         )
 
-        ; Use #f to specify default library
         (define/public (assign-legacy-link!! library name)
           (assert
             (format "Invalid library or identifier: ~a :: ~a" library name)
