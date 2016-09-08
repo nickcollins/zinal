@@ -66,6 +66,10 @@
     )
   )
 
+  (define/override (visit-unassigned u referables)
+    (error 'visit-unassigned "Ya can't build scheme code if ya got unassigned shit!")
+  )
+
   ; TODO This implementaiton is rather slow and a bit goofy.
   ; I've come up with 2 alternatives so far:
   ;
