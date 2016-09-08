@@ -177,10 +177,17 @@
             ]
             [else
               (define loc-id (send loc get-id))
-              (define parent-id
+              (define direct-parent-id
                 (if (equal? "list_nodes" (get-table loc-id))
                   (get-cell* loc-id "owner_id")
                   loc-id
+                )
+              )
+              ; We want the parent of a lambda body expr to be the lambda, not the list it's hidden in
+              (define parent-id
+                (if (equal? "body_id" (get-cell* direct-parent-id "parent_col"))
+                  (get-cell* direct-parent-id "parent_id")
+                  direct-parent-id
                 )
               )
               (if (= parent-id PROG-START-ID)
@@ -237,8 +244,22 @@
           (build-list (get-cell* id "arity") (compose1 get-handle! (curry get-param-id id)))
         )
 
-        (define/public (get-body-list)
+        (define/public (get-body)
           (send this assert-valid)
+          (send (get-body-list*) get-items)
+        )
+
+        (define/public (insert-into-body!! index)
+          (send this assert-valid)
+          (send (get-body-list*) insert!! index)
+        )
+
+        (define/public (remove-from-body!! index)
+          (send this assert-valid)
+          (send (get-body-list*) remove!! index)
+        )
+
+        (define (get-body-list*)
           (get-handle! (send this get-id) "body_id")
         )
       )

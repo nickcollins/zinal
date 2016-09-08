@@ -75,12 +75,22 @@
   ; Returns a list of veme:db-param%%
   get-params ; ()
 
-  ; Returns a veme:db-list%%, whose children are the statements/expressions constituting
-  ; the lambda's body.
-  ; TODO what if they do something like call 'unassign!!' ? Maybe we need to hide the
-  ; the veme:db-list%% and provide access through the lambda interface
-  ; TODO we should also try to snoop out this sort of issue elsewhere
-  get-body-list ; ()
+  ; Returns a list whose elements are the statements/expressions constituting the lambda's body.
+  get-body ; ()
+
+  ; Inserts a new unassigned node into the lambda body at the specified index.
+  ; E.g. if the lambda is (lambda (x y) (define a (+ x y)) (define b (* x y)) (- a b)),
+  ; then (insert-into-body!! 1) creates an unassigned node after the definition of a .
+  ; Returns a veme:db-unassigned%% handle to the new unassigned node
+  insert-into-body!! ; (non-negative-integer)
+
+  ; Deletes the nth expr (and all associated data, and all children) of the lambda's body,
+  ; and shifts all latter exprs in the body down by one index.
+  ; E.g. if the lambda is (lambda (x y) (define a (+ x y)) (define b (* x y)) (- a b)),
+  ; then (remove-from-body!! 2) deletes the (- a b) expression.
+  ; Any handles associated with the deleted expr are now invalid and cannot be used.
+  ; No meaningful return value.
+  remove-from-body!! ; (non-negative-integer)
 ))
 
 (define veme:db-number%% (interface (veme:db-atom%%)))
