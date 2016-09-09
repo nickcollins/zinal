@@ -103,7 +103,7 @@
     ; DB ELEMENT IMPLEMENTATION CLASSES
 
     (define db-element%
-      (class* object% (veme:db-element%%)
+      (class* object% (veme:db:element%%)
         (init id)
 
         (super-new)
@@ -152,7 +152,7 @@
     )
 
     (define db-node%
-      (class* db-element% (veme:db-node%%)
+      (class* db-element% (veme:db:node%%)
         (init loc)
 
         (define/override (accept visitor data)
@@ -201,6 +201,7 @@
         (define/public (unassign!!)
           (send this assert-valid)
           ; TODO NYI
+          ; TODO make sure you can't unassign (or do any other weird stuff) the root list
         )
 
         (define/public (get-loc)
@@ -213,7 +214,7 @@
     ; TODO we should probably do mixins for this but not sure i want to have much OOP functionality
     ; before boostrapping
     (define db-describable-node%
-      (class* db-node% (veme:db-describable%%)
+      (class* db-node% (veme:db:describable%%)
         (super-new)
 
         (define/public (get-short-desc)
@@ -229,7 +230,7 @@
     )
 
     (define db-lambda%
-      (class* db-describable-node% (veme:db-lambda%%)
+      (class* db-describable-node% (veme:db:lambda%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -266,7 +267,7 @@
     )
 
     (define db-def%
-      (class* db-describable-node% (veme:db-def%%)
+      (class* db-describable-node% (veme:db:def%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -288,7 +289,7 @@
     )
 
     (define db-list%
-      (class* db-describable-node% (veme:db-list%%)
+      (class* db-describable-node% (veme:db:list%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -330,7 +331,7 @@
     )
 
     (define db-param%
-      (class* db-element% (veme:db-param%%)
+      (class* db-element% (veme:db:param%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -372,7 +373,7 @@
     )
 
     (define db-atom%
-      (class* db-node% (veme:db-atom%%) ; abstract
+      (class* db-node% (veme:db:atom%%) ; abstract
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -396,7 +397,7 @@
     )
 
     (define db-number%
-      (class* db-atom% (veme:db-number%%)
+      (class* db-atom% (veme:db:number%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -416,7 +417,7 @@
     )
 
     (define db-char%
-      (class* db-atom% (veme:db-char%%)
+      (class* db-atom% (veme:db:char%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -438,7 +439,7 @@
     )
 
     (define db-string%
-      (class* db-atom% (veme:db-string%%)
+      (class* db-atom% (veme:db:string%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -454,7 +455,7 @@
     )
 
     (define db-bool%
-      (class* db-atom% (veme:db-bool%%)
+      (class* db-atom% (veme:db:bool%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -475,7 +476,7 @@
     )
 
     (define db-symbol%
-      (class* db-atom% (veme:db-symbol%%)
+      (class* db-atom% (veme:db:symbol%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -491,7 +492,7 @@
     )
 
     (define db-legacy%
-      (class* db-node% (veme:db-legacy-link%%)
+      (class* db-node% (veme:db:legacy-link%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -514,7 +515,7 @@
     )
 
     (define db-reference%
-      (class* db-node% (veme:db-reference%%) ; abstract
+      (class* db-node% (veme:db:reference%%) ; abstract
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -528,7 +529,7 @@
     )
 
     (define db-param-ref%
-      (class* db-reference% (veme:db-param-ref%%)
+      (class* db-reference% (veme:db:param-ref%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -549,7 +550,7 @@
     )
 
     (define db-def-ref%
-      (class* db-reference% (veme:db-def-ref%%)
+      (class* db-reference% (veme:db:def-ref%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
@@ -571,7 +572,7 @@
     )
 
     (define db-unassigned%
-      (class* db-describable-node% (veme:db-unassigned%%)
+      (class* db-describable-node% (veme:db:unassigned%%)
 
         (define/override (accept visitor data)
           (send this assert-valid)
