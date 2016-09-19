@@ -685,11 +685,24 @@
             (get-cell* id* col*)
           )
         )
+        (define/public (get-id&col)
+          (list id* col*)
+        )
       )
     )
     (define ROOT-LOC (new loc% [id BOGUS-ID] [col #f]))
 
     ; HELPER FUNCTIONS
+
+    ; id&col is a horrible abomination but it seems the least painful way to use locs as hash keys
+    ; TODO we may be able to fix this if we wind up supporting init-field after all
+    (define (id&col->loc id&col)
+      (define id (first id&col))
+      (if (= id (send ROOT-LOC get-id))
+        ROOT-LOC
+        (new loc% [id id] [col (second id&col)])
+      )
+    )
 
     (define (get-table id)
       (assert-real-id id)
@@ -715,23 +728,24 @@
         (implies col (number? loc/id))
       )
       (get-handle*!
-        (if col
-          (new loc% [id loc/id] [col col])
-          loc/id
+        (cond
+          [col (list loc/id col)]
+          [(is-a? loc/id loc%) (send loc/id get-id&col)]
+          [else loc/id]
         )
       )
     )
 
-    (define (get-handle*! loc/id)
+    (define (get-handle*! id&col/id)
       (or
-        (hash-ref handles* loc/id #f)
-        (create-handle*! (if (is-a? loc/id loc%) get-node-handle* get-param-handle*) loc/id)
+        (hash-ref handles* id&col/id #f)
+        (create-handle*! (if (cons? id&col/id) get-node-handle* get-param-handle*) id&col/id)
       )
     )
 
-    (define (create-handle*! handle-getter loc/id)
-      (define handle (handle-getter loc/id))
-      (hash-set! handles* loc/id handle)
+    (define (create-handle*! handle-getter id&col/id)
+      (define handle (handle-getter id&col/id))
+      (hash-set! handles* id&col/id handle)
       handle
     )
 
@@ -739,7 +753,8 @@
       (new db-param% [id id])
     )
 
-    (define (get-node-handle* loc)
+    (define (get-node-handle* id&col)
+      (define loc (id&col->loc id&col))
       (define id (send loc get-cell))
       (define table (get-table id))
       (case table

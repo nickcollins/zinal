@@ -8,6 +8,7 @@
 (require "db.rkt")
 (require "sql-db.rkt")
 (require "hier-gui.rkt")
+(require "transpile.rkt")
 
 ; GENERIC HELPERS
 
@@ -1125,3 +1126,5 @@
 (send main-window show #t)
 (send main-window maximize #t)
 (send main-gui-manager focus)
+
+(transpile main-db)

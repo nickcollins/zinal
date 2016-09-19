@@ -30,13 +30,13 @@
   )
 
   (define/override (visit-reference r referables)
-    (get-unique-id (send r get-referable))
+    (get-unique-id (send r get-referable) referables)
   )
 
   (define/override (visit-lambda l referables)
     (append
       (list 'lambda (db-elems->scheme (send l get-params) referables))
-      (db-elem->scheme (send l get-body-list))
+      (db-elems->scheme (send l get-body) referables)
     )
   )
 
@@ -89,6 +89,7 @@
   ;    current solution
   (define (get-unique-id referable referables)
     (define num-id (list-index (lambda (other) (send referable equals? other)) referables))
+    (assert (format "Could not find referable ~a in referables" (send referable get-short-desc)) num-id)
     (string->symbol (format "veme-id:_~a" (add1 num-id)))
   )
 )))
