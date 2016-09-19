@@ -18,7 +18,7 @@
   ; returns the veme:db%%
   get-db ; ()
 
-  accept ; (veme:db:element-visitor%)
+  accept ; (veme:db:element-visitor% [data])
 
   ; Returns #t if and only if this handle and the other handle both refer to the same element
   equals? ; (veme:db:element%%)
@@ -28,10 +28,18 @@
 
   ; A short string description of the element, that should be much less than a line long.
   ; Comparable to an identifier, but only used by humans; logic should never use this value.
+  ; Returns #f if none is specified
   get-short-desc ; ()
 
   ; An indefinitely long string explanation of the element. Comparable to documentation.
+  ; Returns #f if none is specified
   get-long-desc ; ()
+
+  ; Send #f to specify that there is no short descriptor
+  set-short-desc!! ; (string OR #f)
+
+  ; Send #f to specify that there is no long descriptor
+  set-long-desc!! ; (string OR #f)
 ))
 
 (define veme:db:node%% (interface (veme:db:element%%)

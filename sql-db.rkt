@@ -29,6 +29,7 @@
   "list_headers"
   "atoms"
   "legacies"
+  "unassigned"
 ))
 
 (define DEFAULT-LIBRARY "")
@@ -41,43 +42,8 @@
 
 (define sql-db%
   (class* object% (veme:db%%)
+
     (init filename)
-
-    (super-new)
-
-    (define filename* filename)
-    (define db* (sqlite3-connect #:database filename*))
-    (define sql-db* this)
-    ; This should hold values weakly, but racket seems to only support weak keys.
-    (define handles* (make-hash))
-
-    (unless (positive? (file-size filename*))
-      (query-exec db* "CREATE TABLE params(id INTEGER PRIMARY KEY, short_desc TEXT, long_desc TEXT, ref_count INT, lambda_id INT, position INT)")
-      (query-exec db* "CREATE TABLE atoms(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, type TEXT, value TEXT)")
-      (query-exec db* "CREATE TABLE defines(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT, expr_id INT)")
-      (query-exec db* "CREATE TABLE definitions(id INTEGER PRIMARY KEY, ref_count INT, define_id INT UNIQUE)")
-      (query-exec db* "CREATE TABLE legacies(id INTEGER PRIMARY KEY, ref_count INT, library TEXT, name TEXT)")
-      (query-exec db* "CREATE TABLE lambdas(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT, arity INT, body_id INT)")
-      (query-exec db* "CREATE TABLE list_nodes(id INTEGER PRIMARY KEY, owner_id INT, car_id INT, cdr_id INT)")
-      (query-exec db* "CREATE TABLE list_headers(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT, cdr_id INT)")
-      (query-exec db* "CREATE TABLE unassigned(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT)")
-
-      (define first-id
-        (create-something!! "list_headers"
-          (list
-            (list "parent_id" BOGUS-ID)
-            (list "parent_col" sql-null)
-            (list "short_desc" "Main Program")
-            (list "long_desc" "")
-            (list "cdr_id" NIL-ID)
-          )
-        )
-      )
-      (assert
-        (format "first created item should have id ~a but has id ~a" PROG-START-ID)
-        (= PROG-START-ID first-id)
-      )
-    )
 
     (define/public (get-root)
       (get-handle! ROOT-LOC)
@@ -88,7 +54,7 @@
       (map get-handle!
         (append
           (map
-            (lambda (v) (new loc% [id (vec-ref v 0)] [col (vec-ref v 1)]))
+            (lambda (v) (new loc% [id (vector-ref v 0)] [col (vector-ref v 1)]))
             (query-rows db* "SELECT parent_id, parent_col FROM defines")
           )
           (query-list db* "SELECT id FROM params")
@@ -104,24 +70,16 @@
 
     (define db-element%
       (class* object% (veme:db:element%%)
+
         (init id)
-
-        (super-new)
-
         (assert-real-id id)
-
-        (define id* id)
-        ; This object will be invalidated if the data it's referring to gets deleted or unassigned. Any attempts to do something with
-        ; an invalid handle will cause an exception. Calling code is responsible for never using a stale handle, but this is a sanity
-        ; check.
-        (define valid*? #t)
 
         (define/public (get-db)
           (assert-valid)
           sql-db*
         )
 
-        (define/public (accept visitor data)
+        (define/public (accept visitor [data #f])
           (assert-valid)
           (send visitor visit-element this data)
         )
@@ -148,26 +106,31 @@
         (define/public (invalidate!)
           (set! valid*? #f)
         )
+
+        (define id* id)
+        ; This object will be invalidated if the data it's referring to gets deleted or unassigned. Any attempts to do something with
+        ; an invalid handle will cause an exception. Calling code is responsible for never using a stale handle, but this is a sanity
+        ; check.
+        (define valid*? #t)
+
+        (super-new)
       )
     )
 
     (define db-node%
       (class* db-element% (veme:db:node%%)
+
         (init loc)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-node this data)
         )
 
         (define/override (invalidate!)
-          (hash-remove! handles* loc)
+          (hash-remove! handles* loc*)
           (super invalidate!)
         )
-
-        (super-new [id (send loc get-cell)])
-
-        (define loc* loc)
 
         (define/public (get-parent)
           (send this assert-valid)
@@ -176,7 +139,7 @@
               #f
             ]
             [else
-              (define loc-id (send loc get-id))
+              (define loc-id (send loc* get-id))
               (define direct-parent-id
                 (if (equal? "list_nodes" (get-table loc-id))
                   (get-cell* loc-id "owner_id")
@@ -208,6 +171,10 @@
           (send this assert-valid)
           loc*
         )
+
+        (define loc* loc)
+
+        (super-new [id (send loc get-cell)])
       )
     )
 
@@ -215,29 +182,38 @@
     ; before boostrapping
     (define db-describable-node%
       (class* db-node% (veme:db:describable%%)
-        (super-new)
-
         (define/public (get-short-desc)
           (send this assert-valid)
-          (get-cell* (send this get-id) "short-desc")
+          (sql:// (get-cell* (send this get-id) "short_desc") #f)
         )
 
         (define/public (get-long-desc)
           (send this assert-valid)
-          (get-cell* (send this get-id) "long-desc")
+          (sql:// (get-cell* (send this get-id) "long_desc") #f)
         )
+
+        ; TODO we could probably factor this a bit
+        (define/public (set-short-desc!! new-desc)
+          (send this assert-valid)
+          (set-desc*!! 'short (send this get-id) new-desc)
+        )
+
+        (define/public (set-long-desc!! new-desc)
+          (send this assert-valid)
+          (set-desc*!! 'long (send this get-id) new-desc)
+        )
+
+        (super-new)
       )
     )
 
     (define db-lambda%
       (class* db-describable-node% (veme:db:lambda%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-lambda this data)
         )
-
-        (super-new)
 
         (define/public (get-params)
           (send this assert-valid)
@@ -263,18 +239,18 @@
         (define (get-body-list*)
           (get-handle! (send this get-id) "body_id")
         )
+
+        (super-new)
       )
     )
 
     (define db-def%
       (class* db-describable-node% (veme:db:def%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-def this data)
         )
-
-        (super-new)
 
         (define/public (get-references)
           (send this assert-valid)
@@ -285,18 +261,18 @@
           (send this assert-valid)
           (get-handle! (send this get-id) "expr_id")
         )
+
+        (super-new)
       )
     )
 
     (define db-list%
       (class* db-describable-node% (veme:db:list%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-list this data)
         )
-
-        (super-new)
 
         (define/public (get-items)
           (send this assert-valid)
@@ -319,7 +295,7 @@
           (define car-loc (new loc% [id new-node-id] [col "car_id"]))
           (create-unassigned!! car-loc)
           ; We captured the original cdr_id, and moved it to the newly created node, so we can safely replace this node's cdr
-          (set-cell-dangerous*!! insertion-point-loc new-node-id)
+          (set-loc-dangerous*!! insertion-point-loc new-node-id)
           (get-handle! car-loc)
         )
 
@@ -327,13 +303,15 @@
           (send this assert-valid)
           ; TODO NYI
         )
+
+        (super-new)
       )
     )
 
     (define db-param%
       (class* db-element% (veme:db:param%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-param this data)
         )
@@ -342,8 +320,6 @@
           (hash-remove! handles* (send this get-id))
           (super invalidate!)
         )
-
-        (super-new)
 
         (define/public (get-pos)
           (send this assert-valid)
@@ -357,32 +333,42 @@
 
         (define/public (get-short-desc)
           (send this assert-valid)
-          (get-cell* (send this get-id) "short-desc")
+          (sql:// (get-cell* (send this get-id) "short_desc") #f)
         )
 
         (define/public (get-long-desc)
           (send this assert-valid)
-          (get-cell* (send this get-id) "long-desc")
+          (sql:// (get-cell* (send this get-id) "long_desc") #f)
+        )
+
+        (define/public (set-short-desc!! new-desc)
+          (send this assert-valid)
+          (set-desc*!! 'short (send this get-id) new-desc)
+        )
+
+        (define/public (set-long-desc!! new-desc)
+          (send this assert-valid)
+          (set-desc*!! 'long (send this get-id) new-desc)
         )
 
         (define/public (get-references)
           (send this assert-valid)
           (get-references* (send this get-id))
         )
+
+        (super-new)
       )
     )
 
     (define db-atom%
       (class* db-node% (veme:db:atom%%) ; abstract
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-atom this data)
         )
 
-        (super-new)
-
-        (define/public (assert-correct-type-and-get-stored-value* expected-type)
+        (define/public (assert-correct-type-and-get-stored-value expected-type)
           (send this assert-valid)
           (define actual-type (string->symbol (get-cell* (send this get-id) "type")))
           (assert
@@ -393,41 +379,41 @@
         )
 
         (abstract get-val)
+
+        (super-new)
       )
     )
 
     (define db-number%
       (class* db-atom% (veme:db:number%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-number this data)
         )
 
-        (super-new)
-
         (define/override (get-val)
-          (define stored-value (assert-correct-type-and-get-stored-value* 'number))
+          (define stored-value (send this assert-correct-type-and-get-stored-value 'number))
           (or
             (string->number stored-value)
             (error 'get-val "Number ~a cannot be converted to number" stored-value)
           )
         )
+
+        (super-new)
       )
     )
 
     (define db-char%
       (class* db-atom% (veme:db:char%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-char this data)
         )
 
-        (super-new)
-
         (define/override (get-val)
-          (define stored-value (assert-correct-type-and-get-stored-value* 'character))
+          (define stored-value (send this assert-correct-type-and-get-stored-value 'character))
           (define int-value (string->number stored-value))
           (assert
             (format "Character ~a must be the integer value of the desired character" stored-value)
@@ -435,71 +421,71 @@
           )
           (integer->char int-value)
         )
+
+        (super-new)
       )
     )
 
     (define db-string%
       (class* db-atom% (veme:db:string%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-string this data)
         )
 
-        (super-new)
-
         (define/override (get-val)
-          (assert-correct-type-and-get-stored-value* 'string)
+          (send this assert-correct-type-and-get-stored-value 'string)
         )
+
+        (super-new)
       )
     )
 
     (define db-bool%
       (class* db-atom% (veme:db:bool%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-bool this data)
         )
 
-        (super-new)
-
         (define/override (get-val)
-          (define stored-value (assert-correct-type-and-get-stored-value* 'boolean))
+          (define stored-value (send this assert-correct-type-and-get-stored-value 'boolean))
           (case stored-value
             [("f") #f]
             [("t") #t]
             [else (error 'get-val "Boolean ~a is neither 'f' nor 't'" stored-value)]
           )
         )
+
+        (super-new)
       )
     )
 
     (define db-symbol%
       (class* db-atom% (veme:db:symbol%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-symbol this data)
         )
 
-        (super-new)
-
         (define/override (get-val)
-          (string->symbol (assert-correct-type-and-get-stored-value* 'symbol))
+          (string->symbol (send this assert-correct-type-and-get-stored-value 'symbol))
         )
+
+        (super-new)
       )
     )
 
     (define db-legacy%
       (class* db-node% (veme:db:legacy-link%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-legacy-link this data)
         )
-
-        (super-new)
 
         (define/public (get-library)
           (send this assert-valid)
@@ -511,13 +497,15 @@
           (send this assert-valid)
           (get-cell* (send this get-id) "name")
         )
+
+        (super-new)
       )
     )
 
     (define db-reference%
       (class* db-node% (veme:db:reference%%) ; abstract
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-reference this data)
         )
@@ -531,14 +519,12 @@
     (define db-param-ref%
       (class* db-reference% (veme:db:param-ref%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-param-ref this data)
         )
 
-        (super-new)
-
-        (define/public (get-referable)
+        (define/override (get-referable)
           (get-param)
         )
 
@@ -546,20 +532,20 @@
           (send this assert-valid)
           (get-handle! (send this get-id))
         )
+
+        (super-new)
       )
     )
 
     (define db-def-ref%
       (class* db-reference% (veme:db:def-ref%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-def-ref this data)
         )
 
-        (super-new)
-
-        (define/public (get-referable)
+        (define/override (get-referable)
           (get-def)
         )
 
@@ -568,36 +554,36 @@
           (define define-id (get-cell* (send this get-id) "define_id"))
           (get-handle! (get-cell* define-id "parent_id") (get-cell* define-id "parent_col"))
         )
+
+        (super-new)
       )
     )
 
     (define db-unassigned%
       (class* db-describable-node% (veme:db:unassigned%%)
 
-        (define/override (accept visitor data)
+        (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-unassigned this data)
         )
 
-        (super-new)
-
         (define/public (assign-lambda!! arity [short-desc #f] [long-desc #f])
           (assert (format "negative arity: ~a" arity) (non-negative? arity))
-          (assign*!! (lambda (loc) (
+          (assign*!! (lambda (loc)
             (define lambda-id
               (create-describable-child!! "lambdas" loc short-desc long-desc (list (list "arity" arity) (list "body_id" BOGUS-ID)))
             )
             (create-list-header!! (new loc% [id lambda-id] [col "body_id"]))
             (build-list arity (curry create-param!! lambda-id))
-          )))
+          ))
         )
 
         (define/public (assign-def!! [short-desc #f] [long-desc #f])
-          (assign*!! (lambda (loc) (
+          (assign*!! (lambda (loc)
             (define define-id (create-describable-child!! "defines" loc short-desc long-desc (list (list "expr_id" BOGUS-ID))))
             (create-unassigned!! (new loc% [id define-id] [col "expr_id"]))
             (create-something!! "definitions" (list (list "ref_count" 0) (list "define_id" define-id)))
-          )))
+          ))
         )
 
         (define/public (assign-list!! [short-desc #f] [long-desc #f])
@@ -643,7 +629,7 @@
           )
           ; TODO properly vet the library and name
           (define storage-lib (or library DEFAULT-LIBRARY))
-          (assign*!! (lambda (loc) (
+          (assign*!! (lambda (loc)
             (define link-id
               (or
                 (query-maybe-value db* "SELECT id FROM legacies WHERE library = ?1 AND name = ?2" storage-lib name)
@@ -652,20 +638,20 @@
             )
             (inc-ref-count!! link-id)
             (set-id!! loc link-id)
-          )))
+          ))
         )
 
         (define/private (assign-atom*!! type storage-value)
-          (assign*!! (lambda (loc) (
+          (assign*!! (lambda (loc)
             (create-child!! "atoms" loc (list (list "type" (symbol->string type)) (list "value" storage-value)))
-          )))
+          ))
         )
 
         (define/private (assign-ref*!! ref-id)
-          (assign*!! (lambda (loc) (
+          (assign*!! (lambda (loc)
             (inc-ref-count!! ref-id)
             (set-id!! loc ref-id)
-          )))
+          ))
         )
 
         (define/private (assign*!! assigner!!)
@@ -676,6 +662,8 @@
           (assigner!! loc)
           (get-handle! loc)
         )
+
+        (super-new)
       )
     )
 
@@ -707,8 +695,8 @@
       (assert-real-id id)
       (cond
         [else
-          (define tables (filter (lambda (t) (cons? (query-rows (format "SELECT * FROM ~a WHERE id = ?1" t) id))) TABLES))
-          (assert (format "there should be exactly one table with id ~a: ~a" id tables) (length tables))
+          (define tables (filter (lambda (t) (cons? (query-rows db* (format "SELECT * FROM ~a WHERE id = ?1" t) id))) TABLES))
+          (assert (format "there should be exactly one table with id ~a: ~a" id tables) (= 1 (length tables)))
           (car tables)
         ]
       )
@@ -724,7 +712,7 @@
     (define (get-handle! loc/id [col #f])
       (assert
         (format "get-handle! cannot be called with a col if loc/id is a loc: ~a" loc/id)
-        (implies col (number? id))
+        (implies col (number? loc/id))
       )
       (get-handle*!
         (if col
@@ -763,11 +751,11 @@
         [("atoms")
           (define type (string->symbol (get-cell* id "type")))
           (case type
-            [('number) (new db-number% [loc loc])]
-            [('character) (new db-char% [loc loc])]
-            [('string) (new db-string% [loc loc])]
-            [('boolean) (new db-bool% [loc loc])]
-            [('symbol) (new db-symbol% [loc loc])]
+            [(number) (new db-number% [loc loc])]
+            [(character) (new db-char% [loc loc])]
+            [(string) (new db-string% [loc loc])]
+            [(boolean) (new db-bool% [loc loc])]
+            [(symbol) (new db-symbol% [loc loc])]
             [else (error 'get-node-handle* "Invalid atom type ~a for id ~a" type id)]
           )
         ]
@@ -777,16 +765,16 @@
       )
     )
 
-    (define (create-something-sql-string* col-val-assocs)
+    (define (create-something-sql-string* table col-val-assocs)
       (define placeholders (build-list (length col-val-assocs) (compose1 (curry format "?~a") add1)))
       (define cols (map first col-val-assocs))
-      (format "INSERT INTO ~~a(~a) values(~a)" (string-join cols ", ") (string-join placeholders ", "))
+      (format "INSERT INTO ~a(~a) values(~a)" table (string-join cols ", ") (string-join placeholders ", "))
     )
 
     (define (create-something!! table col-val-assocs)
       (define id (get-next-id))
-      (define total-assocs (append (list "id" id) col-val-assocs))
-      (apply query-exec db* (create-something-sql-string* total-assocs) (map second col-val-assocs))
+      (define total-assocs (append (list (list "id" id)) col-val-assocs))
+      (apply query-exec db* (create-something-sql-string* table total-assocs) id (map second col-val-assocs))
       id
     )
 
@@ -868,16 +856,22 @@
 
     ; WARNING: do not use this on id columns unless ref-counts have already been updated.
     ;          This function can orphan extant nodes.
-    (define (set-cell-dangerous*!! loc value)
-      (q!! query-exec (format "UPDATE ~~a SET ~a = ?2" (send loc get-col)) (send loc get-id) value)
+    (define (set-loc-dangerous*!! loc value)
+      (set-cell-dangerous*!! (send loc get-id) (send loc get-col) value)
     )
 
-    ; WARNING: do not use this on id columns unless ref-counts have already been updated
+    ; WARNING: do not use this on id columns unless ref-counts have already been updated.
+    ;          This function can orphan extant nodes.
+    (define (set-cell-dangerous*!! id col value)
+      (q!! query-exec (format "UPDATE ~~a SET ~a = ?2" col) id value)
+    )
+
+    ; WARNING: do not use this unless ref-counts have already been updated
     (define (set-id!! loc id)
       (define col (send loc get-col))
       (assert (format "destination column does not end in '_id': ~a" col) (string-suffix? "_id" col))
       (assert-bogus-id loc)
-      (set-cell-dangerous*!! loc id)
+      (set-loc-dangerous*!! loc id)
     )
 
     (define (inc-ref-count!! id)
@@ -924,6 +918,19 @@
       )
     )
 
+    (define (set-desc*!! short/long id new-desc)
+      (assert
+        (format "short/long must either be 'short or 'long: ~a" short/long)
+        (or (equal? short/long 'short) (equal? short/long 'long))
+      )
+      (assert
+        (format "~a is not a string or #f" new-desc)
+        (implies new-desc (string? new-desc))
+      )
+      (define col (format "~a_desc" (symbol->string short/long)))
+      (set-cell-dangerous*!! id col new-desc)
+    )
+
     (define (delete-unreferenceable-leaf*!! loc)
       (define id (send loc get-cell))
       (define table (get-table id))
@@ -932,7 +939,44 @@
         (or (equal? table "unassigned") (equal? table "atoms"))
       )
       (q!! query-exec "DELETE FROM ~a" id)
-      (set-cell-dangerous*!! loc BOGUS-ID)
+      (set-loc-dangerous*!! loc BOGUS-ID)
+    )
+
+    (super-new)
+
+    (define filename* filename)
+    (unless (file-exists? filename*) (close-output-port (open-output-file filename*)))
+    (define db* (sqlite3-connect #:database filename*))
+    (define sql-db* this)
+    ; This should hold values weakly, but racket seems to only support weak keys.
+    (define handles* (make-hash))
+
+    (unless (positive? (file-size filename*))
+      (query-exec db* "CREATE TABLE params(id INTEGER PRIMARY KEY, short_desc TEXT, long_desc TEXT, ref_count INT, lambda_id INT, position INT)")
+      (query-exec db* "CREATE TABLE atoms(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, type TEXT, value TEXT)")
+      (query-exec db* "CREATE TABLE defines(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT, expr_id INT)")
+      (query-exec db* "CREATE TABLE definitions(id INTEGER PRIMARY KEY, ref_count INT, define_id INT UNIQUE)")
+      (query-exec db* "CREATE TABLE legacies(id INTEGER PRIMARY KEY, ref_count INT, library TEXT, name TEXT)")
+      (query-exec db* "CREATE TABLE lambdas(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT, arity INT, body_id INT)")
+      (query-exec db* "CREATE TABLE list_nodes(id INTEGER PRIMARY KEY, owner_id INT, car_id INT, cdr_id INT)")
+      (query-exec db* "CREATE TABLE list_headers(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT, cdr_id INT)")
+      (query-exec db* "CREATE TABLE unassigned(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT)")
+
+      (define first-id
+        (create-something!! "list_headers"
+          (list
+            (list "parent_id" BOGUS-ID)
+            (list "parent_col" sql-null)
+            (list "short_desc" "Main Program")
+            (list "long_desc" "")
+            (list "cdr_id" NIL-ID)
+          )
+        )
+      )
+      (assert
+        (format "first created item should have id ~a but has id ~a" PROG-START-ID)
+        (= PROG-START-ID first-id)
+      )
     )
   )
 )
