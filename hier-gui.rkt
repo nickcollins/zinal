@@ -303,7 +303,7 @@
           (create-gui-items*!)
         ]
         [else
-          (map
+          (for-each
             (lambda (item)
               (when (is-a? item veme:gui-model-list-item%)
                 (send item maybe-refresh-gui!)
