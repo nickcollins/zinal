@@ -128,7 +128,7 @@
         )
 
         (define/override (invalidate!)
-          (hash-remove! handles* loc*)
+          (hash-remove! handles* (send loc* get-id&col))
           (super invalidate!)
         )
 
