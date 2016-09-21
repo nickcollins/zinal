@@ -378,7 +378,7 @@
         (case (send key-event get-key-code)
           [(#\j) (move-down*! selected-model*)]
           [(#\k) (move-up*!)]
-          [(#\H) (send this select-out) (send selected-model* close!)]
+          [(#\H) (close-current-list*!)]
           [(#\h) (send this select-out)]
           [(#\l) (send this select-in)]
           [else (send selected-model* handle-key-event!! key-event)]
@@ -403,6 +403,13 @@
 
     (define/public (get-selected-model)
       selected-model*
+    )
+
+    (define (close-current-list*!)
+      (when (implies (is-a? selected-model* veme:gui-model-list-item%) (not (send selected-model* open?)))
+        (send this select-out)
+      )
+      (send selected-model* close!)
     )
 
     (define (move-up*!)

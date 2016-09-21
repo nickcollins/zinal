@@ -678,7 +678,7 @@
           (get-short-desc-or* l
             (if in-list?
               (if (cons? (send l get-items)) "(...)" "()")
-              (format "(~a)" (string-join (map (curryr get-short-text* #t) (send l get-items)) ", "))
+              (format "(~a)" (string-join (map (curryr get-short-text* #t) (send l get-items)) " "))
             )
           )
         )
@@ -1181,4 +1181,4 @@
 (send main-window maximize #t)
 (send main-gui-manager focus)
 
-(transpile main-db)
+; (transpile main-db)
