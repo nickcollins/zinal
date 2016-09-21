@@ -190,6 +190,9 @@
 
         (abstract init!)
         (abstract select!)
+        ; TODO this doesn't really belong in the interface. it's just some convenience bullshit to
+        ; make it as easy as possible to refresh short text in the current fairly flawed framework
+        (abstract refresh-text!)
 
         (define slot* slot)
         (define subroot-handle* subroot-handle)
@@ -205,11 +208,15 @@
 
         (define/override (init! subroot-model-parent subroot-model-index)
           (set! subroot-model* (send subroot-model-parent insert-item! subroot-model-index (send this get-event-handler)))
-          (send subroot-model* set-short-text! (get-short-text))
+          (refresh-text!)
         )
 
         (define/override (select!)
           (send subroot-model* select!)
+        )
+
+        (define/override (refresh-text!)
+          (send subroot-model* set-short-text! (get-short-text))
         )
 
         (define/public (get-subroot-model)
@@ -233,13 +240,17 @@
           (set! subroot-model*
             (send subroot-model-parent insert-list! subroot-model-index (send this get-event-handler))
           )
-          (send subroot-model* set-open-text! (get-open-text))
-          (send subroot-model* set-closed-text! (get-closed-text))
+          (refresh-text!)
           (send subroot-model* open!)
         )
 
         (define/override (select!)
           (send subroot-model* select!)
+        )
+
+        (define/override (refresh-text!)
+          (send subroot-model* set-open-text! (get-open-text))
+          (send subroot-model* set-closed-text! (get-closed-text))
         )
 
         (define/public (get-subroot-model)
@@ -264,6 +275,22 @@
             ; TODO non-default list event handling
             [else (super handle-event!! key-event)]
           )
+        )
+
+        (define/override (refresh-text!)
+          (super refresh-text!)
+          (for-each
+            (lambda (s)
+              (send (send s get-ent) refresh-text!)
+            )
+            slots*
+          )
+        )
+
+        ; TODO currently we only need this to support the questionable refresh-text! method for root,
+        ; so we may be able to delete this in the future after this stuff is better designed
+        (define/public (get-child-ents)
+          (map (lambda (s) (send s get-ent)) slots*)
         )
 
         (abstract get-item-handles)
@@ -291,6 +318,7 @@
             (when creator!!
               (define new-handle (creator!! handle))
               (respawn-slot*! slot new-handle)
+              (send root* refresh-text!)
               (send (send slot get-ent) select!)
             )
           )
@@ -299,6 +327,7 @@
         (define (append-unassigned*!! [index (length (get-item-handles))])
           (define new-db-handle (db-insert!! index))
           (define slot (insert-slot*! new-db-handle index))
+          (send root* refresh-text!)
           (send (send slot get-ent) select!)
         )
 
@@ -331,9 +360,10 @@
           (send (send this get-subroot-model) remove! ind)
         )
 
+        (define slots* '())
+
         (super-new)
 
-        (define slots* '())
         (begin
           (define handles (list->vector (get-item-handles)))
           (build-list
@@ -427,6 +457,13 @@
           (format "~a ~a" (get-open-text) (get-short-text* (get-expr-handle*)))
         )
 
+        (define/override (refresh-text!)
+          (super refresh-text!)
+          (when expr-slot*
+            (send (send expr-slot* get-ent) refresh-text!)
+          )
+        )
+
         (define (handle-expr-event*!! key-event)
           (case (send key-event get-key-code)
             [(#\s) (maybe-replace-item*!!)]
@@ -442,6 +479,7 @@
             (when creator!!
               (creator!! handle)
               (respawn-expr*!)
+              (send root* refresh-text!)
               (send (send expr-slot* get-ent) select!)
             )
           )
@@ -460,9 +498,13 @@
           (send (send this get-subroot-handle) get-expr)
         )
 
+        ; TODO super hacky
+        (define expr-slot* #f)
+
         (super-new)
 
-        (define expr-slot* (new slot% [event-handler!! handle-expr-event*!!]))
+        (set! expr-slot* (new slot% [event-handler!! handle-expr-event*!!]))
+
         (spawn-expr*!)
       )
     )
@@ -562,9 +604,19 @@
           (set! root-model*
             (send gui-model-manager* create-root-list-model! (send this get-event-handler))
           )
+          (refresh-text!)
+          (send root-model* open!)
+        )
+
+        (define/override (refresh-text!)
           (send root-model* set-open-text! (send this get-open-text))
           (send root-model* set-closed-text! (send this get-closed-text))
-          (send root-model* open!)
+          (for-each
+            (lambda (e)
+              (send e refresh-text!)
+            )
+            (send this get-child-ents)
+          )
         )
 
         (define/override (get-subroot-model)
@@ -599,6 +651,9 @@
     )
 
     (define (get-short-text* db-handle [in-list? #f])
+      ; TODO doing this recursively via handles is probably wrong. The recursion aspect should recurse on ents.
+      ; But for now it's simple and it works, so we're going to keep, until it starts sucking, or until we
+      ; refactor ents in a big way, whichever comes first
       (send db-handle accept (new (class veme:db:element-visitor% (super-new)
         (define/override (visit-element e meh)
           (error 'get-short-text* "Unhandled element")
@@ -657,10 +712,9 @@
     (define db* db)
     (define gui-model-manager* gui-model-manager)
     (define NOOP (const #f))
+    (define root* (new ent:root% [root-handle (send db* get-root)]))
 
     (super-new)
-
-    (new ent:root% [root-handle (send db* get-root)])
   )
 )
 
