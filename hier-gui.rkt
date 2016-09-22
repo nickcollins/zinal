@@ -140,8 +140,10 @@
 
     (define/public (set-short-text! new-text)
       (assert (format "short text must be a string: ~a" new-text) (string? new-text))
-      (set! short-text* new-text)
-      (update-text!)
+      (unless (equal? short-text* new-text)
+        (set! short-text* new-text)
+        (update-text!)
+      )
     )
 
     (define/public (selected?)
@@ -270,14 +272,18 @@
 
     (define/public (set-open-text! new-text)
       (assert (format "open text must be a string: ~a" new-text) (string? new-text))
-      (set! open-text* new-text)
-      (send this update-text!)
+      (unless (equal? open-text* new-text)
+        (set! open-text* new-text)
+        (send this update-text!)
+      )
     )
 
     (define/public (set-closed-text! new-text)
       (assert (format "closed text must be a string: ~a" new-text) (string? new-text))
-      (set! closed-text* new-text)
-      (send this update-text!)
+      (unless (equal? closed-text* new-text)
+        (set! closed-text* new-text)
+        (send this update-text!)
+      )
     )
 
     (define/public (insert-list! index event-handler)

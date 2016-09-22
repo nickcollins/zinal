@@ -20,25 +20,34 @@
   (or v sql-null)
 )
 
-(define TABLES '(
-  "lambdas"
-  "params"
-  "defines"
-  "definitions"
-  "list_nodes"
-  "list_headers"
-  "atoms"
-  "legacies"
-  "unassigned"
+(define TABLES->NON-ID-COLS (hash
+  "list_headers" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "cdr_id INT")
+  "lambdas" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "arity INT" "body_id INT")
+  "params" '("short_desc TEXT" "long_desc TEXT" "ref_count INT" "lambda_id INT" "position INT")
+  "defines" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "expr_id INT")
+  "definitions" '("ref_count INT" "define_id INT UNIQUE")
+  "list_nodes" '("owner_id INT" "car_id INT" "cdr_id INT")
+  "atoms" '("parent_id INT" "parent_col TEXT" "type TEXT" "value TEXT")
+  "legacies" '("ref_count INT" "library TEXT" "name TEXT")
+  "unassigned" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT")
 ))
+
+(define TABLES (list->vector (hash-keys TABLES->NON-ID-COLS)))
+
+(define (get-table-mod* table)
+  (define mod (vector-member table TABLES))
+  (assert (format "Invalid table ~a" table) mod)
+  mod
+)
+
+; note PROG-START-ID is not necessarily the very first id, merely the id of the root list
+(define PROG-START-ID (+ (vector-length TABLES) (get-table-mod* "list_headers")))
 
 (define DEFAULT-LIBRARY "")
 
 (define BOGUS-ID -1)
 
 (define NIL-ID 0)
-
-(define PROG-START-ID 1)
 
 (define sql-db%
   (class* object% (veme:db%%)
@@ -706,13 +715,7 @@
 
     (define (get-table id)
       (assert-real-id id)
-      (cond
-        [else
-          (define tables (filter (lambda (t) (cons? (query-rows db* (format "SELECT * FROM ~a WHERE id = ?1" t) id))) TABLES))
-          (assert (format "there should be exactly one table with id ~a: ~a" id tables) (= 1 (length tables)))
-          (car tables)
-        ]
-      )
+      (vector-ref TABLES (modulo id (vector-length TABLES)))
     )
 
     ; query is executed "WHERE id = 'id'". Use ~a for the table, and ?2 ... for other q-parms
@@ -787,21 +790,14 @@
     )
 
     (define (create-something!! table col-val-assocs)
-      (define id (get-next-id))
+      (define id (get-next-id table))
       (define total-assocs (append (list (list "id" id)) col-val-assocs))
       (apply query-exec db* (create-something-sql-string* table total-assocs) id (map second col-val-assocs))
       id
     )
 
-    (define (get-next-id)
-      (add1
-        (apply max
-          (map
-            (lambda (t) (sql:// (query-value db* (format "SELECT MAX(id) FROM ~a" t)) (sub1 PROG-START-ID)))
-            TABLES
-          )
-        )
-      )
+    (define (get-next-id table)
+      (+ (vector-length TABLES) (sql:// (query-value db* (format "SELECT MAX(id) FROM ~a" table)) (get-table-mod* table)))
     )
 
     ; loc must be empty (i.e. BOGUS-ID) before calling this
@@ -967,15 +963,12 @@
     (define handles* (make-hash))
 
     (unless (positive? (file-size filename*))
-      (query-exec db* "CREATE TABLE params(id INTEGER PRIMARY KEY, short_desc TEXT, long_desc TEXT, ref_count INT, lambda_id INT, position INT)")
-      (query-exec db* "CREATE TABLE atoms(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, type TEXT, value TEXT)")
-      (query-exec db* "CREATE TABLE defines(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT, expr_id INT)")
-      (query-exec db* "CREATE TABLE definitions(id INTEGER PRIMARY KEY, ref_count INT, define_id INT UNIQUE)")
-      (query-exec db* "CREATE TABLE legacies(id INTEGER PRIMARY KEY, ref_count INT, library TEXT, name TEXT)")
-      (query-exec db* "CREATE TABLE lambdas(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT, arity INT, body_id INT)")
-      (query-exec db* "CREATE TABLE list_nodes(id INTEGER PRIMARY KEY, owner_id INT, car_id INT, cdr_id INT)")
-      (query-exec db* "CREATE TABLE list_headers(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT, cdr_id INT)")
-      (query-exec db* "CREATE TABLE unassigned(id INTEGER PRIMARY KEY, parent_id INT, parent_col TEXT, short_desc TEXT, long_desc TEXT)")
+      (vector-map
+        (lambda (t)
+          (query-exec db* (format "CREATE TABLE ~a(id INTEGER PRIMARY KEY, ~a)" t (string-join (hash-ref TABLES->NON-ID-COLS t) ", ")))
+        )
+        TABLES
+      )
 
       (define first-id
         (create-something!! "list_headers"
