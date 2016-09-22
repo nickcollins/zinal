@@ -1133,10 +1133,10 @@
       "Enter the standard library identifier"
       "Enter the standard library identifier"
       ; TODO we need to add a reflective validator
-      #:validate (const #t)
+      #:validate non-empty-string?
     )
   )
-  (if result
+  (if (and result (non-empty-string? result))
     (lambda (unassigned) (send unassigned assign-legacy-link!! #f result))
     #f
   )
