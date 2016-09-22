@@ -1142,6 +1142,23 @@
   )
 )
 
+(define new-unassigned-creator (const identity))
+
+; TODO for now we'll leave TODOs as a bit less explicit
+;(define (new-todo-creator scope-handle)
+;  (define result
+;    (get-text-from-user
+;      "What is it that you need TODO?"
+;      "Write yourself a little note"
+;      #:validate (const #t)
+;    )
+;  )
+;  (if result
+;    (lambda (unassigned) (send unassigned set-short-desc!! (format "TODO: ~a" result)) unassigned)
+;    #f
+;  )
+;)
+
 ; Returns #f to signify no action is to be taken (i.e. the user cancels the dialog)
 ; Returns a function that takes an unassigned db handle and will assign it to something else, returning the new handle
 ; The returned creator is not allowed to fail. A failure of this function should return #f instead of a creator
@@ -1169,6 +1186,7 @@
   "lambda" new-lambda-creator
   "reference" new-value-read-creator
   "legacy" new-legacy-creator
+  "TODO" new-unassigned-creator
 )))
 
 ; PROGRAM
