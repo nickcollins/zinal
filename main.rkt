@@ -271,7 +271,8 @@
 
         (define/override (handle-event!! key-event)
           (case (send key-event get-key-code)
-            [(#\O) (append-unassigned*!!)]
+            [(#\I) (maybe-add-item-to-list*!! 0)]
+            [(#\A) (maybe-add-item-to-list*!!)]
             ; TODO non-default list event handling
             [else (super handle-event!! key-event)]
           )
@@ -298,17 +299,37 @@
 
         (define (handle-slot-event*!! index key-event)
           (case (send key-event get-key-code)
-            [(#\o) (append-unassigned*!! (add1 index))]
-            [(#\O) (append-unassigned*!!)]
-            ; TODO kinda silly to use the slot to get the index, then use the index to get the slot
-            ; need to rethink and refactor slot system
+            [(#\o) (maybe-add-item-to-list*!! (add1 index) new-unassigned-creator)]
+            [(#\i) (maybe-add-item-to-list*!! index)]
+            [(#\I) (maybe-add-item-to-list*!! 0)]
+            [(#\a) (maybe-add-item-to-list*!! (add1 index))]
+            [(#\A) (maybe-add-item-to-list*!!)]
+            [(#\() (maybe-add-item-to-list*!! (add1 index) new-list-creator)]
+            ; TODO kinda silly to use the slot to get the index, then use the index to get the slot.
+            ; Need to rethink and refactor slot system
             [(#\s) (maybe-replace-item*!! (list-ref slots* index))]
           )
         )
 
-        ; TODO current
-        ;(define (maybe-add-item-to-list*!! [index (length (get-item-handles))])
-        ;)
+        (define (maybe-add-item-to-list*!! [index (length (get-item-handles))] [creator*!! #f])
+          (define scope-handle
+            (if (zero? index)
+              (send this get-subroot-handle)
+              (send (send (list-ref slots* (sub1 index)) get-ent) get-subroot-handle)
+            )
+          )
+          (define creator!!
+            (if creator*!!
+              (creator*!! scope-handle)
+              (request-new-item-creator scope-handle)
+            )
+          )
+          (when creator!!
+            (define new-unassigned-handle (db-insert!! index))
+            (define new-db-handle (creator!! new-unassigned-handle))
+            (select-and-refresh*! (insert-slot*! new-db-handle index))
+          )
+        )
 
         (define (maybe-replace-item*!! slot)
           (define handle (send (send slot get-ent) get-subroot-handle))
@@ -318,15 +339,12 @@
             (when creator!!
               (define new-handle (creator!! handle))
               (respawn-slot*! slot new-handle)
-              (send root* refresh-text!)
-              (send (send slot get-ent) select!)
+              (select-and-refresh*! slot)
             )
           )
         )
 
-        (define (append-unassigned*!! [index (length (get-item-handles))])
-          (define new-db-handle (db-insert!! index))
-          (define slot (insert-slot*! new-db-handle index))
+        (define (select-and-refresh*! slot)
           (send root* refresh-text!)
           (send (send slot get-ent) select!)
         )
@@ -978,15 +996,16 @@
 
 ; new-blah-creator is a function of form
 ; veme:db:element%% => (veme:db:unassigned%% => veme:db:element%%) OR #f
-; The parameter is a handle that roughly corresponds to the currently selected item.
+; The parameter is a handle that lets us know what is in scope. Any preceding siblings,
+; and any parents, are within scope.
 ; If it returns #f, it means no operation should be performed
 ; The returned creator is destructive and must succeed
 
-(define (new-list-creator selection-handle)
+(define (new-list-creator scope-handle)
   (lambda (unassigned) (send unassigned assign-list!!))
 )
 
-(define (new-number-creator selection-handle)
+(define (new-number-creator scope-handle)
   (define result
     (get-text-from-user
       "Enter a number"
@@ -1003,7 +1022,7 @@
   )
 )
 
-(define (new-character-creator selection-handle)
+(define (new-character-creator scope-handle)
   (define validate-char (compose1 (curry = 1) string-length))
   (define result
     (get-text-from-user
@@ -1021,7 +1040,7 @@
   )
 )
 
-(define (new-string-creator selection-handle)
+(define (new-string-creator scope-handle)
   (define result
     (get-text-from-user
       "Enter a string"
@@ -1035,7 +1054,7 @@
   )
 )
 
-(define (new-boolean-creator selection-handle)
+(define (new-boolean-creator scope-handle)
   (define choices '("true" "false"))
   (define result (get-choice-from-user "To be or not to be?" "That's the fuckin question" choices))
   (if result
@@ -1044,7 +1063,7 @@
   )
 )
 
-(define (new-define-creator selection-handle)
+(define (new-define-creator scope-handle)
   (define result
     (get-text-from-user
       "Enter the new definition's short descriptor"
@@ -1058,7 +1077,7 @@
   )
 )
 
-(define (new-lambda-creator selection-handle)
+(define (new-lambda-creator scope-handle)
   (define validate-natural (compose1 (conjoin integer? non-negative?) string->number))
   (define arity-string
     (get-text-from-user
@@ -1093,8 +1112,8 @@
   )
 )
 
-(define (new-value-read-creator selection-handle)
-  (define all-referables (send (send selection-handle get-db) get-referables))
+(define (new-value-read-creator scope-handle)
+  (define all-referables (send (send scope-handle get-db) get-referables))
   (cond
     [(cons? all-referables)
       (define handles&choices
@@ -1127,7 +1146,7 @@
   )
 )
 
-(define (new-legacy-creator selection-handle)
+(define (new-legacy-creator scope-handle)
   (define result
     (get-text-from-user
       "Enter the standard library identifier"
@@ -1147,11 +1166,11 @@
 ; Returns #f to signify no action is to be taken (i.e. the user cancels the dialog)
 ; Returns a function that takes an unassigned db handle and will assign it to something else, returning the new handle
 ; The returned creator is not allowed to fail. A failure of this function should return #f instead of a creator
-(define (request-new-item-creator selection-handle)
+(define (request-new-item-creator scope-handle)
   (define friendly-types (hash-keys FRIENDLY-TYPE->CREATOR))
   (define choice (get-choice-from-user "Choose the new node's type:" "Choose the node's type:" friendly-types))
   (if choice
-    ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref friendly-types choice)) selection-handle)
+    ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref friendly-types choice)) scope-handle)
     #f
   )
 )
