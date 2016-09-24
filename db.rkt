@@ -47,10 +47,24 @@
   ; Returns a veme:db:node%% handle to the parent of this node. Returns #f for the root node.
   get-parent ; ()
 
+  ; Returns a list of all veme:db:referable%% that are visible underneath this node.
+  ; Included in the list is this node (if it's a referable) and its params (if it's a lambda).
+  get-visible-referables-underneath ; ()
+
+  ; Returns a list of all veme:db:referable%% that are visible after this node.
+  ; Included in the list is this node (if it's a referable) but not its params (if it's a lambda).
+  get-visible-referables-after ; ()
+
   ; Deletes all the data associated with this node and any children it may have, converting
   ; this node to a veme:db:unassigned%% . This handle will be invalidated and cannot be used
   ; again. Returns a handle to the new veme:db:unassigned%% .
   unassign!! ; ()
+))
+
+(define veme:db:parent-node%% (interface (veme:db:node%%)
+
+  ; Returns a list of veme:db:node%% handles to all node children of this non-leaf node
+  get-node-children ; ()
 ))
 
 ; Any element which can be pointed to by some type of veme:db:reference%%
@@ -78,12 +92,13 @@
   get-val ; ()
 ))
 
-(define veme:db:lambda%% (interface (veme:db:node%% veme:db:describable%%)
+(define veme:db:lambda%% (interface (veme:db:parent-node%% veme:db:describable%%)
 
   ; Returns a list of veme:db:param%%
   get-params ; ()
 
-  ; Returns a list whose elements are the statements/expressions constituting the lambda's body.
+  ; Returns a list of veme:db:node%% handles representing the statements/expressions
+  ; constituting the lambda's body.
   get-body ; ()
 
   ; Inserts a new unassigned node into the lambda body at the specified index.
@@ -107,7 +122,7 @@
 (define veme:db:bool%% (interface (veme:db:atom%%)))
 (define veme:db:symbol%% (interface (veme:db:atom%%)))
 
-(define veme:db:list%% (interface (veme:db:node%% veme:db:describable%%)
+(define veme:db:list%% (interface (veme:db:parent-node%% veme:db:describable%%)
 
   ; Returns a list of veme:db:node%% , constituting the items of this list
   get-items ; ()
@@ -122,7 +137,7 @@
   remove!! ; (non-negative-integer)
 ))
 
-(define veme:db:def%% (interface (veme:db:node%% veme:db:referable%%)
+(define veme:db:def%% (interface (veme:db:parent-node%% veme:db:referable%%)
 
   ; Returns a veme:db:node%% handle for the expression of this define
   get-expr ; ()

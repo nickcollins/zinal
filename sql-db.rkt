@@ -59,7 +59,6 @@
     )
 
     (define/public (get-referables)
-      ; TODO need to rework to account for scoping
       (map get-handle!
         (append
           (map
@@ -170,6 +169,14 @@
           )
         )
 
+        (define/public (get-visible-referables-underneath)
+          (get-visible-referables*)
+        )
+
+        (define/public (get-visible-referables-after)
+          (get-visible-referables*)
+        )
+
         (define/public (unassign!!)
           (send this assert-valid)
           ; TODO NYI
@@ -179,6 +186,26 @@
         (define/public (get-loc)
           (send this assert-valid)
           loc*
+        )
+
+        (define (get-visible-referables*)
+          (define parent (get-parent))
+          (if parent
+            (append
+              (get-visible-sibling-referables* (send parent get-node-children))
+              (send parent get-visible-referables-underneath)
+            )
+            ; We assume root is not a referable
+            '()
+          )
+        )
+
+        (define (get-visible-sibling-referables* siblings)
+          (define preceding (takef siblings (lambda (s) (not (send s equals? this)))))
+          (filter
+            (curryr is-a? veme:db:referable%%)
+            (cons this preceding)
+          )
         )
 
         (define loc* loc)
@@ -224,10 +251,21 @@
           (send visitor visit-lambda this data)
         )
 
+        (define/override (get-visible-referables-underneath)
+          (append
+            (get-params)
+            (super get-visible-referables-underneath)
+          )
+        )
+
         (define/public (get-params)
           (send this assert-valid)
           (define id (send this get-id))
           (build-list (get-cell* id "arity") (compose1 get-handle! (curry get-param-id id)))
+        )
+
+        (define/public (get-node-children)
+          (get-body)
         )
 
         (define/public (get-body)
@@ -266,6 +304,10 @@
           (get-references* (get-definition-id (send this get-id)))
         )
 
+        (define/public (get-node-children)
+          (list (get-expr))
+        )
+
         (define/public (get-expr)
           (send this assert-valid)
           (get-handle! (send this get-id) "expr_id")
@@ -281,6 +323,10 @@
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-list this data)
+        )
+
+        (define/public (get-node-children)
+          (get-items)
         )
 
         (define/public (get-items)

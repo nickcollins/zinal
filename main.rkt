@@ -294,7 +294,14 @@
           (map (lambda (s) (send s get-ent)) slots*)
         )
 
-        (abstract get-item-handles)
+        (define/public (get-basic-list-handle)
+          (send this get-subroot-handle)
+        )
+
+        (define/public (get-item-handles)
+          (send (get-basic-list-handle) get-node-children)
+        )
+
         (abstract db-insert!!)
 
         (define (handle-slot-event*!! index key-event)
@@ -305,23 +312,17 @@
             [(#\a) (maybe-add-item-to-list*!! (add1 index))]
             [(#\A) (maybe-add-item-to-list*!!)]
             [(#\() (maybe-add-item-to-list*!! (add1 index) new-list-creator)]
-            ; TODO kinda silly to use the slot to get the index, then use the index to get the slot.
-            ; Need to rethink and refactor slot system
-            [(#\s) (maybe-replace-item*!! (list-ref slots* index))]
+            [(#\s) (maybe-replace-item*!! index)]
           )
         )
 
         (define (maybe-add-item-to-list*!! [index (length (get-item-handles))] [creator*!! #f])
-          (define scope-handle
-            (if (zero? index)
-              (send this get-subroot-handle)
-              (send (send (list-ref slots* (sub1 index)) get-ent) get-subroot-handle)
-            )
-          )
+          ; TODO current doesn't work for func-def
+          (define visible-referables (get-visible-referables-for-hypothetical-index* index))
           (define creator!!
             (if creator*!!
-              (creator*!! scope-handle)
-              (request-new-item-creator scope-handle)
+              (creator*!! visible-referables)
+              (request-new-item-creator visible-referables)
             )
           )
           (when creator!!
@@ -331,16 +332,27 @@
           )
         )
 
-        (define (maybe-replace-item*!! slot)
+        (define (maybe-replace-item*!! index)
+          ; TODO kinda silly to use the slot to get the index, then use the index to get the slot.
+          ; Need to rethink and refactor slot system
+          (define slot (list-ref slots* index))
           (define handle (send (send slot get-ent) get-subroot-handle))
           ; TODO we shouldn't really be checking the type of the handle like this
           (when (is-a? handle veme:db:unassigned%%)
-            (define creator!! (request-new-item-creator handle))
+            (define visible-referables (get-visible-referables-for-hypothetical-index* index))
+            (define creator!! (request-new-item-creator visible-referables))
             (when creator!!
               (define new-handle (creator!! handle))
               (respawn-slot*! slot new-handle)
               (select-and-refresh*! slot)
             )
+          )
+        )
+
+        (define (get-visible-referables-for-hypothetical-index* index)
+          (if (zero? index)
+            (send (get-basic-list-handle) get-visible-referables-underneath)
+            (send (send (send (list-ref slots* (sub1 index)) get-ent) get-subroot-handle) get-visible-referables-after)
           )
         )
 
@@ -417,10 +429,6 @@
           (get-closed-lambda-text* (send this get-subroot-handle))
         )
 
-        (define/override (get-item-handles)
-          (send (send this get-subroot-handle) get-body)
-        )
-
         (define/override (db-insert!! index)
           (send (send this get-subroot-handle) insert-into-body!! index)
         )
@@ -440,10 +448,6 @@
           (get-short-text* (send this get-subroot-handle))
         )
 
-        (define/override (get-item-handles)
-          (send (send this get-subroot-handle) get-items)
-        )
-
         (define/override (db-insert!! index)
           (send (send this get-subroot-handle) insert!! index)
         )
@@ -451,7 +455,7 @@
         (define (get-short-desc-or** alt)
           (get-short-desc-or*
             (send this get-subroot-handle)
-            (if (cons? (get-item-handles))
+            (if (cons? (send this get-item-handles))
               alt
               "()"
             )
@@ -493,7 +497,8 @@
           (define handle (send (send expr-slot* get-ent) get-subroot-handle))
           ; TODO we shouldn't really be checking the type of the handle like this
           (when (is-a? handle veme:db:unassigned%%)
-            (define creator!! (request-new-item-creator handle))
+            (define visible-referables (send (send this get-subroot-handle) get-visible-referables-underneath))
+            (define creator!! (request-new-item-creator visible-referables))
             (when creator!!
               (creator!! handle)
               (respawn-expr*!)
@@ -547,26 +552,22 @@
         )
 
         (define/override (get-closed-text)
-          (format "'~a" (get-short-text* (get-inner-list*)))
+          (format "'~a" (get-short-text* (get-basic-list-handle)))
         )
 
-        (define/override (get-item-handles)
-          (send (get-inner-list*) get-items)
+        (define/override (get-basic-list-handle)
+          (second (send (send this get-subroot-handle) get-items))
         )
 
         (define/override (db-insert!! index)
-          (send (get-inner-list*) insert!! index)
-        )
-
-        (define (get-inner-list*)
-          (second (send (send this get-subroot-handle) get-items))
+          (send (get-basic-list-handle) insert!! index)
         )
 
         (define (get-short-desc-or** alt)
           (get-short-desc-or*
             ; TODO which short desc should we use in cases like this?
-            (get-inner-list*)
-            (if (cons? (get-item-handles))
+            (get-basic-list-handle)
+            (if (cons? (send this get-item-handles))
               alt
               "'()"
             )
@@ -588,22 +589,18 @@
           (get-text* get-closed-lambda-text*)
         )
 
-        (define/override (get-item-handles)
-          (send (get-lambda-body-db-handle*) get-body)
+        (define/override (get-basic-list-handle)
+          (send (send this get-subroot-handle) get-expr)
         )
 
         (define/override (db-insert!! index)
-          (send (get-lambda-body-db-handle*) insert-into-body!! index)
-        )
-
-        (define (get-lambda-body-db-handle*)
-          (send (send this get-subroot-handle) get-expr)
+          (send (get-basic-list-handle) insert-into-body!! index)
         )
 
         (define (get-text* lambda-text-getter)
           (format "~a ~a"
             (get-short-text* (send this get-subroot-handle))
-            (lambda-text-getter (get-lambda-body-db-handle*))
+            (lambda-text-getter (get-basic-list-handle))
           )
         )
 
@@ -995,17 +992,16 @@
 )
 
 ; new-blah-creator is a function of form
-; veme:db:element%% => (veme:db:unassigned%% => veme:db:element%%) OR #f
-; The parameter is a handle that lets us know what is in scope. Any preceding siblings,
-; and any parents, are within scope.
+; (list-of veme:db:referable%%) => (veme:db:unassigned%% => veme:db:element%%) OR #f
+; visible-referables are handles for all referables that are visible to any newly minted nodes.
 ; If it returns #f, it means no operation should be performed
 ; The returned creator is destructive and must succeed
 
-(define (new-list-creator scope-handle)
+(define (new-list-creator visible-referables)
   (lambda (unassigned) (send unassigned assign-list!!))
 )
 
-(define (new-number-creator scope-handle)
+(define (new-number-creator visible-referables)
   (define result
     (get-text-from-user
       "Enter a number"
@@ -1022,7 +1018,7 @@
   )
 )
 
-(define (new-character-creator scope-handle)
+(define (new-character-creator visible-referables)
   (define validate-char (compose1 (curry = 1) string-length))
   (define result
     (get-text-from-user
@@ -1040,7 +1036,7 @@
   )
 )
 
-(define (new-string-creator scope-handle)
+(define (new-string-creator visible-referables)
   (define result
     (get-text-from-user
       "Enter a string"
@@ -1054,7 +1050,7 @@
   )
 )
 
-(define (new-boolean-creator scope-handle)
+(define (new-boolean-creator visible-referables)
   (define choices '("true" "false"))
   (define result (get-choice-from-user "To be or not to be?" "That's the fuckin question" choices))
   (if result
@@ -1063,7 +1059,7 @@
   )
 )
 
-(define (new-define-creator scope-handle)
+(define (new-define-creator visible-referables)
   (define result
     (get-text-from-user
       "Enter the new definition's short descriptor"
@@ -1077,7 +1073,7 @@
   )
 )
 
-(define (new-lambda-creator scope-handle)
+(define (new-lambda-creator visible-referables)
   (define validate-natural (compose1 (conjoin integer? non-negative?) string->number))
   (define arity-string
     (get-text-from-user
@@ -1112,14 +1108,13 @@
   )
 )
 
-(define (new-value-read-creator scope-handle)
-  (define all-referables (send (send scope-handle get-db) get-referables))
+(define (new-value-read-creator visible-referables)
   (cond
-    [(cons? all-referables)
+    [(cons? visible-referables)
       (define handles&choices
         (map
           (lambda (handle) (list handle (get-short-desc-or* handle "<no desc>")))
-          all-referables
+          visible-referables
         )
       )
       (define dialog
@@ -1146,7 +1141,7 @@
   )
 )
 
-(define (new-legacy-creator scope-handle)
+(define (new-legacy-creator visible-referables)
   (define result
     (get-text-from-user
       "Enter the standard library identifier"
@@ -1166,11 +1161,11 @@
 ; Returns #f to signify no action is to be taken (i.e. the user cancels the dialog)
 ; Returns a function that takes an unassigned db handle and will assign it to something else, returning the new handle
 ; The returned creator is not allowed to fail. A failure of this function should return #f instead of a creator
-(define (request-new-item-creator scope-handle)
+(define (request-new-item-creator visible-referables)
   (define friendly-types (hash-keys FRIENDLY-TYPE->CREATOR))
   (define choice (get-choice-from-user "Choose the new node's type:" "Choose the node's type:" friendly-types))
   (if choice
-    ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref friendly-types choice)) scope-handle)
+    ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref friendly-types choice)) visible-referables)
     #f
   )
 )
