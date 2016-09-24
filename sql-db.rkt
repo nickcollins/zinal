@@ -189,6 +189,7 @@
         )
 
         (define (get-visible-referables*)
+          (send this assert-valid)
           (define parent (get-parent))
           (if parent
             (append
@@ -252,6 +253,7 @@
         )
 
         (define/override (get-visible-referables-underneath)
+          (send this assert-valid)
           (append
             (get-params)
             (super get-visible-referables-underneath)
@@ -265,6 +267,7 @@
         )
 
         (define/public (get-node-children)
+          (send this assert-valid)
           (get-body)
         )
 
@@ -305,6 +308,7 @@
         )
 
         (define/public (get-node-children)
+          (send this assert-valid)
           (list (get-expr))
         )
 
@@ -326,6 +330,7 @@
         )
 
         (define/public (get-node-children)
+          (send this assert-valid)
           (get-items)
         )
 
