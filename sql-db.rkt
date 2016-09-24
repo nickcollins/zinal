@@ -23,9 +23,9 @@
 (define TABLES->NON-ID-COLS (hash
   "list_headers" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "cdr_id INT")
   "lambdas" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "arity INT" "body_id INT")
-  "params" '("short_desc TEXT" "long_desc TEXT" "ref_count INT" "lambda_id INT" "position INT")
+  "params" '("short_desc TEXT" "long_desc TEXT" "lambda_id INT" "position INT")
   "defines" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "expr_id INT")
-  "definitions" '("ref_count INT" "define_id INT UNIQUE")
+  "definitions" '("define_id INT UNIQUE")
   "list_nodes" '("owner_id INT" "car_id INT" "cdr_id INT")
   "atoms" '("parent_id INT" "parent_col TEXT" "type TEXT" "value TEXT")
   "legacies" '("ref_count INT" "library TEXT" "name TEXT")
@@ -637,7 +637,7 @@
           (assign*!! (lambda (loc)
             (define define-id (create-describable-child!! "defines" loc short-desc long-desc (list (list "expr_id" BOGUS-ID))))
             (create-unassigned!! (new loc% [id define-id] [col "expr_id"]))
-            (create-something!! "definitions" (list (list "ref_count" 0) (list "define_id" define-id)))
+            (create-something!! "definitions" (list (list "define_id" define-id)))
           ))
         )
 
@@ -704,7 +704,6 @@
 
         (define/private (assign-ref*!! ref-id)
           (assign*!! (lambda (loc)
-            (inc-ref-count!! ref-id)
             (set-id!! loc ref-id)
           ))
         )
@@ -890,7 +889,6 @@
       (create-something!! "params" (list
         (list "short_desc" sql-null)
         (list "long_desc" sql-null)
-        (list "ref_count" 0)
         (list "lambda_id" lambda-id)
         (list "position" position)
       ))
@@ -911,19 +909,16 @@
       result
     )
 
-    ; WARNING: do not use this on id columns unless ref-counts have already been updated.
-    ;          This function can orphan extant nodes.
+    ; WARNING: This function can orphan extant nodes.
     (define (set-loc-dangerous*!! loc value)
       (set-cell-dangerous*!! (send loc get-id) (send loc get-col) value)
     )
 
-    ; WARNING: do not use this on id columns unless ref-counts have already been updated.
-    ;          This function can orphan extant nodes.
+    ; WARNING: This function can orphan extant nodes.
     (define (set-cell-dangerous*!! id col value)
       (q!! query-exec (format "UPDATE ~~a SET ~a = ?2" col) id value)
     )
 
-    ; WARNING: do not use this unless ref-counts have already been updated
     (define (set-id!! loc id)
       (define col (send loc get-col))
       (assert (format "destination column does not end in '_id': ~a" col) (string-suffix? "_id" col))
