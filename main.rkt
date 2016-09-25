@@ -16,6 +16,31 @@
   (or (send db-describable-handle get-short-desc) alt)
 )
 
+(define (issue-warning title message)
+  (message-box title message #f '(ok caution))
+)
+
+(define (if-unassignable handle action)
+  (cond
+    [(send handle can-unassign?)
+      (action)
+    ]
+    [(send handle get-parent)
+      (assert "can't unassign a non-referable, non-root handle" (is-a? handle veme:db:referable%%))
+      (issue-warning
+        "Cannot unassign"
+        (format
+          "Referable ~a has at least one reference that is not a descendant, so it can't be unassigned"
+          (send handle get-short-desc)
+        )
+      )
+    ]
+    [else
+      (issue-warning "Cannot unassign" "You cannot unassign the root node")
+    ]
+  )
+)
+
 ; ENTS
 
 (define ent:manager%
@@ -188,8 +213,12 @@
           )
         )
 
+        (define/public (select!)
+          (send (get-subroot-model) select!)
+        )
+
         (abstract init!)
-        (abstract select!)
+        (abstract get-subroot-model)
         ; TODO this doesn't really belong in the interface. it's just some convenience bullshit to
         ; make it as easy as possible to refresh short text in the current fairly flawed framework
         (abstract refresh-text!)
@@ -211,15 +240,11 @@
           (refresh-text!)
         )
 
-        (define/override (select!)
-          (send subroot-model* select!)
-        )
-
         (define/override (refresh-text!)
           (send subroot-model* set-short-text! (get-short-text))
         )
 
-        (define/public (get-subroot-model)
+        (define/override (get-subroot-model)
           subroot-model*
         )
 
@@ -244,16 +269,12 @@
           (send subroot-model* open!)
         )
 
-        (define/override (select!)
-          (send subroot-model* select!)
-        )
-
         (define/override (refresh-text!)
           (send subroot-model* set-open-text! (get-open-text))
           (send subroot-model* set-closed-text! (get-closed-text))
         )
 
-        (define/public (get-subroot-model)
+        (define/override (get-subroot-model)
           subroot-model*
         )
 
@@ -271,9 +292,8 @@
 
         (define/override (handle-event!! key-event)
           (case (send key-event get-key-code)
-            [(#\I) (maybe-add-item-to-list*!! 0)]
-            [(#\A) (maybe-add-item-to-list*!!)]
-            ; TODO non-default list event handling
+            [(#\I) (maybe-add-item*!! 0)]
+            [(#\A) (maybe-add-item*!!)]
             [else (super handle-event!! key-event)]
           )
         )
@@ -303,48 +323,62 @@
         )
 
         (abstract db-insert!!)
+        (abstract db-remove!!)
 
         (define (handle-slot-event*!! index key-event)
           (case (send key-event get-key-code)
-            [(#\o) (maybe-add-item-to-list*!! (add1 index) new-unassigned-creator)]
-            [(#\i) (maybe-add-item-to-list*!! index)]
-            [(#\I) (maybe-add-item-to-list*!! 0)]
-            [(#\a) (maybe-add-item-to-list*!! (add1 index))]
-            [(#\A) (maybe-add-item-to-list*!!)]
-            [(#\() (maybe-add-item-to-list*!! (add1 index) new-list-creator)]
+            ; TODO alphabetize this and others
+            [(#\o) (maybe-add-item*!! (add1 index) new-unassigned-creator)]
+            [(#\i) (maybe-add-item*!! index)]
+            [(#\I) (maybe-add-item*!! 0)]
+            [(#\a) (maybe-add-item*!! (add1 index))]
+            [(#\A) (maybe-add-item*!!)]
+            [(#\() (maybe-add-item*!! (add1 index) new-list-creator)]
             [(#\s) (maybe-replace-item*!! index)]
+            [(#\d) (maybe-unassign-or-remove-item*!! index)]
           )
         )
 
-        (define (maybe-add-item-to-list*!! [index (length (get-item-handles))] [creator*!! #f])
-          ; TODO current doesn't work for func-def
-          (define visible-referables (get-visible-referables-for-hypothetical-index* index))
-          (define creator!!
-            (if creator*!!
-              (creator*!! visible-referables)
-              (request-new-item-creator visible-referables)
-            )
+        (define (maybe-add-item*!! [index (length (get-item-handles))] [creator-getter #f])
+          (maybe-create*!!
+            (get-visible-referables-for-hypothetical-index* index)
+            (thunk (db-insert!! index))
+            (compose1 select*! (curryr insert-slot*! index))
+            creator-getter
           )
-          (when creator!!
-            (define new-unassigned-handle (db-insert!! index))
-            (define new-db-handle (creator!! new-unassigned-handle))
-            (select-and-refresh*! (insert-slot*! new-db-handle index))
+        )
+
+        (define (maybe-unassign-or-remove-item*!! index)
+          (define slot (get-slot* index))
+          (define ent (send slot get-ent))
+          (cond
+            [(is-a? ent ent:unassigned%)
+              (delete-slot*! slot)
+              (send this select!)
+              (refresh-all-text*!)
+            ]
+            [else
+              (define handle (send ent get-subroot-handle))
+              (if-unassignable handle (thunk
+                (respawn-slot*! slot (send handle unassign!!))
+                (select*! slot)
+                (refresh-all-text*!)
+              ))
+            ]
           )
         )
 
         (define (maybe-replace-item*!! index)
           ; TODO kinda silly to use the slot to get the index, then use the index to get the slot.
           ; Need to rethink and refactor slot system
-          (define slot (list-ref slots* index))
+          (define slot (get-slot* index))
           (define handle (send (send slot get-ent) get-subroot-handle))
-          ; TODO we shouldn't really be checking the type of the handle like this
-          (when (is-a? handle veme:db:unassigned%%)
-            (define visible-referables (get-visible-referables-for-hypothetical-index* index))
-            (define creator!! (request-new-item-creator visible-referables))
-            (when creator!!
-              (define new-handle (creator!! handle))
+          (maybe-replace*!!
+            (get-visible-referables-for-hypothetical-index* index)
+            handle
+            (lambda (new-handle)
               (respawn-slot*! slot new-handle)
-              (select-and-refresh*! slot)
+              (select*! slot)
             )
           )
         )
@@ -352,12 +386,11 @@
         (define (get-visible-referables-for-hypothetical-index* index)
           (if (zero? index)
             (send (get-basic-list-handle) get-visible-referables-underneath)
-            (send (send (send (list-ref slots* (sub1 index)) get-ent) get-subroot-handle) get-visible-referables-after)
+            (send (send (send (get-slot* (sub1 index)) get-ent) get-subroot-handle) get-visible-referables-after)
           )
         )
 
-        (define (select-and-refresh*! slot)
-          (send root* refresh-text!)
+        (define (select*! slot)
           (send (send slot get-ent) select!)
         )
 
@@ -367,9 +400,7 @@
           (define slot (new indexed-slot% [event-handler!! handle-slot-event*!!] [index ind]))
           (spawn-entity*! slot new-handle (send this get-subroot-model) ind)
           (set! slots* (append before (cons slot after)))
-          (when (cons? after)
-            (build-list (length slots*) (lambda (i) (send (list-ref slots* i) set-index! i)))
-          )
+          (when (cons? after) (reset-slot-indices*!))
           slot
         )
 
@@ -380,14 +411,23 @@
           (spawn-entity*! slot new-handle (send this get-subroot-model) ind)
         )
 
-        ; Do not call this unless the db data has already been deleted
-        ; TODO this should probably just issue a delete to the child, which would then delete its own db data
         (define (delete-slot*! slot)
+          (assert "Can only delete unassigned slots" (is-a? (send slot get-ent) ent:unassigned%))
           (define ind (send slot get-index))
+          (db-remove!! ind)
           (define before (take slots* ind))
           (define after (drop slots* (add1 ind)))
           (set! slots* (append before after))
+          (when (cons? after) (reset-slot-indices*!))
           (send (send this get-subroot-model) remove! ind)
+        )
+
+        (define (get-slot* index)
+          (list-ref slots* index)
+        )
+
+        (define (reset-slot-indices*!)
+          (build-list (length slots*) (lambda (i) (send (get-slot* i) set-index! i)))
         )
 
         (define slots* '())
@@ -433,6 +473,10 @@
           (send (send this get-subroot-handle) insert-into-body!! index)
         )
 
+        (define/override (db-remove!! index)
+          (send (send this get-subroot-handle) remove-from-body!! index)
+        )
+
         (super-new)
       )
     )
@@ -450,6 +494,10 @@
 
         (define/override (db-insert!! index)
           (send (send this get-subroot-handle) insert!! index)
+        )
+
+        (define/override (db-remove!! index)
+          (send (send this get-subroot-handle) remove!! index)
         )
 
         (define (get-short-desc-or** alt)
@@ -488,21 +536,27 @@
 
         (define (handle-expr-event*!! key-event)
           (case (send key-event get-key-code)
-            [(#\s) (maybe-replace-item*!!)]
+            [(#\d) (unassign-expr*!!)]
+            [(#\s) (maybe-replace-expr*!!)]
           )
         )
 
-        (define (maybe-replace-item*!!)
-          ; TODO this looks a whole lot like the one for lists -_-
-          (define handle (send (send expr-slot* get-ent) get-subroot-handle))
-          ; TODO we shouldn't really be checking the type of the handle like this
-          (when (is-a? handle veme:db:unassigned%%)
-            (define visible-referables (send (send this get-subroot-handle) get-visible-referables-underneath))
-            (define creator!! (request-new-item-creator visible-referables))
-            (when creator!!
-              (creator!! handle)
+        (define (unassign-expr*!!)
+          (define handle (get-expr-handle*))
+          (if-unassignable handle (thunk
+            (send handle unassign!!)
+            (respawn-expr*!)
+            (send (send expr-slot* get-ent) select!)
+            (refresh-all-text*!)
+          ))
+        )
+
+        (define (maybe-replace-expr*!!)
+          (maybe-replace*!!
+            (send (send this get-subroot-handle) get-visible-referables-underneath)
+            (send (send expr-slot* get-ent) get-subroot-handle)
+            (lambda (new-handle)
               (respawn-expr*!)
-              (send root* refresh-text!)
               (send (send expr-slot* get-ent) select!)
             )
           )
@@ -563,6 +617,10 @@
           (send (get-basic-list-handle) insert!! index)
         )
 
+        (define/override (db-remove!! index)
+          (send (get-basic-list-handle) remove!! index)
+        )
+
         (define (get-short-desc-or** alt)
           (get-short-desc-or*
             ; TODO which short desc should we use in cases like this?
@@ -595,6 +653,10 @@
 
         (define/override (db-insert!! index)
           (send (get-basic-list-handle) insert-into-body!! index)
+        )
+
+        (define/override (db-remove!! index)
+          (send (get-basic-list-handle) remove-from-body!! index)
         )
 
         (define (get-text* lambda-text-getter)
@@ -722,6 +784,34 @@
 
     (define (standard-with-name*? db-legacy-link-handle name)
       (and (standard*? db-legacy-link-handle) (equal? name (send db-legacy-link-handle get-name)))
+    )
+
+    (define (maybe-create*!! visible-referables generate-replaceable-handle follow-up [get-creator #f])
+      (define creator!!
+        (if get-creator
+          (get-creator visible-referables)
+          (request-new-item-creator visible-referables)
+        )
+      )
+      (when creator!!
+        (define new-handle (creator!! (send (generate-replaceable-handle) unassign!!)))
+        (follow-up new-handle)
+        (refresh-all-text*!)
+      )
+    )
+
+    (define (maybe-replace*!! visible-referables handle-to-replace follow-up)
+      (if-unassignable handle-to-replace (thunk
+        (maybe-create*!!
+          visible-referables
+          (const handle-to-replace)
+          follow-up
+        )
+      ))
+    )
+
+    (define (refresh-all-text*!)
+      (send root* refresh-text!)
     )
 
     (define db* db)
@@ -857,6 +947,9 @@
             keys&choices*
           )
           (when (zero? (send this get-number)) (reset-choices*!))
+          ; TODO we need to laser in on any reference that's an exact match
+          ; if we type "n", we don't want it to be underneath "index", because then there's no way to get
+          ; to "n" without resorting to the arrow keys or mouse
           (unless (send this get-selection)
             (send this set-selection 0)
           )

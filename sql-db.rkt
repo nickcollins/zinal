@@ -115,6 +115,8 @@
           (set! valid*? #f)
         )
 
+        (abstract delete-and-invalidate*!!)
+
         (define id* id)
         ; This object will be invalidated if the data it's referring to gets deleted or unassigned. Any attempts to do something with
         ; an invalid handle will cause an exception. Calling code is responsible for never using a stale handle, but this is a sanity
@@ -126,7 +128,7 @@
     )
 
     (define db-node%
-      (class* db-element% (veme:db:node%%)
+      (class* db-element% (veme:db:node%%) ; abstract
 
         (init loc)
 
@@ -138,6 +140,12 @@
         (define/override (invalidate!)
           (hash-remove! handles* (send loc* get-id&col))
           (super invalidate!)
+        )
+
+        ; Overrides must invoke this as their last action
+        (define/override (delete-and-invalidate*!!)
+          (set-loc-dangerous*!! loc* BOGUS-ID)
+          (send this invalidate!)
         )
 
         (define/public (get-parent)
@@ -177,10 +185,19 @@
           (get-visible-referables*)
         )
 
-        (define/public (unassign!!)
+        (define/public (can-unassign?)
           (send this assert-valid)
-          ; TODO NYI
-          ; TODO make sure you can't unassign (or do any other weird stuff) the root list
+          (get-parent)
+        )
+
+        (define/public (unassign!!)
+          (assert
+            (format "Cannot unassign node (~a, ~a):~a" (send loc* get-id) (send loc* get-col) (send this get-id))
+            (can-unassign?)
+          )
+          (delete-and-invalidate*!!)
+          (create-unassigned!! loc*)
+          (get-handle! loc*)
         )
 
         (define/public (get-loc)
@@ -260,6 +277,13 @@
           )
         )
 
+        (define/override (delete-and-invalidate*!!)
+          (send (get-body-list*) delete-and-invalidate*!!)
+          (for-each (lambda (p) (send p delete-and-invalidate*!!)) (get-params))
+          (delete-id*!! (send this get-id))
+          (super delete-and-invalidate*!!)
+        )
+
         (define/public (get-params)
           (send this assert-valid)
           (define id (send this get-id))
@@ -302,6 +326,25 @@
           (send visitor visit-def this data)
         )
 
+        (define/override (can-unassign?)
+          (send this assert-valid)
+          (and
+            (super can-unassign?)
+            (andmap
+              (curryr descendant? this)
+              (get-references)
+            )
+          )
+        )
+
+        (define/override (delete-and-invalidate*!!)
+          (define id (send this get-id))
+          (send (get-expr) delete-and-invalidate*!!)
+          (delete-id*!! (get-definition-id id))
+          (delete-id*!! id)
+          (super delete-and-invalidate*!!)
+        )
+
         (define/public (get-references)
           (send this assert-valid)
           (get-references* (get-definition-id (send this get-id)))
@@ -329,6 +372,12 @@
           (send visitor visit-list this data)
         )
 
+        (define/override (delete-and-invalidate*!!)
+          (for-each (lambda (h) (send h delete-and-invalidate*!!)) (get-items))
+          (delete-list-nodes-and-header* (send this get-id))
+          (super delete-and-invalidate*!!)
+        )
+
         (define/public (get-node-children)
           (send this assert-valid)
           (get-items)
@@ -343,10 +392,9 @@
         )
 
         (define/public (insert!! index)
-          ; TODO add bounds checking!! probably need to add bounds checking elsewhere in the code too
           (send this assert-valid)
           (define list-header-id (send this get-id))
-          (define insertion-point-id (nth-list-insertion-point* list-header-id index))
+          (define insertion-point-id (nth-list-insertion-point* list-header-id index index))
           (define insertion-point-loc (new loc% [id insertion-point-id] [col "cdr_id"]))
           (define old-cdr (send insertion-point-loc get-cell))
           (define new-node-id
@@ -361,7 +409,47 @@
 
         (define/public (remove!! index)
           (send this assert-valid)
-          ; TODO NYI
+          (define list-header-id (send this get-id))
+          (define insertion-point-id (nth-list-insertion-point* list-header-id index index))
+          (define id-to-delete (get-cell* insertion-point-id "cdr_id"))
+          (assert (format "Index out of bounds: ~a" index) (not (= id-to-delete NIL-ID)))
+          (define id-to-contract (get-cell* id-to-delete "cdr_id"))
+          (define unassigned-loc (new loc% [id id-to-delete] [col "car_id"]))
+          (define unassigned-handle (get-handle! unassigned-loc))
+          (assert
+            (format "You can only remove!! an unassigned: (~a, ~a):~a" (send unassigned-loc get-id) (send unassigned-loc get-col) (send unassigned-loc get-cell))
+            (is-a? unassigned-handle veme:db:unassigned%%)
+          )
+          (send unassigned-handle delete-and-invalidate*!!)
+          (delete-id*!! id-to-delete)
+          (set-cell-dangerous*!! insertion-point-id "cdr_id" id-to-contract)
+          (void)
+        )
+
+        (define (nth-list-insertion-point* list-start-id index orig-index)
+          (assert
+            (format "Index out of bounds: ~a" orig-index)
+            (and (non-negative? index) (not (= list-start-id NIL-ID)))
+          )
+          (if (zero? index)
+            list-start-id
+            (nth-list-insertion-point* (get-cell* list-start-id "cdr_id") (sub1 index) orig-index)
+          )
+        )
+
+        (define (get-cdrs* list-node-id)
+          (if (= list-node-id NIL-ID)
+            '()
+            (cons list-node-id (get-cdrs* (get-cell* list-node-id "cdr_id")))
+          )
+        )
+
+        ; Don't call until cars have been deleted!
+        (define (delete-list-nodes-and-header* list-node-id)
+          (unless (= list-node-id NIL-ID)
+            (delete-list-nodes-and-header* (get-cell* list-node-id "cdr_id"))
+            (delete-id*!! list-node-id)
+          )
         )
 
         (super-new)
@@ -379,6 +467,11 @@
         (define/override (invalidate!)
           (hash-remove! handles* (send this get-id))
           (super invalidate!)
+        )
+
+        (define/override (delete-and-invalidate*!!)
+          (delete-id*!! (send this get-id))
+          (send this invalidate!)
         )
 
         (define/public (get-pos)
@@ -426,6 +519,11 @@
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-atom this data)
+        )
+
+        (define/override (delete-and-invalidate*!!)
+          (delete-id*!! (send this get-id))
+          (super delete-and-invalidate*!!)
         )
 
         (define/public (assert-correct-type-and-get-stored-value expected-type)
@@ -547,6 +645,11 @@
           (send visitor visit-legacy-link this data)
         )
 
+        (define/override (delete-and-invalidate*!!)
+          (dec-ref-count!! (send this get-id))
+          (super delete-and-invalidate*!!)
+        )
+
         (define/public (get-library)
           (send this assert-valid)
           (define stored-result (get-cell* (send this get-id) "library"))
@@ -625,6 +728,19 @@
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-unassigned this data)
+        )
+
+        (define/override (can-unassign?)
+          #t
+        )
+
+        (define/override (unassign!!)
+          this
+        )
+
+        (define/override (delete-and-invalidate*!!)
+          (delete-id*!! (send this get-id))
+          (super delete-and-invalidate*!!)
         )
 
         (define/public (assign-lambda!! arity [short-desc #f] [long-desc #f])
@@ -716,8 +832,7 @@
         (define/private (assign*!! assigner!!)
           (send this assert-valid)
           (define loc (send this get-loc))
-          (send this invalidate!)
-          (delete-unreferenceable-leaf*!! loc)
+          (delete-and-invalidate*!!)
           (assigner!! loc)
           (get-handle! loc)
         )
@@ -931,8 +1046,15 @@
       (set-loc-dangerous*!! loc id)
     )
 
+    (define (dec-ref-count!! id)
+      (change-ref-count*!! id (sub1 (get-cell* id "ref_count")))
+    )
+
     (define (inc-ref-count!! id)
-      (define new-ref-count (add1 (get-cell* id "ref_count")))
+      (change-ref-count*!! id (add1 (get-cell* id "ref_count")))
+    )
+
+    (define (change-ref-count*!! id new-ref-count)
       (q!! query-exec "UPDATE ~a SET ref_count = ?2" id new-ref-count)
       new-ref-count
     )
@@ -961,20 +1083,6 @@
       (query-maybe-value db* "SELECT id FROM params WHERE lambda_id = ?1 AND position = ?2" lambda-id position)
     )
 
-    (define (get-cdrs* list-node-id)
-      (if (= list-node-id NIL-ID)
-        '()
-        (cons list-node-id (get-cdrs* (get-cell* list-node-id "cdr_id")))
-      )
-    )
-
-    (define (nth-list-insertion-point* list-start-id index)
-      (if (zero? index)
-        list-start-id
-        (nth-list-insertion-point* (get-cell* list-start-id "cdr_id") (sub1 index))
-      )
-    )
-
     (define (set-desc*!! short/long id new-desc)
       (assert
         (format "short/long must either be 'short or 'long: ~a" short/long)
@@ -988,15 +1096,19 @@
       (set-cell-dangerous*!! id col new-desc)
     )
 
-    (define (delete-unreferenceable-leaf*!! loc)
-      (define id (send loc get-cell))
-      (define table (get-table id))
-      (assert
-        (format "id ~a in table ~a is not an unreferenceable leaf" id table)
-        (or (equal? table "unassigned") (equal? table "atoms"))
-      )
+    (define (delete-id*!! id)
       (q!! query-exec "DELETE FROM ~a" id)
-      (set-loc-dangerous*!! loc BOGUS-ID)
+    )
+
+    (define (descendant? child subroot)
+      (define parent (send child get-parent))
+      (or
+        (send child equals? subroot)
+        (and
+          parent
+          (descendant? parent subroot)
+        )
+      )
     )
 
     (super-new)

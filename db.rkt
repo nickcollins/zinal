@@ -55,9 +55,17 @@
   ; Included in the list is this node (if it's a referable) but not its params (if it's a lambda).
   get-visible-referables-after ; ()
 
+  ; Returns true iff unassign!! can be called without throwing an exception. Returns #f if this
+  ; node is the root node, of if deleting this node as well as all associated data and children
+  ; would "orphan" any extant references. Returns #t for unassigned nodes, as for them unassign!!
+  ; is a no-op.
+  can-unassign? ; ()
+
   ; Deletes all the data associated with this node and any children it may have, converting
   ; this node to a veme:db:unassigned%% . This handle will be invalidated and cannot be used
   ; again. Returns a handle to the new veme:db:unassigned%% .
+  ; If this is called on a veme:db:unassigned%%, nothing happens, and this is returned.
+  ; If this is called when can-unassign? would return #f, then an exception is thrown.
   unassign!! ; ()
 ))
 
@@ -107,12 +115,13 @@
   ; Returns a veme:db:unassigned%% handle to the new unassigned node
   insert-into-body!! ; (non-negative-integer)
 
-  ; Deletes the nth expr (and all associated data, and all children) of the lambda's body,
+  ; Deletes the nth expr (which must be a veme:db:unassigned%%) of the lambda's body,
   ; and shifts all latter exprs in the body down by one index.
-  ; E.g. if the lambda is (lambda (x y) (define a (+ x y)) (define b (* x y)) (- a b)),
-  ; then (remove-from-body!! 2) deletes the (- a b) expression.
+  ; E.g. if the lambda is (lambda (x y) (define a (+ x y)) (define b (* x y)) <?>),
+  ; then (remove-from-body!! 2) deletes the <?>.
   ; Any handles associated with the deleted expr are now invalid and cannot be used.
-  ; No meaningful return value.
+  ; No meaningful return value. If the node at the specified index isn't a
+  ; veme:db:unassigned%% , an exception is thrown.
   remove-from-body!! ; (non-negative-integer)
 ))
 
@@ -131,9 +140,10 @@
   ; Returns a veme:db:unassigned%% handle to the new unassigned node
   insert!! ; (non-negative-integer)
 
-  ; Deletes the node (and all associated data, and all children) at the specified position,
-  ; and shifts all latter items in the list down by one index. Any handles associated with
-  ; that node are now invalid and cannot be used. No meaningful return value.
+  ; Deletes a veme:db:unassigned%% at the specified position, and shifts all latter
+  ; items in the list down by one index. Any handles associated with that node are
+  ; now invalid and cannot be used. No meaningful return value. If the node at the
+  ; specified index is not veme:db:unassigned%% , an exception will be thrown
   remove!! ; (non-negative-integer)
 ))
 
