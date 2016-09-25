@@ -274,10 +274,10 @@
     (define/override (on-char key-event)
       (when selected-model*
         (case (send key-event get-key-code)
+          [(#\h) (send this select-out)]
+          [(#\H) (close-current-list*!)]
           [(#\j) (move-down*! selected-model*)]
           [(#\k) (move-up*!)]
-          [(#\H) (close-current-list*!)]
-          [(#\h) (send this select-out)]
           [(#\l) (send this select-in)]
           [else (send selected-model* handle-key-event!! key-event)]
         )

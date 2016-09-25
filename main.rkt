@@ -292,8 +292,8 @@
 
         (define/override (handle-event!! key-event)
           (case (send key-event get-key-code)
-            [(#\I) (maybe-add-item*!! 0)]
             [(#\A) (maybe-add-item*!!)]
+            [(#\I) (maybe-add-item*!! 0)]
             [else (super handle-event!! key-event)]
           )
         )
@@ -327,15 +327,14 @@
 
         (define (handle-slot-event*!! index key-event)
           (case (send key-event get-key-code)
-            ; TODO alphabetize this and others
-            [(#\o) (maybe-add-item*!! (add1 index) new-unassigned-creator)]
-            [(#\i) (maybe-add-item*!! index)]
-            [(#\I) (maybe-add-item*!! 0)]
             [(#\a) (maybe-add-item*!! (add1 index))]
             [(#\A) (maybe-add-item*!!)]
-            [(#\() (maybe-add-item*!! (add1 index) new-list-creator)]
-            [(#\s) (maybe-replace-item*!! index)]
             [(#\d) (maybe-unassign-or-remove-item*!! index)]
+            [(#\i) (maybe-add-item*!! index)]
+            [(#\I) (maybe-add-item*!! 0)]
+            [(#\o) (maybe-add-item*!! (add1 index) new-unassigned-creator)]
+            [(#\s) (maybe-replace-item*!! index)]
+            [(#\() (maybe-add-item*!! (add1 index) new-list-creator)]
           )
         )
 
