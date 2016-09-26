@@ -743,6 +743,14 @@
           (~a (send a get-val))
         )
 
+        (define/override (visit-symbol s meh)
+          (format "'~a" (send s get-val))
+        )
+
+        (define/override (visit-char c meh)
+          (format "#\\~a" (send c get-val))
+        )
+
         (define/override (visit-lambda l meh)
           (if in-list?
             (format "λ~a" (get-short-desc-or* l "..."))
@@ -1018,14 +1026,14 @@
           (define key-code (send key-event get-key-code))
           (define (reset-chars!) (set! chars ""))
           (case key-code
-            [(#\j)
+            [(#\J)
               (reset-chars!)
               (unless (= current-selection (sub1 num-choices*))
                 (send this set-selection (add1 current-selection))
               )
               #t
             ]
-            [(#\k)
+            [(#\K)
               (reset-chars!)
               (unless (zero? current-selection)
                 (send this set-selection (sub1 current-selection))
@@ -1138,6 +1146,35 @@
   )
   (if result
     (lambda (unassigned) (send unassigned assign-string!! result))
+    #f
+  )
+)
+
+; TODO let's factor the boilerplate out of these things
+(define (new-symbol-creator visible-referables)
+  (define result
+    (get-text-from-user
+      "Enter a symbol as a string"
+      "Don't include the leading '"
+      #:validate (const #t)
+    )
+  )
+  (if result
+    (lambda (unassigned) (send unassigned assign-symbol!! (string->symbol result)))
+    #f
+  )
+)
+
+(define (new-keyword-creator visible-referables)
+  (define result
+    (get-text-from-user
+      "Enter a keyword as a string"
+      "Don't include the leading #:"
+      #:validate (const #t)
+    )
+  )
+  (if result
+    (lambda (unassigned) (send unassigned assign-keyword!! (string->keyword result)))
     #f
   )
 )
@@ -1270,6 +1307,8 @@
   "character" new-character-creator
   "string" new-string-creator
   "boolean" new-boolean-creator
+  "symbol" new-symbol-creator
+  "keyword" new-keyword-creator
 ))
 
 (define FRIENDLY-TYPE->CREATOR (hash-union FRIENDLY-LITERAL-TYPE->CREATOR (hash

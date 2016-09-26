@@ -637,6 +637,22 @@
       )
     )
 
+    (define db-keyword%
+      (class* db-atom% (veme:db:keyword%%)
+
+        (define/override (accept visitor [data #f])
+          (send this assert-valid)
+          (send visitor visit-keyword this data)
+        )
+
+        (define/override (get-val)
+          (string->keyword (send this assert-correct-type-and-get-stored-value 'keyword))
+        )
+
+        (super-new)
+      )
+    )
+
     (define db-legacy%
       (class* db-node% (veme:db:legacy-link%%)
 
@@ -798,6 +814,11 @@
           (assign-atom*!! 'symbol (symbol->string value))
         )
 
+        (define/public (assign-keyword!! value)
+          (assert (format "~a aint no keyword" value) (keyword? value))
+          (assign-atom*!! 'keyword (keyword->string value))
+        )
+
         (define/public (assign-legacy-link!! library name)
           (assert
             (format "Invalid library or identifier: ~a :: ~a" library name)
@@ -939,6 +960,7 @@
             [(string) (new db-string% [loc loc])]
             [(boolean) (new db-bool% [loc loc])]
             [(symbol) (new db-symbol% [loc loc])]
+            [(keyword) (new db-keyword% [loc loc])]
             [else (error 'get-node-handle* "Invalid atom type ~a for id ~a" type id)]
           )
         ]
