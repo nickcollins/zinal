@@ -319,7 +319,7 @@
         )
 
         (define/public (get-item-handles)
-          (send (get-basic-list-handle) get-node-children)
+          (send (get-basic-list-handle) get-children)
         )
 
         (abstract db-insert!!)
@@ -485,6 +485,10 @@
 
         (define/override (db-remove!! index)
           (send (send this get-subroot-handle) remove-from-body!! index)
+        )
+
+        (define/override (get-item-handles)
+          (send (send this get-subroot-handle) get-body)
         )
 
         (super-new)
@@ -726,7 +730,7 @@
     ; HELPER FUNCTIONS
 
     (define (get-params-text* db-lambda-handle)
-      (string-join (map (curryr get-short-desc-or* "¯\\_(ツ)_/¯") (send db-lambda-handle get-params)) ", ")
+      (string-join (map (curryr get-short-desc-or* "¯\\_(ツ)_/¯") (send db-lambda-handle get-all-params)) ", ")
     )
 
     (define (get-open-lambda-text* lambda-handle)
@@ -1214,40 +1218,11 @@
 )
 
 (define (new-lambda-creator visible-referables)
-  (define validate-natural (compose1 (conjoin integer? non-negative?) string->number))
-  (define arity-string
-    (get-text-from-user
-      "Enter the new function's arity"
-      "How many params does it have? Seriously."
-      #f
-      ""
-      '(disallow-invalid)
-      #:validate validate-natural
-    )
-  )
-  (cond
-    [(and arity-string (validate-natural arity-string))
-      (define arity (string->number arity-string))
-      (define param-short-names
-        (build-list arity (lambda (p)
-          (get-text-from-user
-            (format "Enter the short descriptor of the ~ath parameter" p)
-            (format "Param ~a is:" p)
-            #:validate (const #t)
-          )
-        ))
-      )
-      (lambda (unassigned)
-        (define lambda-handle (send unassigned assign-lambda!! arity))
-        (define params (send lambda-handle get-params))
-        (map (lambda (p n) (send p set-short-desc!! n)) params param-short-names)
-        lambda-handle
-      )
-    ]
-    [else #f]
-  )
+  (lambda (unassigned) (send unassigned assign-lambda!!))
 )
 
+; TODO fucking terrible inconsistent focus issues. AFAICT they started happening after "upgrading"
+; to 16.04.1
 (define (new-value-read-creator visible-referables)
   (cond
     [(cons? visible-referables)

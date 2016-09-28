@@ -71,8 +71,10 @@
 
 (define veme:db:parent-node%% (interface (veme:db:node%%)
 
-  ; Returns a list of veme:db:node%% handles to all node children of this non-leaf node
-  get-node-children ; ()
+  ; Returns a list of veme:db:node%% handles to all children of this non-leaf node. The children
+  ; are returned in "lexical" order, so if child B depends on child A, A must appear before B in
+  ; the returned list
+  get-children ; ()
 ))
 
 ; Any element which can be pointed to by some type of veme:db:reference%%
@@ -100,10 +102,26 @@
   get-val ; ()
 ))
 
+; TODO current update documentation
 (define veme:db:lambda%% (interface (veme:db:parent-node%% veme:db:describable%%)
 
-  ; Returns a list of veme:db:param%%
-  get-params ; ()
+  get-all-params ; ()
+
+  get-required-params ; ()
+
+  can-remove-required-param? ; (index)
+
+  remove-required-param!! ; (index)
+
+  insert-required-param!! ; (index [short-desc])
+
+  get-optional-params ; ()
+
+  can-remove-optional-param? ; (index)
+
+  remove-optional-param!! ; (index)
+
+  insert-optional-param!! ; (index [short-desc])
 
   ; Returns a list of veme:db:node%% handles representing the statements/expressions
   ; constituting the lambda's body.
@@ -160,13 +178,14 @@
   get-def ; ()
 ))
 
-(define veme:db:param%% (interface (veme:db:referable%%)
+(define veme:db:param%% (interface (veme:db:parent-node%% veme:db:referable%%)
 
-  ; Returns a veme:db:lambda%% handle for the lambda that this param belongs to
+  ; Returns a veme:db:lambda%% handle for the lambda that this param belongs to.
+  ; Equivalent to get-parent
   get-lambda ; ()
 
-  ; Returns a non-negative integer indicating the position of this positional parameter
-  get-pos ; ()
+  ; Returns a veme:db:node%% handle for the default expression. Returns #f for required params.
+  get-default ; ()
 ))
 
 (define veme:db:param-ref%% (interface (veme:db:reference%%)
@@ -200,7 +219,7 @@
 ; actually be implemented
 (define veme:db:unassigned%%
   (interface (veme:db:node%% veme:db:describable%%)
-    assign-lambda!! ; (arity [short-desc] [long-desc])
+    assign-lambda!! ; ([short-desc] [long-desc])
     assign-def!! ; ([short-desc] [long-desc])
     assign-list!! ; ([short-desc] [long-desc])
     assign-def-ref!! ; (veme:db:def%%)
@@ -235,7 +254,7 @@
     (define/public (visit-list l data) (visit-node l data))
     (define/public (visit-def d data) (visit-node d data))
     (define/public (visit-def-ref dr data) (visit-reference dr data))
-    (define/public (visit-param p data) (visit-element p data))
+    (define/public (visit-param p data) (visit-node p data))
     (define/public (visit-param-ref pr data) (visit-reference pr data))
     (define/public (visit-legacy-link l data) (visit-node l data))
 

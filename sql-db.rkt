@@ -22,14 +22,15 @@
 
 (define TABLES->NON-ID-COLS (hash
   "list_headers" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "cdr_id INT")
-  "lambdas" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "arity INT" "body_id INT")
-  "params" '("short_desc TEXT" "long_desc TEXT" "lambda_id INT" "position INT")
+  "lambdas" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "req_params_id INT" "opt_params_id INT" "body_id INT")
+  "params" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "default_id INT")
   "defines" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "expr_id INT")
+  "param_refs" '("param_id INT UNIQUE")
   "definitions" '("define_id INT UNIQUE")
   "list_nodes" '("owner_id INT" "car_id INT" "cdr_id INT")
-  "atoms" '("parent_id INT" "parent_col TEXT" "type TEXT" "value TEXT")
+  "atoms" '("type TEXT" "value TEXT")
   "legacies" '("ref_count INT" "library TEXT" "name TEXT")
-  "unassigned" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT")
+  "unassigned" '("short_desc TEXT" "long_desc TEXT")
 ))
 
 (define TABLES (list->vector (hash-keys TABLES->NON-ID-COLS)))
@@ -59,15 +60,7 @@
     )
 
     (define/public (get-referables)
-      (map get-handle!
-        (append
-          (map
-            (lambda (v) (new loc% [id (vector-ref v 0)] [col (vector-ref v 1)]))
-            (query-rows db* "SELECT parent_id, parent_col FROM defines")
-          )
-          (query-list db* "SELECT id FROM params")
-        )
-      )
+      (map get-handle! (append (get-referables-of-type* "params") (get-referables-of-type* "defines")))
     )
 
     (define/public (get-filename)
@@ -162,16 +155,21 @@
                   loc-id
                 )
               )
-              ; We want the parent of a lambda body expr to be the lambda, not the list it's hidden in
-              (define parent-id
-                (if (equal? "body_id" (get-cell* direct-parent-id "parent_col"))
-                  (get-cell* direct-parent-id "parent_id")
-                  direct-parent-id
-                )
-              )
-              (if (= parent-id PROG-START-ID)
-                (get-handle! ROOT-LOC)
-                (get-handle! (get-cell* parent-id "parent_id") (get-cell* parent-id "parent_col"))
+              (cond
+                [(= direct-parent-id PROG-START-ID)
+                  (get-handle! ROOT-LOC)
+                ]
+                [else
+                  ; We want the parent of a lambda body expr to be the lambda, not the list it's hidden in
+                  (define direct-grandparent-id (get-cell* direct-parent-id "parent_id"))
+                  (define parent-id
+                    (if (equal? "lambdas" (get-table direct-grandparent-id))
+                      direct-grandparent-id
+                      direct-parent-id
+                    )
+                  )
+                  (get-handle! (get-cell* parent-id "parent_id") (get-cell* parent-id "parent_col"))
+                ]
               )
             ]
           )
@@ -210,8 +208,8 @@
           (define parent (get-parent))
           (if parent
             (append
-              (get-visible-sibling-referables* (send parent get-node-children))
-              (send parent get-visible-referables-underneath)
+              (get-visible-sibling-referables* (send parent get-children))
+              (send parent get-visible-referables-after)
             )
             ; We assume root is not a referable
             '()
@@ -246,7 +244,6 @@
           (sql:// (get-cell* (send this get-id) "long_desc") #f)
         )
 
-        ; TODO we could probably factor this a bit
         (define/public (set-short-desc!! new-desc)
           (send this assert-valid)
           (set-desc*!! 'short (send this get-id) new-desc)
@@ -272,27 +269,66 @@
         (define/override (get-visible-referables-underneath)
           (send this assert-valid)
           (append
-            (get-params)
+            (get-all-params)
             (super get-visible-referables-underneath)
           )
         )
 
         (define/override (delete-and-invalidate*!!)
           (send (get-body-list*) delete-and-invalidate*!!)
-          (for-each (lambda (p) (send p delete-and-invalidate*!!)) (get-params))
+          (for-each (lambda (p) (send p delete-and-invalidate*!!)) (get-all-params))
           (delete-id*!! (send this get-id))
           (super delete-and-invalidate*!!)
         )
 
-        (define/public (get-params)
+        (define/public (get-children)
           (send this assert-valid)
-          (define id (send this get-id))
-          (build-list (get-cell* id "arity") (compose1 get-handle! (curry get-param-id id)))
+          (append (get-all-params) (get-body))
         )
 
-        (define/public (get-node-children)
+        (define/public (get-all-params)
           (send this assert-valid)
-          (get-body)
+          (append (get-required-params) (get-optional-params))
+        )
+
+        (define/public (get-required-params)
+          (send this assert-valid)
+          (send (get-reqd-params-list*) get-items)
+        )
+
+        (define/public (can-remove-required-param? index)
+          (send this assert-valid)
+          (can-remove-param*? (get-required-params) index)
+        )
+
+        (define/public (remove-required-param!! index)
+          (send this assert-valid)
+          (remove-param*!! (get-reqd-params-list*) index)
+        )
+
+        (define/public (insert-required-param!! index [short-desc #f])
+          (send this assert-valid)
+          (send (get-reqd-params-list*) insert-param*!! index #t short-desc)
+        )
+
+        (define/public (get-optional-params)
+          (send this assert-valid)
+          (send (get-opt-params-list*) get-items)
+        )
+
+        (define/public (can-remove-optional-param? index)
+          (send this assert-valid)
+          (can-remove-param*? (get-optional-params) index)
+        )
+
+        (define/public (remove-optional-param!! index)
+          (send this assert-valid)
+          (remove-param*!! (get-opt-params-list*) index)
+        )
+
+        (define/public (insert-optional-param!! index [short-desc #f])
+          (send this assert-valid)
+          (send (get-opt-params-list*) insert-param*!! index #f short-desc)
         )
 
         (define/public (get-body)
@@ -308,6 +344,28 @@
         (define/public (remove-from-body!! index)
           (send this assert-valid)
           (send (get-body-list*) remove!! index)
+        )
+
+        (define (remove-param*!! param-list index)
+          (define params (send param-list get-items))
+          (assert
+            (format "Cannot delete ~ath required or optional param" index)
+            (can-remove-param*? params index)
+          )
+          (send (list-ref params index) delete-and-invalidate*!!)
+          (send param-list remove*!! index #f)
+        )
+
+        (define (can-remove-param*? params index)
+          (all-references-are-descendants*? (list-ref params index))
+        )
+
+        (define (get-reqd-params-list*)
+          (get-handle! (send this get-id) "req_params_id")
+        )
+
+        (define (get-opt-params-list*)
+          (get-handle! (send this get-id) "opt_params_id")
         )
 
         (define (get-body-list*)
@@ -330,10 +388,7 @@
           (send this assert-valid)
           (and
             (super can-unassign?)
-            (andmap
-              (curryr descendant? this)
-              (get-references)
-            )
+            (all-references-are-descendants*? this)
           )
         )
 
@@ -350,7 +405,7 @@
           (get-references* (get-definition-id (send this get-id)))
         )
 
-        (define/public (get-node-children)
+        (define/public (get-children)
           (send this assert-valid)
           (list (get-expr))
         )
@@ -378,7 +433,7 @@
           (super delete-and-invalidate*!!)
         )
 
-        (define/public (get-node-children)
+        (define/public (get-children)
           (send this assert-valid)
           (get-items)
         )
@@ -392,6 +447,22 @@
         )
 
         (define/public (insert!! index)
+          (define car-loc (insert*!! index))
+          (create-unassigned!! car-loc)
+          (get-handle! car-loc)
+        )
+
+        (define/public (remove!! index)
+          (remove*!! index #t)
+        )
+
+        (define/public (insert-param*!! index required? short-desc)
+          (define car-loc (insert*!! index))
+          (create-param!! car-loc required? short-desc)
+          (get-handle! car-loc)
+        )
+
+        (define/public (insert*!! index)
           (send this assert-valid)
           (define list-header-id (send this get-id))
           (define insertion-point-id (nth-list-insertion-point* list-header-id index index))
@@ -400,27 +471,29 @@
           (define new-node-id
             (create-something!! "list_nodes" (list (list "owner_id" list-header-id) (list "car_id" BOGUS-ID) (list "cdr_id" old-cdr)))
           )
-          (define car-loc (new loc% [id new-node-id] [col "car_id"]))
-          (create-unassigned!! car-loc)
           ; We captured the original cdr_id, and moved it to the newly created node, so we can safely replace this node's cdr
           (set-loc-dangerous*!! insertion-point-loc new-node-id)
-          (get-handle! car-loc)
+          ; returns the car_id loc so that the caller can set the node
+          (new loc% [id new-node-id] [col "car_id"])
         )
 
-        (define/public (remove!! index)
+        (define/public (remove*!! index expect-unassigned?)
           (send this assert-valid)
           (define list-header-id (send this get-id))
           (define insertion-point-id (nth-list-insertion-point* list-header-id index index))
           (define id-to-delete (get-cell* insertion-point-id "cdr_id"))
           (assert (format "Index out of bounds: ~a" index) (not (= id-to-delete NIL-ID)))
           (define id-to-contract (get-cell* id-to-delete "cdr_id"))
-          (define unassigned-loc (new loc% [id id-to-delete] [col "car_id"]))
-          (define unassigned-handle (get-handle! unassigned-loc))
-          (assert
-            (format "You can only remove!! an unassigned: (~a, ~a):~a" (send unassigned-loc get-id) (send unassigned-loc get-col) (send unassigned-loc get-cell))
-            (is-a? unassigned-handle veme:db:unassigned%%)
+          (define loc-to-delete (new loc% [id id-to-delete] [col "car_id"]))
+          (when expect-unassigned?
+            (define unassigned-handle (get-handle! loc-to-delete))
+            (assert
+              (format "You can only remove!! an unassigned: (~a, ~a):~a" (send loc-to-delete get-id) (send loc-to-delete get-col) (send loc-to-delete get-cell))
+              (is-a? unassigned-handle veme:db:unassigned%%)
+            )
+            (send unassigned-handle delete-and-invalidate*!!)
           )
-          (send unassigned-handle delete-and-invalidate*!!)
+          (assert-bogus-id loc-to-delete)
           (delete-id*!! id-to-delete)
           (set-cell-dangerous*!! insertion-point-id "cdr_id" id-to-contract)
           (void)
@@ -457,56 +530,53 @@
     )
 
     (define db-param%
-      (class* db-element% (veme:db:param%%)
+      (class* db-describable-node% (veme:db:param%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-param this data)
         )
 
-        (define/override (invalidate!)
-          (hash-remove! handles* (send this get-id))
-          (super invalidate!)
+        (define/override (can-unassign?)
+          #f
         )
 
         (define/override (delete-and-invalidate*!!)
-          (delete-id*!! (send this get-id))
-          (send this invalidate!)
-        )
-
-        (define/public (get-pos)
-          (send this assert-valid)
-          (get-cell* (send this get-id) "position")
+          (define default (get-default))
+          (when default (send default delete-and-invalidate*!!))
+          (define id (send this get-id))
+          (delete-id*!! (get-param-ref-id id))
+          (delete-id*!! id)
+          (super delete-and-invalidate*!!)
         )
 
         (define/public (get-lambda)
           (send this assert-valid)
-          (get-handle! (send this get-id) "lambda_id")
+          (send this get-parent)
         )
 
-        (define/public (get-short-desc)
+        (define/public (get-default)
           (send this assert-valid)
-          (sql:// (get-cell* (send this get-id) "short_desc") #f)
+          (define id (send this get-id))
+          (if
+            (= NIL-ID (get-cell* id "default_id"))
+            #f
+            (get-handle! id "default_id")
+          )
         )
 
-        (define/public (get-long-desc)
+        (define/public (get-children)
           (send this assert-valid)
-          (sql:// (get-cell* (send this get-id) "long_desc") #f)
-        )
-
-        (define/public (set-short-desc!! new-desc)
-          (send this assert-valid)
-          (set-desc*!! 'short (send this get-id) new-desc)
-        )
-
-        (define/public (set-long-desc!! new-desc)
-          (send this assert-valid)
-          (set-desc*!! 'long (send this get-id) new-desc)
+          (define default (get-default))
+          (if default
+            (list default)
+            '()
+          )
         )
 
         (define/public (get-references)
           (send this assert-valid)
-          (get-references* (send this get-id))
+          (get-references* (get-param-ref-id (send this get-id)))
         )
 
         (super-new)
@@ -689,9 +759,15 @@
           (send visitor visit-reference this data)
         )
 
-        (super-new)
+        (define/public (get-referable)
+          (send this assert-valid)
+          (define referable-id (get-cell* (send this get-id) (get-referable-id-col)))
+          (get-handle! (get-cell* referable-id "parent_id") (get-cell* referable-id "parent_col"))
+        )
 
-        (abstract get-referable)
+        (abstract get-referable-id-col)
+
+        (super-new)
       )
     )
 
@@ -703,13 +779,12 @@
           (send visitor visit-param-ref this data)
         )
 
-        (define/override (get-referable)
-          (get-param)
+        (define/override (get-referable-id-col)
+          "param_id"
         )
 
         (define/public (get-param)
-          (send this assert-valid)
-          (get-handle! (send this get-id))
+          (send this get-referable)
         )
 
         (super-new)
@@ -724,14 +799,12 @@
           (send visitor visit-def-ref this data)
         )
 
-        (define/override (get-referable)
-          (get-def)
+        (define/override (get-referable-id-col)
+          "define_id"
         )
 
         (define/public (get-def)
-          (send this assert-valid)
-          (define define-id (get-cell* (send this get-id) "define_id"))
-          (get-handle! (get-cell* define-id "parent_id") (get-cell* define-id "parent_col"))
+          (send this get-referable)
         )
 
         (super-new)
@@ -746,10 +819,6 @@
           (send visitor visit-unassigned this data)
         )
 
-        (define/override (can-unassign?)
-          #t
-        )
-
         (define/override (unassign!!)
           this
         )
@@ -759,20 +828,30 @@
           (super delete-and-invalidate*!!)
         )
 
-        (define/public (assign-lambda!! arity [short-desc #f] [long-desc #f])
-          (assert (format "negative arity: ~a" arity) (non-negative? arity))
+        (define/public (assign-lambda!! [short-desc #f] [long-desc #f])
           (assign*!! (lambda (loc)
             (define lambda-id
-              (create-describable-child!! "lambdas" loc short-desc long-desc (list (list "arity" arity) (list "body_id" BOGUS-ID)))
+              (create-parent!! 
+                "lambdas"
+                loc
+                short-desc
+                long-desc
+                (list
+                  (list "req_params_id" BOGUS-ID)
+                  (list "opt_params_id" BOGUS-ID)
+                  (list "body_id" BOGUS-ID)
+                )
+              )
             )
+            (create-list-header!! (new loc% [id lambda-id] [col "req_params_id"]))
+            (create-list-header!! (new loc% [id lambda-id] [col "opt_params_id"]))
             (create-list-header!! (new loc% [id lambda-id] [col "body_id"]))
-            (build-list arity (curry create-param!! lambda-id))
           ))
         )
 
         (define/public (assign-def!! [short-desc #f] [long-desc #f])
           (assign*!! (lambda (loc)
-            (define define-id (create-describable-child!! "defines" loc short-desc long-desc (list (list "expr_id" BOGUS-ID))))
+            (define define-id (create-parent!! "defines" loc short-desc long-desc (list (list "expr_id" BOGUS-ID))))
             (create-unassigned!! (new loc% [id define-id] [col "expr_id"]))
             (create-something!! "definitions" (list (list "define_id" define-id)))
           ))
@@ -787,7 +866,7 @@
         )
 
         (define/public (assign-param-ref!! param-handle)
-          (assign-ref*!! (send param-handle get-id))
+          (assign-ref*!! (get-param-ref-id (send param-handle get-id)))
         )
 
         (define/public (assign-number!! value)
@@ -885,7 +964,7 @@
         )
       )
     )
-    (define ROOT-LOC (new loc% [id BOGUS-ID] [col #f]))
+    (define ROOT-LOC (new loc% [id NIL-ID] [col #f]))
 
     ; HELPER FUNCTIONS
 
@@ -913,61 +992,55 @@
     ; not purely functional, because of interning
     (define (get-handle! loc/id [col #f])
       (assert
-        (format "get-handle! cannot be called with a col if loc/id is a loc: ~a" loc/id)
-        (implies col (number? loc/id))
+        (format "the first arg of get-handle! must be a loc iff the second arg is #f: ~a ~a" loc/id col)
+        (not (xor col (number? loc/id)))
       )
       (get-handle*!
-        (cond
-          [col (list loc/id col)]
-          [(is-a? loc/id loc%) (send loc/id get-id&col)]
-          [else loc/id]
+        (if col
+          (list loc/id col)
+          (send loc/id get-id&col)
         )
       )
     )
 
-    (define (get-handle*! id&col/id)
+    (define (get-handle*! id&col)
       (or
-        (hash-ref handles* id&col/id #f)
-        (create-handle*! (if (cons? id&col/id) get-node-handle* get-param-handle*) id&col/id)
+        (hash-ref handles* id&col #f)
+        (create-handle*! id&col)
       )
     )
 
-    (define (create-handle*! handle-getter id&col/id)
-      (define handle (handle-getter id&col/id))
-      (hash-set! handles* id&col/id handle)
-      handle
-    )
-
-    (define (get-param-handle* id)
-      (new db-param% [id id])
-    )
-
-    (define (get-node-handle* id&col)
+    (define (create-handle*! id&col)
       (define loc (id&col->loc id&col))
       (define id (send loc get-cell))
       (define table (get-table id))
-      (case table
-        [("lambdas") (new db-lambda% [loc loc])]
-        [("defines") (new db-def% [loc loc])]
-        [("list_headers") (new db-list% [loc loc])]
-        [("params") (new db-param-ref% [loc loc])]
-        [("definitions") (new db-def-ref% [loc loc])]
-        [("atoms")
-          (define type (string->symbol (get-cell* id "type")))
-          (case type
-            [(number) (new db-number% [loc loc])]
-            [(character) (new db-char% [loc loc])]
-            [(string) (new db-string% [loc loc])]
-            [(boolean) (new db-bool% [loc loc])]
-            [(symbol) (new db-symbol% [loc loc])]
-            [(keyword) (new db-keyword% [loc loc])]
-            [else (error 'get-node-handle* "Invalid atom type ~a for id ~a" type id)]
-          )
-        ]
-        [("legacies") (new db-legacy% [loc loc])]
-        [("unassigned") (new db-unassigned% [loc loc])]
-        [else (error 'create-node-handle*! "cannot create a handle for loc ~a of invalid type ~a" loc table)]
+      (define handle
+        (case table
+          [("lambdas") (new db-lambda% [loc loc])]
+          [("defines") (new db-def% [loc loc])]
+          [("list_headers") (new db-list% [loc loc])]
+          [("params") (new db-param% [loc loc])]
+          [("param_refs") (new db-param-ref% [loc loc])]
+          [("definitions") (new db-def-ref% [loc loc])]
+          [("atoms")
+            (define type (string->symbol (get-cell* id "type")))
+            (case type
+              [(number) (new db-number% [loc loc])]
+              [(character) (new db-char% [loc loc])]
+              [(string) (new db-string% [loc loc])]
+              [(boolean) (new db-bool% [loc loc])]
+              [(symbol) (new db-symbol% [loc loc])]
+              [(keyword) (new db-keyword% [loc loc])]
+              [else (error 'create-handle*! "Invalid atom type ~a for id ~a" type id)]
+            )
+          ]
+          [("legacies") (new db-legacy% [loc loc])]
+          [("unassigned") (new db-unassigned% [loc loc])]
+          [else (error 'create-handle*! "cannot create a handle for loc ~a of invalid type ~a" loc table)]
+        )
       )
+      (hash-set! handles* id&col handle)
+      handle
     )
 
     (define (create-something-sql-string* table col-val-assocs)
@@ -990,14 +1063,7 @@
     ; loc must be empty (i.e. BOGUS-ID) before calling this
     (define (create-child!! table loc col-value-assocs)
       (assert-bogus-id loc)
-      (define id
-        (create-something!! table
-          (append
-            (list (list "parent_id" (send loc get-id)) (list "parent_col" (send loc get-col)))
-            col-value-assocs
-          )
-        )
-      )
+      (define id (create-something!! table col-value-assocs))
       (set-id!! loc id)
       id
     )
@@ -1014,26 +1080,33 @@
       (create-child!! table loc expanded-assocs)
     )
 
+    ; loc must be empty (i.e. BOGUS-ID) before calling this
+    ; If either desc is #f, it'll be stored as sql-null
+    (define (create-parent!! table loc short-desc long-desc col-value-assocs)
+      (define expanded-assocs
+        (append
+          (list (list "parent_id" (send loc get-id)) (list "parent_col" (send loc get-col)))
+          col-value-assocs
+        )
+      )
+      (create-describable-child!! table loc short-desc long-desc expanded-assocs)
+    )
+
     (define (create-unassigned!! loc)
       (create-describable-child!! "unassigned" loc #f #f '())
     )
 
     (define (create-list-header!! loc [short-desc #f] [long-desc #f])
-      (create-describable-child!! "list_headers" loc short-desc long-desc (list (list "cdr_id" NIL-ID)))
+      (create-parent!! "list_headers" loc short-desc long-desc (list (list "cdr_id" NIL-ID)))
     )
 
-    (define (create-param!! lambda-id position)
-      (define arity (get-cell* lambda-id "arity"))
-      (assert
-        (format "attempt to make param with position ~a for lambda ~a with arity ~a" position lambda-id arity)
-        (and (non-negative? position) (< position arity))
+    (define (create-param!! loc required? [short-desc #f] [long-desc #f])
+      (define param-id
+        (create-parent!! "params" loc short-desc long-desc (list (list "default_id" (if required? NIL-ID BOGUS-ID))))
       )
-      (create-something!! "params" (list
-        (list "short_desc" sql-null)
-        (list "long_desc" sql-null)
-        (list "lambda_id" lambda-id)
-        (list "position" position)
-      ))
+      (unless required? (create-unassigned!! (new loc% [id param-id] [col "default_id"])))
+      (create-something!! "param_refs" (list (list "param_id" param-id)))
+      param-id
     )
 
     (define (assert-bogus-id loc)
@@ -1081,12 +1154,27 @@
       new-ref-count
     )
 
+    (define (get-param-ref-id param-id)
+      (query-value db* "SELECT id FROM param_refs WHERE param_id = ?1" param-id)
+    )
+
     (define (get-definition-id define-id)
       (query-value db* "SELECT id FROM definitions WHERE define_id = ?1" define-id)
     )
 
     (define (get-references* id)
-      (append (get-references-of-type* "list_nodes" "car_id" id) (get-references-of-type* "defines" "expr_id" id))
+      (append
+        (get-references-of-type* "list_nodes" "car_id" id)
+        (get-references-of-type* "defines" "expr_id" id)
+        (get-references-of-type* "params" "default_id" id)
+      )
+    )
+
+    (define (get-referables-of-type* table)
+      (map
+        (lambda (v) (new loc% [id (vector-ref v 0)] [col (vector-ref v 1)]))
+        (query-rows db* (format "SELECT parent_id, parent_col FROM ~a" table))
+      )
     )
 
     (define (get-references-of-type* table col id)
@@ -1094,15 +1182,6 @@
         (curryr get-handle! col)
         (query-list db* (format "SELECT id FROM ~a WHERE ~a = ?1" table col) id)
       )
-    )
-
-    (define (get-param-id lambda-id position)
-      (define arity (get-cell* lambda-id "arity"))
-      (assert
-        (format "attempt to get param with position ~a for lambda ~a with arity ~a" position lambda-id arity)
-        (and (non-negative? position) (< position arity))
-      )
-      (query-maybe-value db* "SELECT id FROM params WHERE lambda_id = ?1 AND position = ?2" lambda-id position)
     )
 
     (define (set-desc*!! short/long id new-desc)
@@ -1115,11 +1194,18 @@
         (implies new-desc (string? new-desc))
       )
       (define col (format "~a_desc" (symbol->string short/long)))
-      (set-cell-dangerous*!! id col new-desc)
+      (set-cell-dangerous*!! id col (or-sql-null new-desc))
     )
 
     (define (delete-id*!! id)
       (q!! query-exec "DELETE FROM ~a" id)
+    )
+
+    (define (all-references-are-descendants*? referable)
+      (andmap
+        (curryr descendant? referable)
+        (send referable get-references)
+      )
     )
 
     (define (descendant? child subroot)
@@ -1153,7 +1239,7 @@
       (define first-id
         (create-something!! "list_headers"
           (list
-            (list "parent_id" BOGUS-ID)
+            (list "parent_id" NIL-ID)
             (list "parent_col" sql-null)
             (list "short_desc" "Main Program")
             (list "long_desc" "")

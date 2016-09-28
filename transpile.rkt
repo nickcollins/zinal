@@ -35,7 +35,7 @@
 
   (define/override (visit-lambda l referables)
     (append
-      (list 'lambda (db-elems->scheme (send l get-params) referables))
+      (list 'lambda (db-elems->scheme (send l get-all-params) referables))
       (db-elems->scheme (send l get-body) referables)
     )
   )
@@ -53,7 +53,12 @@
   )
 
   (define/override (visit-param p referables)
-    (get-unique-id p referables)
+    (define default (send p get-default))
+    (define param-identifier (get-unique-id p referables))
+    (if default
+      (list param-identifier (db-elem->scheme default referables))
+      param-identifier
+    )
   )
 
   (define/override (visit-legacy-link l referables)
