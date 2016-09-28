@@ -353,7 +353,18 @@
           (cond
             [(is-a? ent ent:unassigned%)
               (delete-slot*! slot)
-              (send this select!)
+              (define num-slots (length slots*))
+              (cond
+                [(< index num-slots)
+                  (send (send (get-slot* index) get-ent) select!)
+                ]
+                [(> num-slots 0)
+                  (send (send (get-slot* (sub1 num-slots)) get-ent) select!)
+                ]
+                [else
+                  (send this select!)
+                ]
+              )
               (refresh-all-text*!)
             ]
             [else
