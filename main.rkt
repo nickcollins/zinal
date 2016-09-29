@@ -24,6 +24,7 @@
   (cond
     [(send handle can-unassign?)
       (action)
+      #t
     ]
     [(send handle get-parent)
       (assert "can't unassign a non-referable, non-root handle" (is-a? handle veme:db:referable%%))
@@ -34,9 +35,11 @@
           (send handle get-short-desc)
         )
       )
+      #f
     ]
     [else
       (issue-warning "Cannot unassign" "You cannot unassign the root node")
+      #f
     ]
   )
 )
@@ -49,8 +52,12 @@
     (init db gui-model-manager)
 
     (define (spawn-entity*! slot db-handle gui-model-parent index)
+      (create-entity*! (parse-entity*! db-handle) slot db-handle gui-model-parent index)
+    )
+
+    (define (create-entity*! ent-class slot db-handle gui-model-parent index)
       (define new-ent
-        (new (parse-entity*! db-handle)
+        (new ent-class
           [slot slot]
           [subroot-handle db-handle]
           [subroot-model-parent gui-model-parent]
@@ -78,6 +85,13 @@
 
         (define/override (visit-lambda db-lambda-handle meh)
           ent:lambda%
+        )
+
+        (define/override (visit-param db-param-handle meh)
+          (if (send db-param-handle get-default)
+            ent:optional-param%
+            ent:required-param%
+          )
         )
 
         (define/override (visit-list db-list-handle meh)
@@ -193,10 +207,6 @@
 
         (init slot subroot-handle subroot-model-parent subroot-model-index)
 
-        (define/public (get-slot)
-          slot*
-        )
-
         (define/public (get-subroot-handle)
           subroot-handle*
         )
@@ -204,7 +214,7 @@
         ; Overrides of this method should call super for events they don't want to handle themselves
         ; Any events unhandled by subclasses, will be handled by the slot.
         (define/public (handle-event!! key-event)
-          (send (get-slot) handle-event!! key-event)
+          (send slot* handle-event!! key-event)
         )
 
         (define/public (get-event-handler)
@@ -322,10 +332,7 @@
           (send (get-basic-list-handle) get-children)
         )
 
-        (abstract db-insert!!)
-        (abstract db-remove!!)
-
-        (define (handle-slot-event*!! index key-event)
+        (define/public (handle-child-event!! index key-event)
           (case (send key-event get-key-code)
             [(#\a) (maybe-add-item*!! (add1 index))]
             [(#\A) (maybe-add-item*!!)]
@@ -338,11 +345,42 @@
           )
         )
 
+        (define/public (insert-at-index! new-handle ind)
+          (define before (take slots* ind))
+          (define after (drop slots* ind))
+          (define slot (new indexed-slot% [event-handler!! (lambda (i k) (handle-child-event!! i k))] [index ind]))
+          (spawn-entity*! slot new-handle (send this get-subroot-model) ind)
+          (set! slots* (append before (cons slot after)))
+          (when (cons? after) (reset-slot-indices*!))
+          slot
+        )
+
+        (define/public (delete-index! ind)
+          (define slot (get-slot* ind))
+          ; TODO just make sure this whole ent system doesn't last very long
+          ; (assert "Can only delete unassigned slots" (is-a? (send slot get-ent) ent:unassigned%))
+          (db-remove!! ind)
+          (define before (take slots* ind))
+          (define after (drop slots* (add1 ind)))
+          (set! slots* (append before after))
+          (when (cons? after) (reset-slot-indices*!))
+          (send (send this get-subroot-model) remove! ind)
+        )
+
+        (define/public (select-index! ind)
+          (select*! (get-slot* ind))
+        )
+
+        (abstract db-insert!!)
+        (abstract db-remove!!)
+
         (define (maybe-add-item*!! [index (length (get-item-handles))] [creator-getter #f])
           (maybe-create*!!
             (get-visible-referables-for-hypothetical-index* index)
             (thunk (db-insert!! index))
-            (compose1 select*! (curryr insert-slot*! index))
+            (lambda (new-handle)
+              (select*! (insert-at-index! new-handle index))
+            )
             creator-getter
           )
         )
@@ -352,7 +390,7 @@
           (define ent (send slot get-ent))
           (cond
             [(is-a? ent ent:unassigned%)
-              (delete-slot*! slot)
+              (delete-index! index)
               (define num-slots (length slots*))
               (cond
                 [(< index num-slots)
@@ -404,32 +442,11 @@
           (send (send slot get-ent) select!)
         )
 
-        (define (insert-slot*! new-handle ind)
-          (define before (take slots* ind))
-          (define after (drop slots* ind))
-          (define slot (new indexed-slot% [event-handler!! handle-slot-event*!!] [index ind]))
-          (spawn-entity*! slot new-handle (send this get-subroot-model) ind)
-          (set! slots* (append before (cons slot after)))
-          (when (cons? after) (reset-slot-indices*!))
-          slot
-        )
-
         ; Do not call this unless the db data for the old handle has already been deleted
         (define (respawn-slot*! slot new-handle)
           (define ind (send slot get-index))
           (send (send this get-subroot-model) remove! ind)
           (spawn-entity*! slot new-handle (send this get-subroot-model) ind)
-        )
-
-        (define (delete-slot*! slot)
-          (assert "Can only delete unassigned slots" (is-a? (send slot get-ent) ent:unassigned%))
-          (define ind (send slot get-index))
-          (db-remove!! ind)
-          (define before (take slots* ind))
-          (define after (drop slots* (add1 ind)))
-          (set! slots* (append before after))
-          (when (cons? after) (reset-slot-indices*!))
-          (send (send this get-subroot-model) remove! ind)
         )
 
         (define (get-slot* index)
@@ -449,7 +466,7 @@
           (build-list
             (vector-length handles)
             (lambda (i)
-              (insert-slot*! (vector-ref handles i) i)
+              (insert-at-index! (vector-ref handles i) i)
             )
           )
         )
@@ -469,7 +486,159 @@
     )
 
     (define ent:lambda%
-      (class ent:basic-list%
+      (class compound-ent%
+
+        (define body*%
+          (class ent:basic-list%
+
+            (define/override (get-open-text)
+              "("
+            )
+
+            (define/override (get-closed-text)
+              "(...)"
+            )
+
+            (define/override (db-insert!! index)
+              (send (send this get-subroot-handle) insert-into-body!! index)
+            )
+
+            (define/override (db-remove!! index)
+              (send (send this get-subroot-handle) remove-from-body!! index)
+            )
+
+            (define/override (get-item-handles)
+              (send (send this get-subroot-handle) get-body)
+            )
+
+            (super-new)
+          )
+        )
+
+        (define params*%
+          (class ent:basic-list% ; abstract
+
+            (define/override (get-open-text)
+              "("
+            )
+
+            (define/override (get-closed-text)
+              (get-params-text* (send this get-item-handles))
+            )
+
+            (define/override (handle-event!! key-event)
+              (case (send key-event get-key-code)
+                [(#\A) (maybe-add-param*!!)]
+                [(#\I) (maybe-add-param*!! 0)]
+              )
+            )
+
+            (define/override (handle-child-event!! index key-event)
+              (case (send key-event get-key-code)
+                [(#\a) (maybe-add-param*!! (add1 index))]
+                [(#\A) (maybe-add-param*!!)]
+                [(#\d) (maybe-remove-param*!! index)]
+                [(#\i) (maybe-add-param*!! index)]
+                [(#\I) (maybe-add-param*!! 0)]
+              )
+            )
+
+            (abstract get-required/optional-string)
+            (abstract can-remove-param?)
+
+            (define (maybe-add-param*!! [index (length (send this get-item-handles))])
+              (define short-desc
+                (get-text-from-user
+                  (format "Enter short descriptor for ~ath ~a param" index (get-required/optional-string))
+                  "A short descriptor, one or a few words, to identify this param"
+                  #:validate non-empty-string?
+                )
+              )
+              (when (and short-desc (non-empty-string? short-desc))
+                (define new-handle (send this db-insert!! index short-desc))
+                (send this insert-at-index! new-handle index)
+                (send this select-index! index)
+                (refresh-all-text*!)
+              )
+            )
+
+            (define (maybe-remove-param*!! index)
+              (when (can-remove-param? index)
+                (send this delete-index! index)
+                (define params (send this get-item-handles))
+                (define num-params (length params))
+                (cond
+                  [(< index num-params)
+                    (send this select-index! index)
+                  ]
+                  [(> num-params 0)
+                    (send this select-index! (sub1 num-params))
+                  ]
+                  [else
+                    (send this select!)
+                  ]
+                )
+                (refresh-all-text*!)
+              )
+            )
+
+            (super-new)
+          )
+        )
+
+        (define req-params*%
+          (class params*%
+
+            (define/override (db-insert!! index [short-desc #f])
+              (send (send this get-subroot-handle) insert-required-param!! index short-desc)
+            )
+
+            (define/override (db-remove!! index)
+              (send (send this get-subroot-handle) remove-required-param!! index)
+            )
+
+            (define/override (get-item-handles)
+              (send (send this get-subroot-handle) get-required-params)
+            )
+
+            (define/override (get-required/optional-string)
+              "required"
+            )
+
+            (define/override (can-remove-param? index)
+              (send (send this get-subroot-handle) can-remove-required-param? index)
+            )
+
+            (super-new)
+          )
+        )
+
+        (define opt-params*%
+          (class params*%
+
+            (define/override (db-insert!! index [short-desc #f])
+              (send (send this get-subroot-handle) insert-optional-param!! index short-desc)
+            )
+
+            (define/override (db-remove!! index)
+              (send (send this get-subroot-handle) remove-optional-param!! index)
+            )
+
+            (define/override (get-item-handles)
+              (send (send this get-subroot-handle) get-optional-params)
+            )
+
+            (define/override (get-required/optional-string)
+              "optional"
+            )
+
+            (define/override (can-remove-param? index)
+              (send (send this get-subroot-handle) can-remove-optional-param? index)
+            )
+
+            (super-new)
+          )
+        )
 
         (define/override (get-open-text)
           (get-open-lambda-text* (send this get-subroot-handle))
@@ -479,19 +648,116 @@
           (get-closed-lambda-text* (send this get-subroot-handle))
         )
 
-        (define/override (db-insert!! index)
-          (send (send this get-subroot-handle) insert-into-body!! index)
+        (define/override (refresh-text!)
+          (super refresh-text!)
+          (when req-params*
+            (send req-params* refresh-text!)
+          )
+          (when opt-params*
+            (send opt-params* refresh-text!)
+          )
+          (when body*
+            (send body* refresh-text!)
+          )
         )
 
-        (define/override (db-remove!! index)
-          (send (send this get-subroot-handle) remove-from-body!! index)
-        )
-
-        (define/override (get-item-handles)
-          (send (send this get-subroot-handle) get-body)
-        )
+        ; TODO super hacky
+        (define req-params* #f)
+        (define opt-params* #f)
+        (define body* #f)
 
         (super-new)
+
+        ; It's a bit hacky to have the component lists be their own ents, because subroot-handle is supposed
+        ; to be the root of the corresponding subtree, but the db api does not expose a root for the params
+        ; or body sublists. So we just give it the lambda handle, which is a bit of a lie.
+        (set! req-params*
+          (create-entity*! req-params*% (new slot% [event-handler!! NOOP]) (send this get-subroot-handle) (send this get-subroot-model) 0)
+        )
+        (set! opt-params*
+          (create-entity*! opt-params*% (new slot% [event-handler!! NOOP]) (send this get-subroot-handle) (send this get-subroot-model) 1)
+        )
+        (set! body*
+          (create-entity*! body*% (new slot% [event-handler!! NOOP]) (send this get-subroot-handle) (send this get-subroot-model) 2)
+        )
+      )
+    )
+
+    (define ent:required-param%
+      (class scalar-ent%
+        (super-new)
+      )
+    )
+
+    ; TODO this should obviously be deduped with ent:def%, but not going to now cuz the whole front end is going to rebuilt probably very
+    ; soon
+    (define ent:optional-param%
+      (class compound-ent%
+
+        (define/override (get-open-text)
+          (get-short-text* (send this get-subroot-handle))
+        )
+
+        (define/override (get-closed-text)
+          (get-open-text)
+        )
+
+        (define/override (refresh-text!)
+          (super refresh-text!)
+          (when default-slot*
+            (send (send default-slot* get-ent) refresh-text!)
+          )
+        )
+
+        (define (handle-default-event*!! key-event)
+          (case (send key-event get-key-code)
+            [(#\d) (unassign-default*!!)]
+            [(#\s) (maybe-replace-default*!!)]
+          )
+        )
+
+        (define (unassign-default*!!)
+          (define handle (get-default-handle*))
+          (if-unassignable handle (thunk
+            (send handle unassign!!)
+            (respawn-default*!)
+            (send (send default-slot* get-ent) select!)
+            (refresh-all-text*!)
+          ))
+        )
+
+        (define (maybe-replace-default*!!)
+          (maybe-replace*!!
+            (send (send this get-subroot-handle) get-visible-referables-underneath)
+            (send (send default-slot* get-ent) get-subroot-handle)
+            (lambda (new-handle)
+              (respawn-default*!)
+              (send (send default-slot* get-ent) select!)
+            )
+          )
+        )
+
+        (define (respawn-default*!)
+          (send (send this get-subroot-model) remove! 0)
+          (spawn-default*!)
+        )
+
+        (define (spawn-default*!)
+          (spawn-entity*! default-slot* (get-default-handle*) (send this get-subroot-model) 0)
+        )
+
+        (define (get-default-handle*)
+          (send (send this get-subroot-handle) get-default)
+        )
+
+        ; TODO super hacky
+        (define default-slot* #f)
+
+        (super-new)
+
+        (set! default-slot* (new slot% [event-handler!! handle-default-event*!!]))
+
+        (spawn-default*!)
       )
     )
 
@@ -650,39 +916,9 @@
       )
     )
 
-    (define ent:func-def%
-      (class ent:basic-list%
-
-        (define/override (get-open-text)
-          (get-text* get-open-lambda-text*)
-        )
-
-        (define/override (get-closed-text)
-          (get-text* get-closed-lambda-text*)
-        )
-
-        (define/override (get-basic-list-handle)
-          (send (send this get-subroot-handle) get-expr)
-        )
-
-        (define/override (db-insert!! index)
-          (send (get-basic-list-handle) insert-into-body!! index)
-        )
-
-        (define/override (db-remove!! index)
-          (send (get-basic-list-handle) remove-from-body!! index)
-        )
-
-        (define (get-text* lambda-text-getter)
-          (format "~a ~a"
-            (get-short-text* (send this get-subroot-handle))
-            (lambda-text-getter (get-basic-list-handle))
-          )
-        )
-
-        (super-new)
-      )
-    )
+    ; TODO we proved the point we can do this, no real point in making effort to support it until
+    ; we overhaul the gui and ent frameworks
+    (define ent:func-def% ent:def%)
 
     (define ent:root%
       (class ent:list%
@@ -729,8 +965,20 @@
 
     ; HELPER FUNCTIONS
 
-    (define (get-params-text* db-lambda-handle)
-      (string-join (map (curryr get-short-desc-or* "¯\\_(ツ)_/¯") (send db-lambda-handle get-all-params)) ", ")
+    (define (get-params-text* params)
+      (string-join
+        (map
+          (lambda (p)
+            (define desc (get-short-desc-or* p "¯\\_(ツ)_/¯"))
+            (if (send p get-default)
+              (format "[~a]" desc)
+              desc
+            )
+          )
+          params
+        )
+        ", "
+      )
     )
 
     (define (get-open-lambda-text* lambda-handle)
@@ -769,7 +1017,15 @@
         (define/override (visit-lambda l meh)
           (if in-list?
             (format "λ~a" (get-short-desc-or* l "..."))
-            (format "λ ~a (~a)" (get-short-desc-or* l "") (get-params-text* l))
+            (format "λ ~a (~a)" (get-short-desc-or* l "") (get-params-text* (send l get-all-params)))
+          )
+        )
+
+        (define/override (visit-param p meh)
+          (define basic (get-short-desc-or* p "¯\\_(ツ)_/¯"))
+          (if (send p get-default)
+            (format "[~a]" basic)
+            basic
           )
         )
 
@@ -1208,10 +1464,10 @@
     (get-text-from-user
       "Enter the new definition's short descriptor"
       "A short descriptor, one or a few words, to identify this variable"
-      #:validate (const #t)
+      #:validate non-empty-string?
     )
   )
-  (if result
+  (if (and result (non-empty-string? result))
     (lambda (unassigned) (send unassigned assign-def!! result))
     #f
   )

@@ -831,7 +831,7 @@
         (define/public (assign-lambda!! [short-desc #f] [long-desc #f])
           (assign*!! (lambda (loc)
             (define lambda-id
-              (create-parent!! 
+              (create-parent!!
                 "lambdas"
                 loc
                 short-desc
