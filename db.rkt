@@ -102,25 +102,36 @@
   get-val ; ()
 ))
 
-; TODO current update documentation
 (define veme:db:lambda%% (interface (veme:db:parent-node%% veme:db:describable%%)
 
+  ; Returns all params, with the required first
   get-all-params ; ()
 
   get-required-params ; ()
 
+  ; Returns #f if the specified param cannot be deleted. A required param can't be deleted
+  ; if there are any references to it
   can-remove-required-param? ; (index)
 
+  ; Deletes the specified param, or throws an exception if can-remove-required-param? would
+  ; return #f
   remove-required-param!! ; (index)
 
+  ; short-desc is #f by default. If #f, the param will not have a short descriptor
   insert-required-param!! ; (index [short-desc])
 
   get-optional-params ; ()
 
+  ; Returns #f if the specified param cannot be deleted. An optional param can't be deleted
+  ; if there are any references to it that occur outside its own subtree
   can-remove-optional-param? ; (index)
 
+  ; Deletes the specified param, or throws an exception if can-remove-optional-param? would
+  ; return #f
   remove-optional-param!! ; (index)
 
+  ; short-desc is #f by default. If #f, the param will not have a short descriptor.
+  ; The newly created param's default value is unassigned
   insert-optional-param!! ; (index [short-desc])
 
   ; Returns a list of veme:db:node%% handles representing the statements/expressions
