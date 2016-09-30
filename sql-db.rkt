@@ -276,7 +276,8 @@
 
         (define/override (delete-and-invalidate*!!)
           (send (get-body-list*) delete-and-invalidate*!!)
-          (for-each (lambda (p) (send p delete-and-invalidate*!!)) (get-all-params))
+          (send (get-opt-params-list*) delete-and-invalidate*!!)
+          (send (get-reqd-params-list*) delete-and-invalidate*!!)
           (delete-id*!! (send this get-id))
           (super delete-and-invalidate*!!)
         )
