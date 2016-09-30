@@ -4,6 +4,46 @@
 (provide (all-defined-out))
 
 ; TODO write more complete/thorough/detailed comments
+; VISIBILITY RULES:
+; All referables are visible to any reference except:
+;   1) If the referable is out of scope. A referable that's obviously in scope, is, well,
+;      in scope. I.e., the params of any parent/ancestor lambda are visible, any parent/ancestor
+;      is visible, and all "older siblings" of the reference itself or any parent/ancestor are
+;      visible.
+;
+;      Somewhat less intuitively, some "younger siblings" of the reference's parent/ancestors
+;      are visible. If a parent/ancestor A is a function definition (i.e., a define whose
+;      expr is a lambda), then an unbroken sequence of function-definitions immediately
+;      following A are also visible to R. That is, if A is the Nth sibling, then if siblings
+;      N+1, N+2, ... N+M are all function definitions, then they are all visible to R. But if
+;      sibling N+M is not a function definition, then siblings younger than N+M are not visible
+;      even if they are function definitions.
+;
+;      Somewhat less unintuitively, here's an example:
+;      (define vis 0)
+;      (1 2 R1)
+;      (do-something
+;        (lambda (p1)
+;          (define thing R2)
+;          (define f1 (lambda () R3))
+;          (define f2 (lambda () R4))
+;          (define stuff 0)
+;          (define f3 (lambda () R5))
+;        )
+;      )
+;      (def invis (lambda () 0))
+;
+;      vis is, of course, visible to all the references, and invis is invisible to all of them.
+;      p1 and thing are visible only to R2-5 (yes, thing is visible to R2, sorry). f1 and f2
+;      are visible only to R3-4. It's obvious that f1 is visible to both, but it's only due to
+;      the "younger sibling" rule that f2 is visible to R3. As you can see, this rule allows
+;      mutually recursing functions without allowing any other weird stuff. f3 is only visible
+;      to R5. If the lines defining stuff and f3 were swapped, then f3 would be visible to
+;      R3-4. Unlike in scheme, the stuff definition breaks the sequence of visible defs because
+;      its evaluation could hypothetically invoke the function that depends on it, creating
+;      a dependency cycle that does not necessarily involve intentional recursion.
+;      If "do-something" was instead replaced by "define blah", then invis would be visible to
+;      R2-5.
 (define veme:db%% (interface ()
 
   ; Returns a veme:db:list%% handle for the root node
@@ -49,10 +89,12 @@
 
   ; Returns a list of all veme:db:referable%% that are visible underneath this node.
   ; Included in the list is this node (if it's a referable) and its params (if it's a lambda).
+  ; See the comment about visibility rules above to see what is and isn't visible.
   get-visible-referables-underneath ; ()
 
   ; Returns a list of all veme:db:referable%% that are visible after this node.
   ; Included in the list is this node (if it's a referable) but not its params (if it's a lambda).
+  ; See the comment about visibility rules above to see what is and isn't visible.
   get-visible-referables-after ; ()
 
   ; Returns true iff unassign!! can be called without throwing an exception. Returns #f if this
@@ -91,6 +133,18 @@
   ; Goto-declaration, effectively.
   ; Returns the unique veme:db:referable%% that this refers to
   get-referable ; ()
+
+  ; TODO we should probably move visibility considerations out of the db. Computing visibility
+  ; doesn't require any special knowledge from the db, and the db doesn't use this knowledge in
+  ; any way, so it's not really the db's responsibility
+
+  ; It is legal for the database for a reference's referable to not be visible to it. The code,
+  ; of course, cannot be compiled, but it is useful to allow broken references so that small,
+  ; incremental changes to the code (such as reordering things, or changing an access modifier)
+  ; do not become illegal. This method returns #t if the reference is valid, and #f if it is not
+  ; valid due to lack of visibility.
+  ; See the comment about visibility rules above to see what is and isn't visible.
+  is-referable-visible? ; ()
 ))
 
 ; Any node which has no children and is self-descriptive; literals, essentially.

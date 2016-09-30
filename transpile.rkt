@@ -30,7 +30,12 @@
   )
 
   (define/override (visit-reference r referables)
-    (get-unique-id (send r get-referable) referables)
+    (define referable (send r get-referable))
+    (assert
+      (format "Can't compile reference to ~a because it's not visible" (send referable get-short-desc))
+      (send r is-referable-visible?)
+    )
+    (get-unique-id referable referables)
   )
 
   (define/override (visit-lambda l referables)

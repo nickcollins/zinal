@@ -176,11 +176,13 @@
         )
 
         (define/public (get-visible-referables-underneath)
-          (get-visible-referables*)
+          (send this assert-valid)
+          (get-visible-referables* this)
         )
 
         (define/public (get-visible-referables-after)
-          (get-visible-referables*)
+          (send this assert-valid)
+          (get-visible-referables* this)
         )
 
         (define/public (can-unassign?)
@@ -201,27 +203,6 @@
         (define/public (get-loc)
           (send this assert-valid)
           loc*
-        )
-
-        (define (get-visible-referables*)
-          (send this assert-valid)
-          (define parent (get-parent))
-          (if parent
-            (append
-              (get-visible-sibling-referables* (send parent get-children))
-              (send parent get-visible-referables-after)
-            )
-            ; We assume root is not a referable
-            '()
-          )
-        )
-
-        (define (get-visible-sibling-referables* siblings)
-          (define preceding (takef siblings (lambda (s) (not (send s equals? this)))))
-          (filter
-            (curryr is-a? veme:db:referable%%)
-            (cons this preceding)
-          )
         )
 
         (define loc* loc)
@@ -766,6 +747,11 @@
           (get-handle! (get-cell* referable-id "parent_id") (get-cell* referable-id "parent_col"))
         )
 
+        (define/public (is-referable-visible?)
+          (send this assert-valid)
+          (findf (lambda (r) (send r equals? this)) (send this get-visible-referables-after))
+        )
+
         (abstract get-referable-id-col)
 
         (super-new)
@@ -1200,6 +1186,44 @@
 
     (define (delete-id*!! id)
       (q!! query-exec "DELETE FROM ~a" id)
+    )
+
+    (define (get-visible-referables* location-node [check-younger-siblings? #f])
+      (define parent (send location-node get-parent))
+      (if parent
+        (append
+          (get-visible-sibling-referables* location-node (send parent get-children) check-younger-siblings?)
+          (get-visible-referables* parent #t)
+        )
+        ; We assume root is not a referable
+        '()
+      )
+    )
+
+    (define (get-visible-sibling-referables* location-node siblings check-younger-siblings?)
+      (define (not-location-node? sib)
+        (not (send sib equals? location-node))
+      )
+      (define older (takef siblings not-location-node?))
+      (append
+        (filter
+          (curryr is-a? veme:db:referable%%)
+          (cons location-node older)
+        )
+        (cond
+          [(and check-younger-siblings? (function-definition? location-node))
+            (define younger (cdr (dropf siblings not-location-node?)))
+            (takef younger function-definition?)
+          ]
+          [else
+            '()
+          ]
+        )
+      )
+    )
+
+    (define (function-definition? handle)
+      (and (is-a? handle veme:db:def%%) (is-a? (send handle get-expr) veme:db:lambda%%))
     )
 
     (define (all-references-are-descendants*? referable)
