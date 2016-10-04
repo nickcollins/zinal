@@ -749,7 +749,8 @@
 
         (define/public (is-referable-visible?)
           (send this assert-valid)
-          (findf (lambda (r) (send r equals? this)) (send this get-visible-referables-after))
+          (define referable (get-referable))
+          (findf (lambda (r) (send r equals? referable)) (send this get-visible-referables-after))
         )
 
         (abstract get-referable-id-col)
