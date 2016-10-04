@@ -5,7 +5,7 @@
 (require "misc.rkt")
 (require "db.rkt")
 
-(provide (prefix-out veme: sql-db%))
+(provide (prefix-out zinal: sql-db%))
 
 ; All indexed db queries must check that id is real first. higher-level stuff need not check directly
 (define-syntax-rule (assert-real-id id)
@@ -51,7 +51,7 @@
 (define NIL-ID 0)
 
 (define sql-db%
-  (class* object% (veme:db%%)
+  (class* object% (zinal:db%%)
 
     (init filename)
 
@@ -70,7 +70,7 @@
     ; DB ELEMENT IMPLEMENTATION CLASSES
 
     (define db-element%
-      (class* object% (veme:db:element%%)
+      (class* object% (zinal:db:element%%)
 
         (init id)
         (assert-real-id id)
@@ -121,7 +121,7 @@
     )
 
     (define db-node%
-      (class* db-element% (veme:db:node%%) ; abstract
+      (class* db-element% (zinal:db:node%%) ; abstract
 
         (init loc)
 
@@ -214,7 +214,7 @@
     ; TODO we should probably do mixins for this but not sure i want to have much OOP functionality
     ; before boostrapping
     (define db-describable-node%
-      (class* db-node% (veme:db:describable%%)
+      (class* db-node% (zinal:db:describable%%)
         (define/public (get-short-desc)
           (send this assert-valid)
           (sql:// (get-cell* (send this get-id) "short_desc") #f)
@@ -240,7 +240,7 @@
     )
 
     (define db-lambda%
-      (class* db-describable-node% (veme:db:lambda%%)
+      (class* db-describable-node% (zinal:db:lambda%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -359,7 +359,7 @@
     )
 
     (define db-def%
-      (class* db-describable-node% (veme:db:def%%)
+      (class* db-describable-node% (zinal:db:def%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -402,7 +402,7 @@
     )
 
     (define db-list%
-      (class* db-describable-node% (veme:db:list%%)
+      (class* db-describable-node% (zinal:db:list%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -471,7 +471,7 @@
             (define unassigned-handle (get-handle! loc-to-delete))
             (assert
               (format "You can only remove!! an unassigned: (~a, ~a):~a" (send loc-to-delete get-id) (send loc-to-delete get-col) (send loc-to-delete get-cell))
-              (is-a? unassigned-handle veme:db:unassigned%%)
+              (is-a? unassigned-handle zinal:db:unassigned%%)
             )
             (send unassigned-handle delete-and-invalidate*!!)
           )
@@ -512,7 +512,7 @@
     )
 
     (define db-param%
-      (class* db-describable-node% (veme:db:param%%)
+      (class* db-describable-node% (zinal:db:param%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -566,7 +566,7 @@
     )
 
     (define db-atom%
-      (class* db-node% (veme:db:atom%%) ; abstract
+      (class* db-node% (zinal:db:atom%%) ; abstract
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -595,7 +595,7 @@
     )
 
     (define db-number%
-      (class* db-atom% (veme:db:number%%)
+      (class* db-atom% (zinal:db:number%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -615,7 +615,7 @@
     )
 
     (define db-char%
-      (class* db-atom% (veme:db:char%%)
+      (class* db-atom% (zinal:db:char%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -637,7 +637,7 @@
     )
 
     (define db-string%
-      (class* db-atom% (veme:db:string%%)
+      (class* db-atom% (zinal:db:string%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -653,7 +653,7 @@
     )
 
     (define db-bool%
-      (class* db-atom% (veme:db:bool%%)
+      (class* db-atom% (zinal:db:bool%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -674,7 +674,7 @@
     )
 
     (define db-symbol%
-      (class* db-atom% (veme:db:symbol%%)
+      (class* db-atom% (zinal:db:symbol%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -690,7 +690,7 @@
     )
 
     (define db-keyword%
-      (class* db-atom% (veme:db:keyword%%)
+      (class* db-atom% (zinal:db:keyword%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -706,7 +706,7 @@
     )
 
     (define db-legacy%
-      (class* db-node% (veme:db:legacy-link%%)
+      (class* db-node% (zinal:db:legacy-link%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -734,7 +734,7 @@
     )
 
     (define db-reference%
-      (class* db-node% (veme:db:reference%%) ; abstract
+      (class* db-node% (zinal:db:reference%%) ; abstract
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -760,7 +760,7 @@
     )
 
     (define db-param-ref%
-      (class* db-reference% (veme:db:param-ref%%)
+      (class* db-reference% (zinal:db:param-ref%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -780,7 +780,7 @@
     )
 
     (define db-def-ref%
-      (class* db-reference% (veme:db:def-ref%%)
+      (class* db-reference% (zinal:db:def-ref%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -800,7 +800,7 @@
     )
 
     (define db-unassigned%
-      (class* db-describable-node% (veme:db:unassigned%%)
+      (class* db-describable-node% (zinal:db:unassigned%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1208,7 +1208,7 @@
       (define older (takef siblings not-location-node?))
       (append
         (filter
-          (curryr is-a? veme:db:referable%%)
+          (curryr is-a? zinal:db:referable%%)
           (cons location-node older)
         )
         (cond
@@ -1224,7 +1224,7 @@
     )
 
     (define (function-definition? handle)
-      (and (is-a? handle veme:db:def%%) (is-a? (send handle get-expr) veme:db:lambda%%))
+      (and (is-a? handle zinal:db:def%%) (is-a? (send handle get-expr) zinal:db:lambda%%))
     )
 
     (define (all-references-are-descendants*? referable)

@@ -44,27 +44,27 @@
 ;      a dependency cycle that does not necessarily involve intentional recursion.
 ;      If "do-something" was instead replaced by "define blah", then invis would be visible to
 ;      R2-5.
-(define veme:db%% (interface ()
+(define zinal:db%% (interface ()
 
-  ; Returns a veme:db:list%% handle for the root node
+  ; Returns a zinal:db:list%% handle for the root node
   get-root ; ()
 
-  ; Returns a list of all veme:db:referable%% in this db
+  ; Returns a list of all zinal:db:referable%% in this db
   get-referables ; ()
 ))
 
-(define veme:db:element%% (interface ()
+(define zinal:db:element%% (interface ()
 
-  ; returns the veme:db%%
+  ; returns the zinal:db%%
   get-db ; ()
 
-  accept ; (veme:db:element-visitor% [data])
+  accept ; (zinal:db:element-visitor% [data])
 
   ; Returns #t if and only if this handle and the other handle both refer to the same element
-  equals? ; (veme:db:element%%)
+  equals? ; (zinal:db:element%%)
 ))
 
-(define veme:db:describable%% (interface (veme:db:element%%)
+(define zinal:db:describable%% (interface (zinal:db:element%%)
 
   ; A short string description of the element, that should be much less than a line long.
   ; Comparable to an identifier, but only used by humans; logic should never use this value.
@@ -82,17 +82,17 @@
   set-long-desc!! ; (string OR #f)
 ))
 
-(define veme:db:node%% (interface (veme:db:element%%)
+(define zinal:db:node%% (interface (zinal:db:element%%)
 
-  ; Returns a veme:db:node%% handle to the parent of this node. Returns #f for the root node.
+  ; Returns a zinal:db:node%% handle to the parent of this node. Returns #f for the root node.
   get-parent ; ()
 
-  ; Returns a list of all veme:db:referable%% that are visible underneath this node.
+  ; Returns a list of all zinal:db:referable%% that are visible underneath this node.
   ; Included in the list is this node (if it's a referable) and its params (if it's a lambda).
   ; See the comment about visibility rules above to see what is and isn't visible.
   get-visible-referables-underneath ; ()
 
-  ; Returns a list of all veme:db:referable%% that are visible after this node.
+  ; Returns a list of all zinal:db:referable%% that are visible after this node.
   ; Included in the list is this node (if it's a referable) but not its params (if it's a lambda).
   ; See the comment about visibility rules above to see what is and isn't visible.
   get-visible-referables-after ; ()
@@ -104,34 +104,34 @@
   can-unassign? ; ()
 
   ; Deletes all the data associated with this node and any children it may have, converting
-  ; this node to a veme:db:unassigned%% . This handle will be invalidated and cannot be used
-  ; again. Returns a handle to the new veme:db:unassigned%% .
-  ; If this is called on a veme:db:unassigned%%, nothing happens, and this is returned.
+  ; this node to a zinal:db:unassigned%% . This handle will be invalidated and cannot be used
+  ; again. Returns a handle to the new zinal:db:unassigned%% .
+  ; If this is called on a zinal:db:unassigned%%, nothing happens, and this is returned.
   ; If this is called when can-unassign? would return #f, then an exception is thrown.
   unassign!! ; ()
 ))
 
-(define veme:db:parent-node%% (interface (veme:db:node%%)
+(define zinal:db:parent-node%% (interface (zinal:db:node%%)
 
-  ; Returns a list of veme:db:node%% handles to all children of this non-leaf node. The children
+  ; Returns a list of zinal:db:node%% handles to all children of this non-leaf node. The children
   ; are returned in "lexical" order, so if child B depends on child A, A must appear before B in
   ; the returned list
   get-children ; ()
 ))
 
-; Any element which can be pointed to by some type of veme:db:reference%%
-(define veme:db:referable%% (interface (veme:db:element%% veme:db:describable%%)
+; Any element which can be pointed to by some type of zinal:db:reference%%
+(define zinal:db:referable%% (interface (zinal:db:element%% zinal:db:describable%%)
 
   ; Find-usages, effectively.
-  ; Returns a list of all veme:db:reference%% that refer to this referable
+  ; Returns a list of all zinal:db:reference%% that refer to this referable
   get-references ; ()
 ))
 
-; Any element which refers to some veme:db:referable%%
-(define veme:db:reference%% (interface (veme:db:node%%)
+; Any element which refers to some zinal:db:referable%%
+(define zinal:db:reference%% (interface (zinal:db:node%%)
 
   ; Goto-declaration, effectively.
-  ; Returns the unique veme:db:referable%% that this refers to
+  ; Returns the unique zinal:db:referable%% that this refers to
   get-referable ; ()
 
   ; TODO we should probably move visibility considerations out of the db. Computing visibility
@@ -149,14 +149,14 @@
 
 ; Any node which has no children and is self-descriptive; literals, essentially.
 ; (A list literal is really a list of literals)
-(define veme:db:atom%% (interface (veme:db:node%%)
+(define zinal:db:atom%% (interface (zinal:db:node%%)
 
   ; Returns the literal value represented by this node,
   ; as a scheme value of the proper type
   get-val ; ()
 ))
 
-(define veme:db:lambda%% (interface (veme:db:parent-node%% veme:db:describable%%)
+(define zinal:db:lambda%% (interface (zinal:db:parent-node%% zinal:db:describable%%)
 
   ; Returns all params, with the required first
   get-all-params ; ()
@@ -188,83 +188,83 @@
   ; The newly created param's default value is unassigned
   insert-optional-param!! ; (index [short-desc])
 
-  ; Returns a list of veme:db:node%% handles representing the statements/expressions
+  ; Returns a list of zinal:db:node%% handles representing the statements/expressions
   ; constituting the lambda's body.
   get-body ; ()
 
   ; Inserts a new unassigned node into the lambda body at the specified index.
   ; E.g. if the lambda is (lambda (x y) (define a (+ x y)) (define b (* x y)) (- a b)),
   ; then (insert-into-body!! 1) creates an unassigned node after the definition of a .
-  ; Returns a veme:db:unassigned%% handle to the new unassigned node
+  ; Returns a zinal:db:unassigned%% handle to the new unassigned node
   insert-into-body!! ; (non-negative-integer)
 
-  ; Deletes the nth expr (which must be a veme:db:unassigned%%) of the lambda's body,
+  ; Deletes the nth expr (which must be a zinal:db:unassigned%%) of the lambda's body,
   ; and shifts all latter exprs in the body down by one index.
   ; E.g. if the lambda is (lambda (x y) (define a (+ x y)) (define b (* x y)) <?>),
   ; then (remove-from-body!! 2) deletes the <?>.
   ; Any handles associated with the deleted expr are now invalid and cannot be used.
   ; No meaningful return value. If the node at the specified index isn't a
-  ; veme:db:unassigned%% , an exception is thrown.
+  ; zinal:db:unassigned%% , an exception is thrown.
   remove-from-body!! ; (non-negative-integer)
 ))
 
-(define veme:db:number%% (interface (veme:db:atom%%)))
-(define veme:db:char%% (interface (veme:db:atom%%)))
-(define veme:db:string%% (interface (veme:db:atom%%)))
-(define veme:db:bool%% (interface (veme:db:atom%%)))
-(define veme:db:symbol%% (interface (veme:db:atom%%)))
-(define veme:db:keyword%% (interface (veme:db:atom%%)))
+(define zinal:db:number%% (interface (zinal:db:atom%%)))
+(define zinal:db:char%% (interface (zinal:db:atom%%)))
+(define zinal:db:string%% (interface (zinal:db:atom%%)))
+(define zinal:db:bool%% (interface (zinal:db:atom%%)))
+(define zinal:db:symbol%% (interface (zinal:db:atom%%)))
+(define zinal:db:keyword%% (interface (zinal:db:atom%%)))
 
-(define veme:db:list%% (interface (veme:db:parent-node%% veme:db:describable%%)
+(define zinal:db:list%% (interface (zinal:db:parent-node%% zinal:db:describable%%)
 
-  ; Returns a list of veme:db:node%% , constituting the items of this list
+  ; Returns a list of zinal:db:node%% , constituting the items of this list
   get-items ; ()
 
   ; Inserts a new unassigned node into the list at the specified index.
-  ; Returns a veme:db:unassigned%% handle to the new unassigned node
+  ; Returns a zinal:db:unassigned%% handle to the new unassigned node
   insert!! ; (non-negative-integer)
 
-  ; Deletes a veme:db:unassigned%% at the specified position, and shifts all latter
+  ; Deletes a zinal:db:unassigned%% at the specified position, and shifts all latter
   ; items in the list down by one index. Any handles associated with that node are
   ; now invalid and cannot be used. No meaningful return value. If the node at the
-  ; specified index is not veme:db:unassigned%% , an exception will be thrown
+  ; specified index is not zinal:db:unassigned%% , an exception will be thrown
   remove!! ; (non-negative-integer)
 ))
 
-(define veme:db:def%% (interface (veme:db:parent-node%% veme:db:referable%%)
+(define zinal:db:def%% (interface (zinal:db:parent-node%% zinal:db:referable%%)
 
-  ; Returns a veme:db:node%% handle for the expression of this define
+  ; Returns a zinal:db:node%% handle for the expression of this define
   get-expr ; ()
 ))
 
-(define veme:db:def-ref%% (interface (veme:db:reference%%)
+(define zinal:db:def-ref%% (interface (zinal:db:reference%%)
 
-  ; Returns a veme:db:def%% handle for the define that this reference refers to
+  ; Returns a zinal:db:def%% handle for the define that this reference refers to
   get-def ; ()
 ))
 
-(define veme:db:param%% (interface (veme:db:parent-node%% veme:db:referable%%)
+(define zinal:db:param%% (interface (zinal:db:parent-node%% zinal:db:referable%%)
 
-  ; Returns a veme:db:lambda%% handle for the lambda that this param belongs to.
+  ; Returns a zinal:db:lambda%% handle for the lambda that this param belongs to.
   ; Equivalent to get-parent
   get-lambda ; ()
 
-  ; Returns a veme:db:node%% handle for the default expression. Returns #f for required params.
+  ; Returns a zinal:db:node%% handle for the default expression. Returns #f for required params.
   get-default ; ()
 ))
 
-(define veme:db:param-ref%% (interface (veme:db:reference%%)
+(define zinal:db:param-ref%% (interface (zinal:db:reference%%)
 
-  ; Returns a veme:db:param%% handle for the param that this reference refers to
+  ; Returns a zinal:db:param%% handle for the param that this reference refers to
   get-param ; ()
 ))
 
 ; Used for invoking (or identifying) scheme functions, macros, constants, etc. E.g.,
-; a veme:db:legacy-link%% with library #f and name "string->symbol" represents the
-; scheme string->symbol function. If it were the first node in a veme:db:list%%, then
+; a zinal:db:legacy-link%% with library #f and name "string->symbol" represents the
+; scheme string->symbol function. If it were the first node in a zinal:db:list%%, then
 ; that list is probably an invokation of string->symbol. This is used for all important
 ; built-ins, such as 'send, 'quote, '+, and 'list.
-(define veme:db:legacy-link%% (interface (veme:db:node%%)
+(define zinal:db:legacy-link%% (interface (zinal:db:node%%)
 
   ; Returns the name (as a string) of the library the specified identifier belongs to.
   ; Returns #f for the default library
@@ -282,13 +282,13 @@
 ; These nodes are describable so that a little "TODO"
 ; note can be written, or so the intended purpose can be described before it must
 ; actually be implemented
-(define veme:db:unassigned%%
-  (interface (veme:db:node%% veme:db:describable%%)
+(define zinal:db:unassigned%%
+  (interface (zinal:db:node%% zinal:db:describable%%)
     assign-lambda!! ; ([short-desc] [long-desc])
     assign-def!! ; ([short-desc] [long-desc])
     assign-list!! ; ([short-desc] [long-desc])
-    assign-def-ref!! ; (veme:db:def%%)
-    assign-param-ref!! ; (veme:db:param%%)
+    assign-def-ref!! ; (zinal:db:def%%)
+    assign-param-ref!! ; (zinal:db:param%%)
     assign-number!! ; (value)
     assign-char!! ; (value)
     assign-string!! ; (value)
@@ -300,7 +300,7 @@
   )
 )
 
-(define veme:db:element-visitor%
+(define zinal:db:element-visitor%
   (class object%
     (super-new)
 

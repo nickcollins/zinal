@@ -27,7 +27,7 @@
       #t
     ]
     [(send handle get-parent)
-      (assert "can't unassign a non-referable, non-root handle" (is-a? handle veme:db:referable%%))
+      (assert "can't unassign a non-referable, non-root handle" (is-a? handle zinal:db:referable%%))
       (issue-warning
         "Cannot unassign"
         (format
@@ -69,7 +69,7 @@
     )
 
     (define (parse-entity*! db-handle)
-      (send db-handle accept (new (class veme:db:element-visitor% (super-new)
+      (send db-handle accept (new (class zinal:db:element-visitor% (super-new)
 
         (define/override (visit-element e meh)
           (error 'parse-entity*! "Cannot parse entity for mysterious db handle")
@@ -103,7 +103,7 @@
 
         (define/override (visit-def db-def-handle meh)
           (define def-expr (send db-def-handle get-expr))
-          (if (is-a? def-expr veme:db:lambda%%)
+          (if (is-a? def-expr zinal:db:lambda%%)
             ent:func-def%
             ent:def%
           )
@@ -123,12 +123,12 @@
       (define items (send db-list-handle get-items))
       (define first-item (first items))
       (cond
-        [(is-a? first-item veme:db:legacy-link%%)
+        [(is-a? first-item zinal:db:legacy-link%%)
           (if
             (and
               (= 2 (length items))
               (standard-with-name*? first-item "quote")
-              (is-a? (second items) veme:db:list%%)
+              (is-a? (second items) zinal:db:list%%)
             )
             ent:quoted-list%
             ; TODO we should probably have some sort of quote-context to make this an ordinary
@@ -993,7 +993,7 @@
       ; TODO doing this recursively via handles is probably wrong. The recursion aspect should recurse on ents.
       ; But for now it's simple and it works, so we're going to keep, until it starts sucking, or until we
       ; refactor ents in a big way, whichever comes first
-      (send db-handle accept (new (class veme:db:element-visitor% (super-new)
+      (send db-handle accept (new (class zinal:db:element-visitor% (super-new)
         (define/override (visit-element e meh)
           (error 'get-short-text* "Unhandled element")
         )
@@ -1363,7 +1363,7 @@
 )
 
 ; new-blah-creator is a function of form
-; (list-of veme:db:referable%%) => (veme:db:unassigned%% => veme:db:element%%) OR #f
+; (list-of zinal:db:referable%%) => (zinal:db:unassigned%% => zinal:db:element%%) OR #f
 ; visible-referables are handles for all referables that are visible to any newly minted nodes.
 ; If it returns #f, it means no operation should be performed
 ; The returned creator is destructive and must succeed
@@ -1500,7 +1500,7 @@
       (define chosen-handle (send dialog get-choice))
       (if chosen-handle
         (lambda (unassigned)
-          (if (is-a? chosen-handle veme:db:param%%)
+          (if (is-a? chosen-handle zinal:db:param%%)
             (send unassigned assign-param-ref!! chosen-handle)
             (send unassigned assign-def-ref!! chosen-handle)
           )
@@ -1563,9 +1563,9 @@
 
 ; PROGRAM
 
-(define main-window (new frame% [label "Veme"]))
-(define main-gui-manager (new veme:gui-manager% [parent main-window]))
-(define main-db (new veme:sql-db% [filename "junk.db"]))
+(define main-window (new frame% [label "zinal"]))
+(define main-gui-manager (new zinal:gui-manager% [parent main-window]))
+(define main-db (new zinal:sql-db% [filename "junk.db"]))
 (define main-ent-manager (new ent:manager% [db main-db] [gui-model-manager main-gui-manager]))
 (send main-window show #t)
 (send main-window maximize #t)

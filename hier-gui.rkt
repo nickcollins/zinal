@@ -4,7 +4,7 @@
 
 (require "misc.rkt")
 
-(provide veme:gui-model-item% veme:gui-model-list-item% veme:gui-manager%)
+(provide zinal:gui-model-item% zinal:gui-model-list-item% zinal:gui-manager%)
 
 ; GUI MODEL
 
@@ -15,7 +15,7 @@
 ; and from which the gui is built. This model is equivalent in structure to the actual gui object and should not
 ; attempt to bridge the gap between the gui structure and the db structure. That job will be taken care of by a
 ; middle layer.
-(define veme:gui-model-item%
+(define zinal:gui-model-item%
   (class object%
 
     (define/public (get-manager)
@@ -110,8 +110,8 @@
   )
 )
 
-(define veme:gui-model-list-item%
-  (class veme:gui-model-item%
+(define zinal:gui-model-list-item%
+  (class zinal:gui-model-item%
 
     (define/override (set-short-text! new-text)
       (error 'set-short-text!  "for lists, use set-open-text! or set-closed-text! instead")
@@ -179,11 +179,11 @@
     )
 
     (define/public (insert-list! index event-handler)
-      (insert*! veme:gui-model-list-item% index event-handler)
+      (insert*! zinal:gui-model-list-item% index event-handler)
     )
 
     (define/public (insert-item! index event-handler)
-      (insert*! veme:gui-model-item% index event-handler)
+      (insert*! zinal:gui-model-item% index event-handler)
     )
 
     (define/public (remove! index)
@@ -203,7 +203,7 @@
         [else
           (for-each
             (lambda (item)
-              (when (is-a? item veme:gui-model-list-item%)
+              (when (is-a? item zinal:gui-model-list-item%)
                 (send item maybe-refresh-gui!)
               )
             )
@@ -251,7 +251,7 @@
   )
 )
 
-(define veme:gui-manager%
+(define zinal:gui-manager%
   (class hierarchical-list%
 
     (define/override (on-select gui-item)
@@ -289,7 +289,7 @@
     (define/public (create-root-list-model! event-handler)
       (assert "root-list-model* is already set" (not root-list-model*))
       (set! root-list-model*
-        (new veme:gui-model-list-item%
+        (new zinal:gui-model-list-item%
           [manager this]
           [parent #f]
           [event-handler event-handler]
@@ -304,7 +304,7 @@
     )
 
     (define (close-current-list*!)
-      (when (implies (is-a? selected-model* veme:gui-model-list-item%) (not (send selected-model* open?)))
+      (when (implies (is-a? selected-model* zinal:gui-model-list-item%) (not (send selected-model* open?)))
         (send this select-out)
       )
       (send selected-model* close!)
@@ -330,7 +330,7 @@
       (cond
         [(send model-item is-root?) (send this select-in)]
         [(is-last-in-list* model-item parent)
-          (if (and can-go-in (is-a? model-item veme:gui-model-list-item%) (cons? (send model-item get-items)))
+          (if (and can-go-in (is-a? model-item zinal:gui-model-list-item%) (cons? (send model-item get-items)))
             (send this select-in)
             (begin (send parent select!) (move-down*! parent #f))
           )

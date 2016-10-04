@@ -22,7 +22,7 @@
   (map (curryr db-elem->scheme referables) elems)
 )
 
-(define transpiler (new (class veme:db:element-visitor%
+(define transpiler (new (class zinal:db:element-visitor%
   (super-new)
 
   (define/override (visit-element e referables)
@@ -83,14 +83,14 @@
   ; TODO This implementaiton is rather slow and a bit goofy.
   ; I've come up with 2 alternatives so far:
   ;
-  ; a) Add a 'get-unique-id' method to veme:db:referable%% .
+  ; a) Add a 'get-unique-id' method to zinal:db:referable%% .
   ;    This option makes the caller code trivial and very performant, and it can be trivially
   ;    implemented by the sql db. However, it adds an awkward burden to the db api, that may
   ;    be difficult or awkward to implement if we switch to a graph database. Also, it is
   ;    awkward to try and explain in the interface what constraints the method would have and
   ;    why it should basically only be used for (and only exists for) one purpose.
   ;
-  ; b) Make veme:db:element%% hashable.
+  ; b) Make zinal:db:element%% hashable.
   ;    This seems like a cleaner option than a), while being pretty easy (tho non-trivial)
   ;    to implement on both sides of the interface, and being essentially as efficient as a) .
   ;    This option has no real downsides except that it's harder to implement than the current
@@ -100,6 +100,6 @@
   (define (get-unique-id referable referables)
     (define num-id (list-index (lambda (other) (send referable equals? other)) referables))
     (assert (format "Could not find referable ~a in referables" (send referable get-short-desc)) num-id)
-    (string->symbol (format "veme-id:_~a" (add1 num-id)))
+    (string->symbol (format "zinal-id:_~a" (add1 num-id)))
   )
 )))
