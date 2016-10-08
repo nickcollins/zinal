@@ -7,7 +7,6 @@
 (require "misc.rkt")
 (require "db.rkt")
 (require "sql-db.rkt")
-(require "hier-gui.rkt")
 (require "transpile.rkt")
 
 ; GENERIC HELPERS
@@ -1362,6 +1361,104 @@
   (send dialog get-choice)
 )
 
+; TODO current
+(define static-text%
+  (class text%
+
+    (define/override (can-do-edit-operation? o [recursive #t])
+      #f
+    )
+
+    (define (can-insert? start len)
+      can-insert*?
+    )
+    (augment can-insert?)
+
+    (define (can-delete? start len)
+      #f
+    )
+    (augment can-delete?)
+
+    (define can-insert*? #t)
+
+    (super-make-object)
+
+    (define styles (send this get-style-list))
+    (define base-style
+      (send styles find-or-create-style
+        (send styles basic-style)
+        (send (make-object style-delta%) set-delta-foreground "White")
+      )
+    )
+    (send this change-style base-style)
+
+    (define (create-new-style delta)
+      (send styles find-or-create-style base-style delta)
+    )
+
+    (define thing_style
+      (create-new-style
+        (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Khaki")
+      )
+    )
+
+    (send this hide-caret #t)
+
+    (define keymap (make-object keymap%))
+    (send keymap add-function "refresh-editor" refresh-editor)
+    (send keymap map-function "right" "refresh-editor")
+    (send this set-keymap keymap)
+
+    ; insert initial text
+    (define (display-node* db-handle whitespace)
+      (send this insert whitespace)
+      (define base-text
+        (if (and (is-a? db-handle zinal:db:describable%%) (send db-handle get-short-desc))
+          (send db-handle get-short-desc)
+          (let-values ([(clazz bleh) (object-info db-handle)])
+            clazz
+          )
+        )
+      )
+      (add-snip* (format "~a ~a\n" base-text (random 1000)) thing_style)
+      (when (is-a? db-handle zinal:db:parent-node%%)
+        (define child-whitespace (string-append whitespace "   "))
+        (for-each (curryr display-node* child-whitespace) (send db-handle get-children))
+      )
+    )
+
+    (define (add-snip* text style)
+      (send this change-style style)
+      (send this insert text)
+      (send this change-style base-style)
+    )
+
+    (display-node* (send main-db get-root) "")
+
+    ;(define is-basic? #t)
+    ;(build-list 50 (lambda (n)
+    ;  ;(send this change-style (make-object style-delta% 'change-toggle-underline))
+    ;  (build-list 35 (lambda (n)
+    ;    ; (send this change-style (make-object style-delta% 'change-toggle-underline))
+    ;    (cond
+    ;      [is-basic?
+    ;        (send this change-style base-style)
+    ;        (set! is-basic? #f)
+    ;      ]
+    ;      [else
+    ;        (send this change-style underlined_style)
+    ;        (set! is-basic? #t)
+    ;      ]
+    ;    )
+    ;    (send this insert (format "~a " (random 1000)))
+    ;  ))
+    ;  (send this insert #\newline)
+    ;))
+
+    (set! can-insert*? #f)
+  )
+)
+
 ; new-blah-creator is a function of form
 ; (list-of zinal:db:referable%%) => (zinal:db:unassigned%% => zinal:db:element%%) OR #f
 ; visible-referables are handles for all referables that are visible to any newly minted nodes.
@@ -1541,6 +1638,43 @@
   )
 )
 
+; TODO current
+;    (define (close-current-list*!)
+;      (when (implies (is-a? selected-model* zinal:gui-model-list-item%) (not (send selected-model* open?)))
+;        (send this select-out)
+;      )
+;      (send selected-model* close!)
+;    )
+;
+;    (define (move-up*!)
+;      ; TODO move to last item, once we have a G command
+;      (unless (send selected-model* is-root?)
+;        (define parent-model (send selected-model* get-parent))
+;        (if (eq? selected-model* (car (send parent-model get-items)))
+;          (send this select-out)
+;          (send this select-prev)
+;        )
+;      )
+;    )
+;
+;    (define (is-last-in-list* model-item parent-list)
+;      (eq? model-item (last (send parent-list get-items)))
+;    )
+;
+;    (define (move-down*! model-item [can-go-in #t])
+;      (define parent (send model-item get-parent))
+;      (cond
+;        [(send model-item is-root?) (send this select-in)]
+;        [(is-last-in-list* model-item parent)
+;          (if (and can-go-in (is-a? model-item zinal:gui-model-list-item%) (cons? (send model-item get-items)))
+;            (send this select-in)
+;            (begin (send parent select!) (move-down*! parent #f))
+;          )
+;        ]
+;        [else (send this select-next)]
+;      )
+;    )
+
 ; GUI CONSTANTS
 
 (define FRIENDLY-LITERAL-TYPE->CREATOR (hash
@@ -1564,11 +1698,23 @@
 ; PROGRAM
 
 (define main-window (new frame% [label "zinal"]))
-(define main-gui-manager (new zinal:gui-manager% [parent main-window]))
-(define main-db (new zinal:sql-db% [filename "junk.db"]))
-(define main-ent-manager (new ent:manager% [db main-db] [gui-model-manager main-gui-manager]))
+(define main-canvas (new editor-canvas% [parent main-window]))
+(send main-canvas set-canvas-background (make-object color% #x15 #x15 #x15))
+
+(define main-db (make-object zinal:sql-db% "junk.db"))
+(define main-ent-manager (make-object zinal:ent:manager% main-db))
+
+(define (display-ui ui-item)
+  ; TODO current (send main-canvas set-editor (make-object static-text%))
+)
+
+(define (handle-main-canvas-or-editor-or-whatever-event key-event)
+  (display-ui (send main-ent-manager handle-event!! key-event))
+)
+
+(display-ui (send main-ent-manager get-initial-ui))
 (send main-window show #t)
 (send main-window maximize #t)
-(send main-gui-manager focus)
+(send main-canvas focus)
 
 ; (transpile main-db)
