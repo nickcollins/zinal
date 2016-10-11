@@ -1,5 +1,8 @@
 #lang racket
 
+; for list-index
+(require srfi/1)
+
 (require "misc.rkt")
 (require "db.rkt")
 
@@ -25,25 +28,12 @@
 ; corresponding ent. It's fairly straightforward for the ent to make db writes or change its ui cone
 ; as necessary. But an operation which affects the root of a cone may involve two cones, and thus
 ; two ents. For example, deletion of a cone root generally falls under the responsibility of the
-; parent ent. Such a deletion means cleanly deleting db, ent, and ui subtrees. To make this happen
-; smoothly, and to help us connect ui cones, we have "ligaments". A ligament is a simple struct
-; containing an ent, a ui list, and an index into the ui list. Ligaments are used as the cone leaves
-; of the ent and the ui. The ent stores the roots of its ui and db cones, so a single ligament is
-; effectively a connection between a db cone root, the corresponding ui cone root, and the location
-; of the ui cone root in its parent cone (the location of the db handle is not necessary cuz the db
-; knows how to handle that sort of thing internally). In the case of deletion, it is rather easy to
-; swap out a ligament's ent with another one. For this and other operations, the ligament also holds
-; an event handler that handle events (like deletion) that the child escalates to the parent. In this
-; case the ligament's location information is very useful for making necessary modifications to the
-; parent structures.
+; parent ent. Such a deletion means cleanly deleting db, ent, and ui subtrees.
+; TODO current blah blah blah something about slots or something
 
-; TODO probably delete, but not yet, let's at least commit for posterity
-; We can imagine that a db cone is a bone, and a
-; ui cone is a muscle, and the ent is just a struct storing the ligaments (well, ok, the ent is also
-; responsible for "editing" the bone and the muscle, but no analogy is perfect). The bone is
-; connected to the muscle by a ligament at each end, but otherwise the bone and muscle diverge and
-; look very different. Another visualization that better respects the tree structure is tent poles
-; that are attached to the rain cover by stakes.
+; HELPERS
+
+(define NOOP (const #f))
 
 (define zinal:ent:manager% (class object%
 
@@ -58,26 +48,33 @@
   )
 
   (define/public (handle-event!! key-event)
-    ; TODO current dispatch event to the currently selected zinal:ui:item%%,
-    ; and return the zinal:ui:item%% to display
+    (send (send selected* get-item) handle-event!! key-event)
+    (send selected* get-root)
   )
 
-  (define/public (get-selected-ui)
+  (define/public (get-selected-ui-context)
     selected*
+  )
+
+  (define/public (select! slot/context)
+    (set! selected*
+      (if (is-a? slot/context slot%)
+        (send (send slot/context get-ent) get-root-ui-context)
+        slot/context
+      )
+    )
   )
 
   (super-make-object)
 ))
 
-; LIGAMENTS
+; SLOTS
 
-(define ligament% (class object%
+(define slot% (class object%
 
-  (init ui-parent ui-parent-index event-handler-getter)
+  (init event-handler-getter)
 
   (define ent* #f)
-  (define ui-parent* ui-parent)
-  (define index* ui-parent-index)
   (define event-handler*!! (event-handler-getter this))
 
   ; Must be called at least once immediately after construction
@@ -95,16 +92,6 @@
     (event-handler*!! key-event)
   )
 
-  (define/public (get-index)
-    (assert-valid*)
-    index*
-  )
-
-  (define/public (set-index! new-index)
-    (assert-valid*)
-    (set! index* new-index)
-  )
-
   (define (assert-valid*)
     (assert "ent must be initialized before using" ent*)
   )
@@ -116,17 +103,17 @@
 
 (define ent% (class object% ; abstract
 
-  (init cone-root-handle)
+  (init slot cone-root-handle)
 
+  (define slot* slot)
   (define cone-root* cone-root-handle)
 
   (define/public (get-cone-root)
-    cone-root* 
+    cone-root*
   )
 
-  (abstract get-root-ui-item)
-  ; Returns a list of pairs, the first of each pair is a db handle, and the second is the entity
-  ; rooted at that handle.
+  (abstract get-root-ui-context)
+  ; Returns a list of slots corresponding to the leaves of this cone and the roots of the child cones
   (abstract get-cone-leaves)
 
   (super-make-object)
@@ -136,16 +123,18 @@
 
 ; UI IMPL
 
-(define ui:item% (class* object% (zinal:ui:item%%) ; abstract
+(define ui:context% (class* object (zinal:ui:context%%)
 
-  (init ent-manager parent event-handler)
+  (init ent-manager horiz-item vert-item is-horizontal?)
 
   (define ent-manager* ent-manager)
-  (define parent* parent)
-  (define event-handler* event-handler)
+  (define horiz-item* horiz-item)
+  (define vert-item* vert-item)
+  (define horizontal*? is-horizontal?)
+  (define parent-context* #f)
 
   (define/public (selected?)
-    (eq? this (send ent-manager* get-selected-ui))
+    (eq? this (send ent-manager* get-selected-ui-context))
   )
 
   (define/public (highlighted?)
@@ -153,16 +142,56 @@
     (error 'highlighted? "highlighted? NYI")
   )
 
-  (define/public (get-parent)
-    parent*
+  (define/public (horizontal?)
+    (or
+      horizontal*?
+      (and parent-context* (send parent-context* horizontal?))
+    )
   )
 
-  (define/public (get-event-handler)
-    event-handler*
+  (define/public (get-item)
+    (if (horizontal?) horiz-item vert-item)
   )
 
-  (define/public (set-event-handler new-event-handler)
-    (set! event-handler* new-event-handler)
+  (define/public (set-horizontal! new-value)
+    (set! horizontal*? new-value)
+  )
+
+  (define/public (get-root)
+    (if parent-context*
+      (send parent-context* get-root)
+      this
+    )
+  )
+
+  (define/public (get-ent-manager)
+    ent-manager*
+  )
+
+  (define/public (set-parent-context! new-parent)
+    (set! parent-context* new-parent)
+  )
+
+  (super-make-object)
+))
+
+(define ui:item% (class* object% (zinal:ui:item%%) ; abstract
+
+  (init context event-handler!!)
+
+  (define context* context)
+  (define event-handler*!! event-handler!!)
+
+  (define (get-context)
+    context*
+  )
+
+  (define/public (handle-event!! key-event)
+    (event-handler*!! key-event)
+  )
+
+  (define/public (get-ent-manager)
+    (send context* get-ent-manager)
   )
 
   (super-make-object)
@@ -170,21 +199,20 @@
 
 (define ui:scalar% (class* ui:item% (zinal:ui:scalar%%) ; abstract
 
-  (init ent-manager parent event-handler style)
+  (init context event-handler!! style-delta)
 
-  ; TODO current what type is style?
-  (define style* style)
+  (define style-delta* style-delta)
 
-  (define/public (get-style)
-    style*
+  (define/public (get-style-delta)
+    style-delta*
   )
 
-  (super-make-object ent-manager parent event-handler)
+  (super-make-object context event-handler!!)
 ))
 
 (define ui:const% (class* ui:scalar% (zinal:ui:const%%)
 
-  (init ent-manager parent event-handler style text)
+  (init context style-delta text)
 
   (define text* text)
 
@@ -192,12 +220,12 @@
     text*
   )
 
-  (super-make-object ent-manager parent event-handler style)
+  (super-make-object context NOOP style-delta)
 ))
 
 (define ui:var-scalar% (class* ui:scalar% (zinal:ui:var-scalar%%)
 
-  (init ent-manager parent event-handler style text-getter)
+  (init context event-handler!! style-delta text-getter)
 
   (define text-getter* text-getter)
 
@@ -205,60 +233,142 @@
     (text-getter*)
   )
 
-  (super-make-object ent-manager parent event-handler style)
+  (super-make-object context event-handler!! style-delta)
 ))
 
-(define ui:vector% (class* ui:item% (zinal:ui:vector%%) ; abstract
+(define ui:list% (class* ui:item% (zinal:ui:list%%)
 
-  (init ent-manager parent event-handler children)
+  (init context event-handler!! child-event-handler!! [header #f] [separator #f])
+  (assert "Header must be a context or #f" (implies header (is-a? header zinal:ui:context%%)))
+  (assert "Separator must be a const or #f" (implies separator (is-a? separator zinal:ui:const%%)))
 
-  (define children* children)
+  (define child-event-handler*!! child-event-handler!!)
+  (define header* header)
+  (define separator* separator)
+  (define children* '())
 
   (define/public (get-children)
-    children*
+    (map
+      (lambda (c)
+        (if (is-a? c slot%)
+          (send (send c get-ent) get-root-ui-context)
+          c
+        )
+      )
+      children*
+    )
   )
-
-  (define/public (insert! index ui-item)
-    (define before (take children* index))
-    (define after (drop children* index))
-    (set! children* (append before (cons ui-item after)))
-  )
-
-  (define/public (remove! ui-item)
-    (set! children* (remq ui-item children*))
-  )
-
-  (super-make-object ent-manager parent event-handler)
-))
-
-(define ui:hlist% (class* ui:vector% (zinal:ui:hlist%%)
-
-  (init ent-manager parent event-handler [separator #f] [children '()])
-  (assert
-    "separator must be a const type or #f"
-    (implies separator (is-a? separator zinal:ui:const%%))
-  )
-
-  (define separator* separator)
-
-  (define/public (get-separator)
-    separator*
-  )
-
-  (super-make-object ent-manager parent event-handler children)
-))
-
-(define ui:vlist% (class* ui:vector% (zinal:ui:vlist%%)
-
-  (init ent-manager parent event-handler header [children '()])
-
-  (define header* header)
 
   (define/public (get-header)
     header*
   )
 
-  (super-make-object ent-manager parent event-handler children)
+  (define/public (get-horizontal-separator)
+    separator*
+  )
+
+  ; TODO current probably delete all these
+  (define/public (insert-before! anchor-child new-child)
+    (insert! (list-index (curry eq? anchor-child) children*) new-child)
+  )
+
+  (define/public (insert-after! anchor-child new-child)
+    (insert! (add1 (list-index (curry eq? anchor-child) children*)) new-child)
+  )
+
+  (define/public (insert-first! new-child)
+    (set! children* (cons new-child children*))
+    (send (send this get-ent-manager) select! new-child)
+  )
+
+  (define/public (insert-last! new-child)
+    (set! children* (append children* (list new-child)))
+    (send (send this get-ent-manager) select! new-child)
+  )
+
+  ; TODO current depublicize if we go with the insert-before variety
+  (define/public (insert! index new-child)
+    ; TODO current delete or change assertion if this method stays public
+    (assert "Invalid insertion index" index)
+    (define before (take children* index))
+    (define after (drop children* index))
+    (set! children* (append before (cons new-child after)))
+    (send (send this get-ent-manager) select! new-child)
+  )
+
+  ; TODO current probably make an indexed version of this
+  (define/public (remove! child)
+    (define index (list-index (curry eq? child) children*))
+    (assert "cannot remove child that's not even in the list" index)
+    (set! children* (remq child children*))
+    (define num-children (length children*))
+    (define selection
+      (cond
+        [(< index num-children)
+          (list-ref children* index)
+        ]
+        [(> num-children 0)
+          (list-ref children* (sub1 num-children))
+        ]
+        [else
+          this
+        ]
+      )
+    )
+    (send (send this get-ent-manager) select! selection)
+  )
+
+  (define/public (get-children-internal)
+    children*
+  )
+
+  (define/public (handle-child-event!! child key-event)
+    (child-event-handler*!! child key-event)
+  )
+
+  (super-make-object context event-handler!!)
+))
+
+(define ui:basic-list% (class ui:list% ; abstract
+
+  (init context fallback-event-handler!!)
+
+  (define (handle-event!! key-event)
+    ; TODO current
+  )
+
+  (define (handle-child-event!! key-event)
+    (case (send key-event get-key-code)
+      [(#\h) (send this select-out)]
+      [(#\j) (move-down*! selected-model*)]
+      [(#\k) (move-up*!)]
+      [(#\l) (send this select-in)]
+      [else (fallback-event-handler!! key-event)]
+    )
+  )
+
+  (super-make-object context handle-event!!)
+))
+
+(define ui:typical-dynamic-list% (class ui:list% ; abstract
+
+  (init context)
+
+  (define (handle-event!! key-event)
+    (case (send key-event get-key-code)
+      [(#\A) (maybe-add-item*!!)]
+      [(#\I) (maybe-add-item*!! 0)]
+      [else (super handle-event!! key-event)]
+    )
+  )
+
+  (define (get-child-index child)
+    (list-index (curry eq? child) (send this get-children-internal))
+  )
+
+  ; TODO current
+
+  (super-make-object context handle-event!!)
 ))
 
 ; TODO current
