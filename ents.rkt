@@ -10,6 +10,7 @@
 
 ; TERMINOLOGY AND CONCEPTS
 
+; TODO current make sure docs discuss events and keymaps properly
 ; The db is a rather simple and minimalistic representation of the logic. Displaying it literally
 ; as a tree would be verbose and ugly. We want a middle layer that parses this "low-level" tree into
 ; a more concise, sophisticated, "high-level" tree. To do so, we will partition the db into a set of
@@ -35,6 +36,107 @@
 
 (define NOOP (const #f))
 
+(define event-handler%% (interface ()
+
+  handle-event!! ; (event)
+))
+
+; TODO current i have no idea what i'm doing
+; We wouldn't need this if keymaps could be copied, inspected, or functionally extended! ugh
+(define keymap-event-handler% (class* object% (event-handler%%)
+
+  (init keymap/function)
+
+  (define keymap/function* keymap/function)
+
+  (define/public (compose fallback-event-handler)
+    (make-object keymap-event-handler% 
+      (lambda (event)
+        (unless (handle-event!! event) (send fallback-event-handler handle-event!! event))
+      )
+    )
+  )
+
+  (define/public (handle-event!! event)
+    (if (keymap-based*?)
+      (if (is-a? event key-event%)
+        (send keymap/function* handle-key-event #f event)
+        (send keymap/function* handle-mouse-event #f event)
+      )
+      (keymap/function* event)
+    )
+  )
+
+  (define (keymap-based*?)
+    (is-a? keymap/function* keymap%)
+  )
+
+  (super-make-object)
+))
+
+(define NOOP-EVENT-HANDLER (make-object keymap-event-handler% (new keymap%)))
+
+(define (get-basic-nav-event-handler ui-context)
+  (define keymap (new keymap%))
+
+  (send keymap add-function "left" (lambda (meh event)
+    (if (send ui-context horizontal?)
+      .
+    )
+  ))
+
+  (send keymap add-function "down" (lambda (meh event)
+    (if (send ui-context horizontal?)
+      .
+    )
+  ))
+
+  (send keymap map-function "left" "left")
+  (send keymap map-function "h" "left")
+  (send keymap map-function "right" "right")
+  (send keymap map-function "l" "right")
+  (send keymap map-function "up" "up")
+  (send keymap map-function "k" "up")
+  (send keymap map-function "down" "down")
+  (send keymap map-function "j" "down")
+
+  (make-object keymap-event-handler% keymap)
+)
+
+; SLOTS
+
+(define slot% (class* object% (event-handler%%)
+
+  (init keymap fallback-event-handler)
+
+  (define ent* #f)
+  (define keymap* keymap)
+  (define fallback-event-handler* fallback-event-handler)
+
+  ; Must be called at least once immediately after construction
+  (define/public (set-ent! new-ent)
+    (set! ent* new-ent)
+  )
+
+  (define/public (get-ent)
+    (assert-valid*)
+    ent*
+  )
+
+  (define/public (handle-event!! event)
+    (assert-valid*)
+    (unless (handle-event keymap* event) (send fallback-event-handler* handle-event!! event))
+  )
+
+  (define (assert-valid*)
+    (assert "ent must be initialized before using" ent*)
+  )
+
+  (super-make-object)
+))
+
+; ENTS
+
 (define zinal:ent:manager% (class object%
 
   (init db)
@@ -47,8 +149,8 @@
     (send db* get-root)
   )
 
-  (define/public (handle-event!! key-event)
-    (send (send selected* get-item) handle-event!! key-event)
+  (define/public (handle-event!! event)
+    (send (send selected* get-item) handle-event!! event)
     (send selected* get-root)
   )
 
@@ -68,40 +170,7 @@
   (super-make-object)
 ))
 
-; SLOTS
-
-(define slot% (class object%
-
-  (init event-handler-getter)
-
-  (define ent* #f)
-  (define event-handler*!! (event-handler-getter this))
-
-  ; Must be called at least once immediately after construction
-  (define/public (set-ent! new-ent)
-    (set! ent* new-ent)
-  )
-
-  (define/public (get-ent)
-    (assert-valid*)
-    ent*
-  )
-
-  (define/public (handle-event!! key-event)
-    (assert-valid*)
-    (event-handler*!! key-event)
-  )
-
-  (define (assert-valid*)
-    (assert "ent must be initialized before using" ent*)
-  )
-
-  (super-make-object)
-))
-
-; ENTS
-
-(define ent% (class object% ; abstract
+(define ent% (class* object% (event-handler%%) ; abstract
 
   (init slot cone-root-handle)
 
@@ -110,6 +179,10 @@
 
   (define/public (get-cone-root)
     cone-root*
+  )
+
+  (define/public (handle-event!! event)
+    (send slot* handle-event!! event)
   )
 
   (abstract get-root-ui-context)
@@ -175,19 +248,20 @@
   (super-make-object)
 ))
 
-(define ui:item% (class* object% (zinal:ui:item%%) ; abstract
+(define ui:item% (class* object% (zinal:ui:item%% event-handler%%) ; abstract
 
-  (init context event-handler!!)
+  (init context keymap fallback-event-handler)
 
   (define context* context)
-  (define event-handler*!! event-handler!!)
+  (define keymap* keymap)
+  (define fallback-event-handler* fallback-event-handler)
 
   (define (get-context)
     context*
   )
 
-  (define/public (handle-event!! key-event)
-    (event-handler*!! key-event)
+  (define/public (handle-event!! event)
+    (unless (handle-event keymap* event) (send fallback-event-handler* handle-event!! event))
   )
 
   (define/public (get-ent-manager)
@@ -199,7 +273,7 @@
 
 (define ui:scalar% (class* ui:item% (zinal:ui:scalar%%) ; abstract
 
-  (init context event-handler!! style-delta)
+  (init context keymap fallback-event-handler style-delta)
 
   (define style-delta* style-delta)
 
@@ -207,12 +281,12 @@
     style-delta*
   )
 
-  (super-make-object context event-handler!!)
+  (super-make-object context keymap fallback-event-handler)
 ))
 
 (define ui:const% (class* ui:scalar% (zinal:ui:const%%)
 
-  (init context style-delta text)
+  (init context keymap fallback-event-handler style-delta text)
 
   (define text* text)
 
@@ -220,12 +294,12 @@
     text*
   )
 
-  (super-make-object context NOOP style-delta)
+  (super-make-object context keymap fallback-event-handler style-delta)
 ))
 
 (define ui:var-scalar% (class* ui:scalar% (zinal:ui:var-scalar%%)
 
-  (init context event-handler!! style-delta text-getter)
+  (init context keymap fallback-event-handler style-delta text-getter)
 
   (define text-getter* text-getter)
 
@@ -233,16 +307,15 @@
     (text-getter*)
   )
 
-  (super-make-object context event-handler!! style-delta)
+  (super-make-object context keymap fallback-event-handler style-delta)
 ))
 
 (define ui:list% (class* ui:item% (zinal:ui:list%%)
 
-  (init context event-handler!! child-event-handler!! [header #f] [separator #f])
+  (init context keymap fallback-event-handler [header #f] [separator #f])
   (assert "Header must be a context or #f" (implies header (is-a? header zinal:ui:context%%)))
   (assert "Separator must be a const or #f" (implies separator (is-a? separator zinal:ui:const%%)))
 
-  (define child-event-handler*!! child-event-handler!!)
   (define header* header)
   (define separator* separator)
   (define children* '())
@@ -322,22 +395,19 @@
     children*
   )
 
-  (define/public (handle-child-event!! child key-event)
-    (child-event-handler*!! child key-event)
-  )
-
-  (super-make-object context event-handler!!)
+  (super-make-object context keymap fallback-event-handler)
 ))
 
 (define ui:basic-list% (class ui:list% ; abstract
 
   (init context fallback-event-handler!!)
 
-  (define (handle-event!! key-event)
+  (define (handle-event!! event)
     ; TODO current
   )
 
-  (define (handle-child-event!! key-event)
+  (define (handle-child-event!! event)
+    ; TODO current convert to keymap
     (case (send key-event get-key-code)
       [(#\h) (send this select-out)]
       [(#\j) (move-down*! selected-model*)]
@@ -354,7 +424,8 @@
 
   (init context)
 
-  (define (handle-event!! key-event)
+  (define (handle-event!! event)
+    ; TODO current convert to keymap
     (case (send key-event get-key-code)
       [(#\A) (maybe-add-item*!!)]
       [(#\I) (maybe-add-item*!! 0)]

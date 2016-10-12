@@ -40,26 +40,3 @@
 
   get-horizontal-separator ; () -> zinal:ui:const%% OR #f
 ))
-
-
-; TODO current delete all this
-
-(define escalated-event-handler%% (interface ()
-
-  handle-event!! ; (key-event)
-))
-
-(define slot% (iface escalated-event-handler%%)
-
-  (init event-handler!! escalated-event-handler)
-
-  (define (handle-event!! key-event)
-  )
-)
-
-(define ent% (iface escalated-event-handler%%)
-
-  (define (handle-event!! key-event)
-    (send slot* handle-event!! key-event)
-  )
-)
