@@ -123,10 +123,13 @@
 )
 
 (define (refresh-editor . blah)
-  (unless (send main-canvas get-editor)
-    (send main-canvas set-editor (new uneditable-text%))
-  )
-  (send (send main-canvas get-editor) make-text)
+  ;(unless (send main-canvas get-editor)
+  ;  (send main-canvas set-editor (new uneditable-text%))
+  ;)
+  ;(send (send main-canvas get-editor) make-text)
+  (define ed (new uneditable-text%))
+  (send ed make-text)
+  (send main-canvas set-editor ed)
 )
 
 (define main-window (new frame% [label "testfuck"]))
