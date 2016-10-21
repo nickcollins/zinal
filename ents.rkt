@@ -32,7 +32,9 @@
 
 ; Any operation which only affects the internals of a cone is the sole responsibility of the
 ; corresponding ent. It's fairly straightforward for the ent to make db writes or change its ui cone
-; as necessary. But an operation which affects the root of a cone may involve two cones, and thus ; two ents. For example, deletion of a cone root generally falls under the responsibility of the ; parent ent. Such a deletion means cleanly deleting db, ent, and ui subtrees.
+; as necessary. But an operation which affects the root of a cone may involve two cones, and thus
+; two ents. For example, deletion of a cone root generally falls under the responsibility of the
+; parent ent. Such a deletion means cleanly deleting db, ent, and ui subtrees.
 ; TODO current blah blah blah something about slots or something
 
 ; HELPER FUNCTIONS
@@ -96,21 +98,6 @@
     )
   )
 
-  ; TODO current delete
-  ;(define keyname->handler-function (make-hash))
-  ;(for-each
-  ;  (lambda (handler-function&keyname)
-  ;    (define handler-function (first handler-function&keyname))
-  ;    (define keyname (second handler-function&keyname))
-  ;    (assert
-  ;      (format "keyname ~a already exists" keyname)
-  ;      (not (hash-has-key? keyname->handler-function keyname))
-  ;    )
-  ;    (hash-set! keyname->handler-function keyname handler-function)
-  ;  )
-  ;  handler-function&keynames=pairs
-  ;)
-
   (define/public (handle-event!! event)
     (if (is-a? event key-event%)
       (send keymap* handle-key-event #f event)
@@ -138,55 +125,8 @@
   )
 )
 
-; TODO current delete
-; We wouldn't need this if keymaps could be copied, inspected, or functionally extended! ugh
-;(define keymap-event-handler% (class* object% (event-handler%%)
-;
-;  (init keymap/function)
-;
-;  (define keymap/function* keymap/function)
-;
-;  (define/public (compose fallback-event-handler)
-;    (make-object keymap-event-handler%
-;      (lambda (event)
-;        (unless (handle-event!! event) (send fallback-event-handler handle-event!! event))
-;      )
-;    )
-;  )
-;
-;  (define/public (handle-event!! event)
-;    (if (keymap-based*?)
-;      (if (is-a? event key-event%)
-;        (send keymap/function* handle-key-event #f event)
-;        (send keymap/function* handle-mouse-event #f event)
-;      )
-;      (keymap/function* event)
-;    )
-;  )
-;
-;  (define (keymap-based*?)
-;    (is-a? keymap/function* keymap%)
-;  )
-;
-;  (super-make-object)
-;))
-;
-;(define (get-replacement-event-handler replacer-getter)
-;  (define keymap (new keymap%))
-;
-;  (send keymap add-function "replace" (lambda (meh event)
-;    (define replacer (replacer-getter))
-;    (when replacer (replacer))
-;  ))
-;
-;  (send keymap map-function "s" "replace")
-;
-;  (make-object keymap-event-handler% keymap)
-;)
-
 ; SLOTS
 
-; TODO current - pretty sure slot% needs a fallback handler, right?
 (define slot% (class* object% (fallback-event-handler%%)
 
   (init slot->event-handler fallback-event-handler)
@@ -713,12 +653,68 @@
 
   (define/public (handle-event!! event)
     (assert "Something must always be selected" selected*)
+    ; TODO if we implement db transactions, then end-transaction could return "has changed",
+    ; in which case we can avoid reparsing unless a change has actually occurred. If we do that,
+    ; we should have reparse traverse the whole damn tree
     (send selected* handle-event!! event)
+    (maybe-reparse*! (reverse (get-backwards-reparse-chain selected*)))
     (send selected* get-root)
   )
 
   (define (select! slot/item)
     (set! selected* (slot/ui-item->ui-item slot/item))
+  )
+
+  (define (get-backwards-reparse-chain ui-item)
+    (cond
+      [ui-item
+        (define slot (send (send ui-item get-parent-ent) get-slot))
+        (define sub-chain (get-backwards-reparse-chain (send ui-item get-parent)))
+        (if (and (pair? sub-chain) (eq? (car sub-chain) slot))
+          sub-chain
+          (cons slot sub-chain)
+        )
+      ]
+      [else
+        '()
+      ]
+    )
+  )
+
+  (define (maybe-reparse*! reparse-chain)
+    (define current-slot (car reparse-chain))
+    (define current-ent (send current-slot get-ent))
+    (define db-handle (send current-ent get-cone-root))
+    (define ui-parent (send (send current-ent get-root-ui-item) get-parent))
+    (define cone-leaves (send current-ent get-cone-leaves))
+    (define ent-type (parse-entity*! db-handle))
+    (define reselector!
+      (cond
+        [(is-a? current-ent ent-type)
+          (const #f)
+        ]
+        [else
+          (spawn-entity*! current-slot db-handle ui-parent (curryr spawn-or-reassign-entity*! cone-leaves))
+          (thunk (select! current-slot))
+        ]
+      )
+    )
+    (define next-reparse-chain (cdr reparse-chain))
+    (if (pair? next-reparse-chain)
+      (cond
+        [(memq (car next-reparse-chain) (send (send current-slot get-ent) get-cone-leaves))
+          (maybe-reparse*! next-reparse-chain)
+          ; In this case, we haven't messed with the selection, so we have no need to do any reselecting
+        ]
+        [else
+          ; In this case, we have definitely orphaned the selection. We heuristically reselect to the current slot
+          (reselector!)
+        ]
+      )
+      ; In this case, current-slot points to the ent that the selection belongs to. So if we reparsed it, we
+      ; should reset the selection
+      (reselector!)
+    )
   )
 
   ; ENTS
@@ -739,7 +735,7 @@
     )
 
     (define/public (handle-child-event!! event)
-      (assert "You must call init! before sending any events" slot*)
+      (assert "You must call assign-to-slot! before sending any events" slot*)
       (send slot* handle-child-event!! event)
     )
 
@@ -761,6 +757,10 @@
       (send (get-root-ui-item) set-parent! ui-parent)
     )
 
+    (define/public (get-slot)
+      slot*
+    )
+
     (abstract get-root-ui-item)
 
     (super-make-object)
@@ -771,7 +771,7 @@
 
     (init cone-root-handle child-spawner!)
 
-    (define ui-thing* (make-object ui:const% NO-STYLE "butt" THING->NOOP this))
+    (define ui-thing* (make-object ui:const% this NO-STYLE "butt" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
 
     (define/override (get-root-ui-item)
       ui-thing*
@@ -780,15 +780,14 @@
     (super-make-object cone-root-handle)
   ))
 
-  ; TODO current when do we maybe-reparse*! ?
   (define ent:basic-list% (class ent% ; abstract
 
     (init cone-root-handle child-spawner!)
 
-    (define separator* (make-object ui:const% NO-STYLE " " THING->NOOP this))
+    (define separator* (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define ui-root* #f)
 
     (define/override (get-root-ui-item)
-      (assert "ui-root* should have been set during init!" ui-root*)
       ui-root*
     )
 
@@ -813,17 +812,8 @@
       (db-remove!! index)
     )
 
-    (define (get-visible-referables-for-hypothetical-index* index)
-      (if (zero? index)
-        (send
-          (db-get-list-handle)
-          get-visible-referables-underneath
-        )
-        (send
-          (slot->db-handle (list-ref (send ui-root* get-children-internal) (sub1 index)))
-          get-visible-referables-after
-        )
-      )
+    (define (get-insert-requestor* index)
+      (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index (db-get-list-handle) (db-get-items) index)))
     )
 
     (define (child-slot->event-handler* slot)
@@ -833,14 +823,14 @@
           ui-root*
           slot
           child-slot->event-handler*
-          (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index* (get-slot-index))))
+          (get-insert-requestor* (get-slot-index))
           db-insert*!!
         )
         (create-insert-after-handler
           ui-root*
           slot
           child-slot->event-handler*
-          (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index* (add1 (get-slot-index)))))
+          (get-insert-requestor* (add1 (get-slot-index)))
           db-insert*!!
         )
       ))
@@ -851,21 +841,24 @@
         (create-insert-start-handler
           list-item
           child-slot->event-handler*
-          (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index* 0)))
+          (get-insert-requestor* 0)
           db-insert*!!
         )
         (create-insert-end-handler
           list-item
           child-slot->event-handler*
-          (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index* (length (send list-item get-children-internal)))))
+          (get-insert-requestor* (length (send list-item get-children-internal)))
           db-insert*!!
         )
       ))
     )
 
+    ; TODO this is painful, but if this is literally the only case that would violate zinal scoping rules,
+    ; then it'd be premature to relax the scoping rules just to clean up this one case
+    (set! ui-root* (make-object ui:list% this list->list-event-handler* this (get-header) (get-separator)))
+
     (super-make-object cone-root-handle)
 
-    (define ui-root* (make-object ui:list% list->list-event-handler* this (get-header) (get-separator)))
     (fill-ui-list-with-slots ui-root* (db-get-items) child-slot->event-handler* child-spawner!)
   ))
 
@@ -892,12 +885,13 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
+  (define ent:invokation% ent:list%)
+
   (define ent:quoted-list% (class ent:basic-list%
 
-    ; TODO current really, the fallback should be the legit ui list
-    (define header* (make-object ui:const% NO-STYLE "` " THING->NOOP this))
-
     (init cone-root-handle child-spawner!)
+
+    (define header* (make-object ui:const% this NO-STYLE "` " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
 
     (define/override (db-insert!! index)
       (send (db-get-list-handle) insert!! index)
@@ -924,12 +918,156 @@
     (send (send this get-root-ui-item) set-horizontal! #t)
   ))
 
+  (define ent:lambda% (class ent:basic-list%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (db-insert!! index)
+      (send (db-get-list-handle) insert-into-body!! index)
+    )
+
+    (define/override (db-remove!! index)
+      (send (db-get-list-handle) remove-from-body!! index)
+    )
+
+    (define/override (db-get-items)
+      (send (db-get-list-handle) get-body)
+    )
+
+    (define/override (db-get-list-handle)
+      (send this get-cone-root)
+    )
+
+    (define/override (get-header)
+      header*
+    )
+
+    (define/public (get-params-header)
+      (make-object ui:const% this NO-STYLE "λ " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    ; TODO current
+    (define (params-list->list-event-handler* list-item)
+      (combine-keyname-event-handlers (list
+        (create-insert-start-handler
+          list-item
+          child-slot->event-handler*
+          (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index 0)))
+          db-insert*!!
+        )
+        (create-insert-end-handler
+          list-item
+          child-slot->event-handler*
+          (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index (length (send list-item get-children-internal)))))
+          db-insert*!!
+        )
+      ))
+    )
+
+    (define params-separator* (make-object ui:const% this NO-STYLE ", " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define header* (make-object ui:list% this params-list->list-event-handler* NOOP-FALLBACK-EVENT-HANDLER (get-params-header) params-separator*))
+    (send header* set-horizontal! #t)
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:atom% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define (get-text)
+      (define db-atom (send this get-cone-root))
+      (define prepend
+        (cond
+          [(is-a? db-atom zinal:db:symbol%%)
+            "'"
+          ]
+          [(is-a? db-atom zinal:db:char%%)
+            "#\\"
+          ]
+          [else
+            ""
+          ]
+        )
+      )
+      (format "~a~a" prepend (send db-atom get-val))
+    )
+
+    (define ui-scalar*
+      (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Orchid") get-text THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:ref% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define (get-text)
+      (get-short-desc-or* (send (send this get-cone-root) get-referable) "<nameless ref>")
+    )
+
+    (define ui-scalar*
+      (make-object ui:var-scalar% this (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Cyan") get-text THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:legacy% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define (get-text)
+      (send (send this get-cone-root) get-name)
+    )
+
+    (define ui-scalar*
+      (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Cyan") get-text THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:unassigned% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define (get-text)
+      (get-short-desc-or* (send this get-cone-root) "<?>")
+    )
+
+    (define ui-scalar*
+      (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Chocolate") get-text THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
   ; UI IMPL
 
   (define ui:item% (class* object% (zinal:ui:item%% event-handler%% fallback-event-handler%%) ; abstract
 
-    (init item->event-handler fallback-event-handler)
+    (init parent-ent item->event-handler fallback-event-handler)
 
+    (define parent-ent* parent-ent)
     (define parent* #f)
 
     (define (select-neighbor-or*! item before? alt)
@@ -944,6 +1082,15 @@
       (if (= neighbor-index boundary)
         (alt)
         (select! (list-ref all-siblings neighbor-index))
+      )
+    )
+
+    (define (select-next-sibling item)
+      (define parent (send item get-parent))
+      (when parent
+        (select-neighbor-or*! item #f (thunk
+          (select-next-sibling parent)
+        ))
       )
     )
 
@@ -968,32 +1115,35 @@
       (define (get-all-children)
         (send this get-children-with-header-internal)
       )
-      (define (select-next-sibling item)
-        (define parent (send item get-parent))
-        (when parent
-          (select-neighbor-or*! item #f (thunk
-            (select-next-sibling parent)
-          ))
-        )
-      )
-      (cond
-        [(and (is-a? this zinal:ui:list%%) (pair? (get-all-children)))
-          (select! (car (get-all-children)))
-        ]
-        [else
-          (select-next-sibling this)
-        ]
+      (if (and (is-a? this zinal:ui:list%%) (pair? (get-all-children)))
+        (select! (car (get-all-children)))
+        (select-next-sibling this)
       )
       #t
     )
 
+    (define (get-child-of-first-vertical-ancestor* item)
+      (define parent (send item get-parent))
+      (if (and parent (send parent horizontal?))
+        (get-child-of-first-vertical-ancestor* parent)
+        item
+      )
+    )
+
     (define (handle-down*! thing event)
-      ; TODO
+      (select-next-sibling (get-child-of-first-vertical-ancestor* this))
       #t
     )
 
     (define (handle-up*! thing event)
-      ; TODO
+      (define vert-child (get-child-of-first-vertical-ancestor* this))
+      (define vert-parent (send vert-child get-parent))
+      (if vert-parent
+        (select-neighbor-or*! vert-child #t (thunk
+          (select! vert-parent)
+        ))
+        vert-child
+      )
       #t
     )
 
@@ -1014,86 +1164,6 @@
     )
     (define fallback-event-handler* fallback-event-handler)
 
-  ;  (define default-event-handler*!! (begin
-  ;    (define keymap (new keymap%))
-  ;
-  ;    (define (select-neighbor-or item before? alt)
-  ;      (define parent (send item get-parent))
-  ;      (define all-siblings (send parent get-children-with-header-internal))
-  ;      (define inc (if before? -1 1))
-  ;      (define boundary (if before? -1 (length all-siblings)))
-  ;      (define this-index
-  ;        (list-index (compose1 (curry eq? item) slot/ui-item->ui-item) all-siblings)
-  ;      )
-  ;      (define neighbor-index (+ this-index inc))
-  ;      (if (= neighbor-index boundary)
-  ;        (alt)
-  ;        (select! (list-ref all-siblings (neighbor-index)))
-  ;      )
-  ;    )
-  ;
-  ;    (send keymap add-function "left" (thunk*
-  ;      (cond
-  ;        [(not parent*)
-  ;          (void)
-  ;        ]
-  ;        [(send parent* horizontal?)
-  ;          (select-neighbor-or this #t (thunk
-  ;            (select! parent*)
-  ;          ))
-  ;        ]
-  ;        [else
-  ;          (select! parent*)
-  ;        ]
-  ;      )
-  ;      #t
-  ;    ))
-  ;
-  ;    (send keymap add-function "right" (thunk*
-  ;      (define (get-all-children)
-  ;        (send this get-children-with-header-internal)
-  ;      )
-  ;      (define (select-next-sibling item)
-  ;        (define parent (send item get-parent))
-  ;        (when parent
-  ;          (select-neighbor-or item #f (thunk
-  ;            (select-next-sibling parent)
-  ;          ))
-  ;        )
-  ;      )
-  ;      (cond
-  ;        [(and (is-a? this zinal:ui:list%%) (pair? (get-all-children)))
-  ;          (select! (car (get-all-children)))
-  ;        ]
-  ;        [else
-  ;          (select-next-sibling this)
-  ;        ]
-  ;      )
-  ;      #t
-  ;    ))
-  ;
-  ;    (send keymap add-function "down" (thunk*
-  ;      ; TODO
-  ;      #t
-  ;    ))
-  ;
-  ;    (send keymap add-function "up" (thunk*
-  ;      ; TODO
-  ;      #t
-  ;    ))
-  ;
-  ;    (send keymap map-function "left" "left")
-  ;    (send keymap map-function "h" "left")
-  ;    (send keymap map-function "right" "right")
-  ;    (send keymap map-function "l" "right")
-  ;    (send keymap map-function "up" "up")
-  ;    (send keymap map-function "k" "up")
-  ;    (send keymap map-function "down" "down")
-  ;    (send keymap map-function "j" "down")
-  ;
-  ;    (make-object keymap-event-handler% keymap)
-  ;  ))
-
     (define/public (selected?)
       (eq? this selected*)
     )
@@ -1112,6 +1182,10 @@
         (send parent* get-root)
         this
       )
+    )
+
+    (define/public (get-parent-ent)
+      parent-ent*
     )
 
     (define/public (get-parent)
@@ -1137,7 +1211,7 @@
 
   (define ui:scalar% (class* ui:item% (zinal:ui:scalar%%) ; abstract
 
-    (init style-delta item->event-handler fallback-event-handler)
+    (init parent-ent style-delta item->event-handler fallback-event-handler)
 
     (define style-delta* style-delta)
 
@@ -1151,12 +1225,12 @@
 
     (abstract get-text)
 
-    (super-make-object item->event-handler fallback-event-handler)
+    (super-make-object parent-ent item->event-handler fallback-event-handler)
   ))
 
   (define ui:const% (class* ui:scalar% (zinal:ui:const%%)
 
-    (init style-delta text item->event-handler fallback-event-handler)
+    (init parent-ent style-delta text item->event-handler fallback-event-handler)
 
     (define text* text)
 
@@ -1168,12 +1242,12 @@
       text*
     )
 
-    (super-make-object style-delta item->event-handler fallback-event-handler)
+    (super-make-object parent-ent style-delta item->event-handler fallback-event-handler)
   ))
 
   (define ui:var-scalar% (class* ui:scalar% (zinal:ui:var-scalar%%)
 
-    (init style-delta text-getter item->event-handler fallback-event-handler)
+    (init parent-ent style-delta text-getter item->event-handler fallback-event-handler)
 
     (define text-getter* text-getter)
 
@@ -1185,17 +1259,19 @@
       (text-getter*)
     )
 
-    (super-make-object style-delta item->event-handler fallback-event-handler)
+    (super-make-object parent-ent style-delta item->event-handler fallback-event-handler)
   ))
 
   (define ui:list% (class* ui:item% (zinal:ui:list%%)
 
-    (init item->event-handler fallback-event-handler [header #f] [separator #f])
+    (init parent-ent item->event-handler fallback-event-handler [header #f] [separator #f])
     (assert "Header must be an item or #f" (implies header (is-a? header zinal:ui:item%%)))
     (assert "Separator must be a const or #f" (implies separator (is-a? separator zinal:ui:const%%)))
 
     (define header* header)
+    (when header* (send header* set-parent! this))
     (define separator* separator)
+    (when separator* (send separator* set-parent! this))
     (define children* '())
     (define horizontal*? #f)
 
@@ -1227,32 +1303,11 @@
       (set! horizontal*? new-value)
     )
 
-  ; TODO current probably delete all these
-  ;  (define/public (insert-before! anchor-child new-child)
-  ;    (insert! (list-index (curry eq? anchor-child) children*) new-child)
-  ;  )
-  ;
-  ;  (define/public (insert-after! anchor-child new-child)
-  ;    (insert! (add1 (list-index (curry eq? anchor-child) children*)) new-child)
-  ;  )
-  ;
-  ;  (define/public (insert-first! new-child)
-  ;    (set! children* (cons new-child children*))
-  ;    (select! new-child)
-  ;  )
-  ;
-  ;  (define/public (insert-last! new-child)
-  ;    (set! children* (append children* (list new-child)))
-  ;    (select! new-child)
-  ;  )
-
-    ; TODO current maybe depublicize if we go with the insert-before variety
     (define/public (insert! index new-child)
-      ; TODO current delete or change assertion if this method stays public
-      (assert "Invalid insertion index" index)
       (define before (take children* index))
       (define after (drop children* index))
       (set! children* (append before (cons new-child after)))
+      (when (is-a? new-child zinal:ui:item%%) (send new-child set-parent! this))
       (select! new-child)
     )
 
@@ -1292,73 +1347,80 @@
       index
     )
 
-    (super-make-object item->event-handler fallback-event-handler)
+    (super-make-object parent-ent item->event-handler fallback-event-handler)
   ))
 
-;  ; TODO current probably delete
-;  (define ui:typical-dynamic-list% (class ui:list%
-;
-;    (init
-;      event-handler
-;      fallback-event-handler
-;      child-slot->event-handler
-;      interaction->new-handle-initializer!!
-;      db-insert!!
-;      [header #f]
-;      [separator #f]
-;    )
-;
-;    (define child-slot->event-handler* child-slot->event-handler)
-;    (define interaction->new-handle-initializer*!! interaction->new-handle-initializer!!)
-;    (define db-insert*!! db-insert!!)
-;
-;    (define (insert-item-at-start*!! new-handle-initializer!!)
-;      (insert-item*!! 0 new-handle-initializer!!)
-;    )
-;
-;    (define (insert-item-at-end*!! new-handle-initializer!!)
-;      (insert-item*!! (length (send this get-children-internal)) new-handle-initializer!!)
-;    )
-;
-;    (define (insert-item*!! index new-handle-initializer!!)
-;      ; TODO current create-insert-slot-handler
-;      (define new-slot (make-object slot% child-slot->event-handler*))
-;      (define new-handle (db-insert*!! index))
-;      (new-handle-initializer!! new-handle)
-;      (spawn-entity*! new-slot new-handle this)
-;      (send this insert! index new-slot)
-;    )
-;
-;    (define event-handler*
-;      (combine-keyname-event-handlers
-;        event-handler
-;        (create-interaction-dependent-event-handler
-;          interaction->new-handle-initializer*!!
-;          insert-item-at-end*!!
-;          "A"
-;        )
-;        (create-interaction-dependent-event-handler
-;          interaction->new-handle-initializer*!!
-;          insert-item-at-start*!!
-;          "I"
-;        )
-;        ; TODO current delete
-;        ;(make-object keyname-event-handler% (list
-;        ;  (list insert-item-at-end*!! '("A"))
-;        ;  (list insert-item-at-start*!! '("I"))
-;        ;))
-;      )
-;    )
-;
-;    ; TODO current delete
-;    ;(define (get-child-index child)
-;    ;  (list-index (curry eq? child) (send this get-children-internal))
-;    ;)
-;
-;    (super-make-object event-handler* fallback-event-handler [header #f] [separator #f])
-;  ))
+  (define ui:dynamic-slotted-list% (class ui:list% ; abstract
+
+    (init parent-ent fallback-event-handler [header #f] [separator #f])
+    ; TODO current [separator (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)]
+
+    (abstract db-insert!!)
+    (abstract db-remove!!)
+    (abstract db-get-items)
+    (abstract db-get-list-handle)
+
+    (abstract child-slot->event-handler)
+    (abstract handle-list-event!!)
+
+    (define (handle-list-event*!! event)
+      (handle-list-event!! event)
+    )
+
+    ; TODO current
+    ;(define (get-insert-requestor* index)
+    ;  (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index (db-get-list-handle) (db-get-items) index)))
+    ;)
+
+    (define (child-slot->event-handler* slot)
+      (define (get-slot-index) (send ui-root* get-child-index slot))
+      (combine-keyname-event-handlers (list
+        (create-insert-before-handler
+          ui-root*
+          slot
+          child-slot->event-handler*
+          (get-insert-requestor* (get-slot-index))
+          db-insert*!!
+        )
+        (create-insert-after-handler
+          ui-root*
+          slot
+          child-slot->event-handler*
+          (get-insert-requestor* (add1 (get-slot-index)))
+          db-insert*!!
+        )
+      ))
+    )
+
+    (define (list->list-event-handler* list-item)
+      (combine-keyname-event-handlers (list
+        (create-insert-start-handler
+          list-item
+          child-slot->event-handler*
+          (get-insert-requestor* 0)
+          db-insert*!!
+        )
+        (create-insert-end-handler
+          list-item
+          child-slot->event-handler*
+          (get-insert-requestor* (length (send list-item get-children-internal)))
+          db-insert*!!
+        )
+      ))
+    )
+
+    ; TODO current basic
+    (super-make-object parent-ent (lambda (list-item) handle-list-event*!!) fallback-event-handler)
+  ))
 
   ; HELPER FUNCTIONS
+
+  (define (get-visible-referables-for-hypothetical-index db-list-handle db-list-children index)
+    (if (zero? index)
+      (send db-list-handle get-visible-referables-underneath)
+      (send (list-ref db-list-children (sub1 index)) get-visible-referables-after)
+    )
+  )
 
   ; result-handler accepts a result from a user interaction and does something with it. Its return
   ; value is ignored.
@@ -1426,6 +1488,13 @@
     )
   )
 
+  (define (create-insert-start-handler ui-parent child-slot->event-handler db-insert!! [new-item-creator request-new-item-creator])
+    (define interaction->new-handle-initializer!!
+      (thunk (new-item-creator (get-visible-referables-for-hypothetical-index TODO current 0)))
+    )
+    (create-insert-slot-handler ui-parent (const 0) child-slot->event-handler interaction->new-handle-initializer!! db-insert!! "I")
+  )
+
   (define (create-insert-start-handler ui-parent child-slot->event-handler interaction->new-handle-initializer!! db-insert!!)
     (create-insert-slot-handler ui-parent (const 0) child-slot->event-handler interaction->new-handle-initializer!! db-insert!! "I")
   )
@@ -1462,24 +1531,6 @@
     (send new-ent assign-to-slot! slot ui-parent)
   )
 
-  (define (maybe-reparse*! slot)
-    (define current-ent (send slot get-ent))
-    (define db-handle (send current-ent get-cone-root))
-    (define ui-parent (send (send current-ent get-root-ui-item) get-parent))
-    (define cone-leaves (send current-ent get-cone-leaves))
-    (define ent-type (parse-entity*! db-handle))
-    (cond
-      [(is-a? current-ent ent-type)
-        #f
-      ]
-      [else
-        (spawn-entity*! slot db-handle ui-parent (curryr spawn-or-reassign-entity*! cone-leaves))
-        #t
-      ]
-    )
-  )
-
-  ; TODO current
   (define (parse-non-nil-list-entity*! db-list-handle)
     (define items (send db-list-handle get-items))
     (define first-item (first items))
@@ -1494,7 +1545,7 @@
           ent:quoted-list%
           ; TODO we should probably have some sort of quote-context to make this an ordinary
           ; list when underneath something quoted ... or something
-          ent:list% ; ent:invokation%
+          ent:invokation%
         )
       ]
       [else ent:list%]
@@ -1510,15 +1561,15 @@
       )
 
       (define/override (visit-reference db-ref-handle meh)
-        ent:fuckit% ; ent:ref%
+        ent:ref%
       )
 
       (define/override (visit-atom db-atom-handle meh)
-        ent:fuckit% ; ent:atom%
+        ent:atom%
       )
 
       (define/override (visit-lambda db-lambda-handle meh)
-        ent:fuckit% ; ent:lambda%
+        ent:lambda%
       )
 
       (define/override (visit-param db-param-handle meh)
@@ -1544,11 +1595,11 @@
       )
 
       (define/override (visit-legacy-link db-legacy-link-handle meh)
-        ent:fuckit% ; ent:legacy-link%
+        ent:legacy%
       )
 
       (define/override (visit-unassigned db-unassigned-handle meh)
-        ent:fuckit% ; ent:unassigned%
+        ent:unassigned%
       )
     )))
   )

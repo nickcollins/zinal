@@ -1,9 +1,6 @@
 #lang racket
 
-; TODO current reconsider necessary imports
 (require racket/gui/base)
-; for hash-union
-(require racket/hash)
 
 (require "misc.rkt")
 (require "ents.rkt")
@@ -12,7 +9,6 @@
 (require "transpile.rkt")
 (require "ui.rkt")
 
-; TODO current
 (define static-text%
   (class text%
 
@@ -106,13 +102,16 @@
             (display-ui-item header preceeding-whitespace selected?)
             (add-snip "(" no-delta selected?)
           )
-          (for-each
-            (lambda (child)
-              (send this insert #\newline)
-              (send this insert child-whitespace)
-              (display-ui-item child child-whitespace selected?)
+          (if (pair? children)
+            (for-each
+              (lambda (child)
+                (send this insert #\newline)
+                (send this insert child-whitespace)
+                (display-ui-item child child-whitespace selected?)
+              )
+              children
             )
-            children
+            (add-snip ")" no-delta selected?)
           )
         ]
       )
