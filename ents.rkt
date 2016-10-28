@@ -117,7 +117,9 @@
   (super-make-object)
 )))
 
-(define THING->NOOP (const (make-object keyname-event-handler% '())))
+(define NOOP (make-object keyname-event-handler% '()))
+
+(define THING->NOOP (const NOOP))
 
 (define (combine-keyname-event-handlers event-handlers)
   (make-object keyname-event-handler%
@@ -127,17 +129,36 @@
 
 ; SLOTS
 
+; TODO current use git diff for guidance
+; slot% now has a handle in it. spawning should perhaps become a slot% method.
+; reset-handle! also spawns
+; perhaps we should pass the parent, and a spawner, into slot init, and then the slot can spawn on init
+; not sure
+; still much work to do to make sure that the very basics of slots with handles make sense, etc.
 (define slot% (class* object% (fallback-event-handler%%)
 
-  (init slot->event-handler fallback-event-handler)
+  (init slot->event-handler fallback-event-handler db-handle)
 
   (define ent* #f)
   (define event-handler* (slot->event-handler this))
   (define fallback-event-handler* fallback-event-handler)
+  (define db-handle* db-handle)
 
   ; Must be called at least once immediately after creation
   (define/public (set-ent! new-ent)
+    (assert "cannot set an ent with the wrong handle" (send (send new-ent get-cone-root) equals? db-handle*))
     (set! ent* new-ent)
+  )
+
+  (define/public (reset-handle! new-db-handle)
+    (assert-valid*)
+    (define ui-parent (send (send ent* get-root-ui-item) get-parent))
+    (set! db-handle* new-db-handle)
+    (spawn-entity*! this ui-parent)
+  )
+
+  (define/public (get-handle)
+    db-handle*
   )
 
   (define/public (get-ent)
@@ -153,7 +174,7 @@
   )
 
   (define (assert-valid*)
-    (assert "ent must be initialized before using" ent*)
+    (assert "ent must be set before using" ent*)
   )
 
   (super-make-object)
@@ -164,10 +185,6 @@
     (send (send slot/ui-item get-ent) get-root-ui-item)
     slot/ui-item
   )
-)
-
-(define (slot->db-handle slot)
-  (send (send slot get-ent) get-cone-root)
 )
 
 ; INTERACTION GUI
@@ -641,35 +658,37 @@
   (define db* db)
   (define ent-manager* this)
   (define selected* #f)
-  (define root-slot* #f)
 
   (define/public (get-initial-ui!)
-    (assert "You can only get the initial ui once, for some reason" (not root-slot*))
-    (set! root-slot* (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (spawn-entity*! root-slot* (send db* get-root) #f)
-    (select! root-slot*)
-    (send selected* get-root)
+    (define root-slot (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER (send db* get-root)))
+    (spawn-entity*! root-slot  #f)
+    (select! root-slot)
+    (send (get-selected) get-root)
   )
 
   (define/public (handle-event!! event)
-    (assert "Something must always be selected" selected*)
+    (assert "Something must always be selected" (get-selected))
     ; TODO if we implement db transactions, then end-transaction could return "has changed",
     ; in which case we can avoid reparsing unless a change has actually occurred. If we do that,
     ; we should have reparse traverse the whole damn tree
-    (send selected* handle-event!! event)
-    (maybe-reparse*! (reverse (get-backwards-reparse-chain selected*)))
-    (send selected* get-root)
+    (send (get-selected) handle-event!! event)
+    (maybe-reparse*! (send (send (send (get-selected) get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path (get-selected))))
+    (send (get-selected) get-root)
   )
 
   (define (select! slot/item)
-    (set! selected* (slot/ui-item->ui-item slot/item))
+    (set! selected* slot/item)
   )
 
-  (define (get-backwards-reparse-chain ui-item)
+  (define (get-selected)
+    (slot/ui-item->ui-item selected*)
+  )
+
+  (define (get-backwards-selection-path ui-item)
     (cond
       [ui-item
         (define slot (send (send ui-item get-parent-ent) get-slot))
-        (define sub-chain (get-backwards-reparse-chain (send ui-item get-parent)))
+        (define sub-chain (get-backwards-selection-path (send ui-item get-parent)))
         (if (and (pair? sub-chain) (eq? (car sub-chain) slot))
           sub-chain
           (cons slot sub-chain)
@@ -681,40 +700,26 @@
     )
   )
 
-  (define (maybe-reparse*! reparse-chain)
-    (define current-slot (car reparse-chain))
-    (define current-ent (send current-slot get-ent))
+  (define (maybe-reparse*! slot selection-path)
+    (define current-ent (send slot get-ent))
     (define db-handle (send current-ent get-cone-root))
     (define ui-parent (send (send current-ent get-root-ui-item) get-parent))
     (define cone-leaves (send current-ent get-cone-leaves))
-    (define ent-type (parse-entity*! db-handle))
-    (define reselector!
-      (cond
-        [(is-a? current-ent ent-type)
-          (const #f)
-        ]
-        [else
-          (spawn-entity*! current-slot db-handle ui-parent (curryr spawn-or-reassign-entity*! cone-leaves))
-          (thunk (select! current-slot))
-        ]
-      )
+    (define was-this-slot-respawned? #f)
+    (unless (is-a? current-ent (parse-entity*! db-handle))
+      (spawn-entity*! slot ui-parent (curryr spawn-or-reassign-entity*! cone-leaves))
+      ; Imperative style, but the functional alternatives are just so damn ugly
+      (set! was-this-slot-respawned? #t)
     )
-    (define next-reparse-chain (cdr reparse-chain))
-    (if (pair? next-reparse-chain)
-      (cond
-        [(memq (car next-reparse-chain) (send (send current-slot get-ent) get-cone-leaves))
-          (maybe-reparse*! next-reparse-chain)
-          ; In this case, we haven't messed with the selection, so we have no need to do any reselecting
-        ]
-        [else
-          ; In this case, we have definitely orphaned the selection. We heuristically reselect to the current slot
-          (reselector!)
-        ]
-      )
-      ; In this case, current-slot points to the ent that the selection belongs to. So if we reparsed it, we
-      ; should reset the selection
-      (reselector!)
+    (define is-current-slot-part-of-selection-path? (and (pair? selection-path) (eq? (car selection-path) slot)))
+    (define next-selection-path (and is-current-slot-part-of-selection-path? (cdr selection-path)))
+    (define is-some-child-part-of-selection-path?
+      (pair? (filter-map (curryr maybe-reparse*! next-selection-path) (send (send slot get-ent) get-cone-leaves)))
     )
+    (when (and was-this-slot-respawned? is-current-slot-part-of-selection-path? (not is-some-child-part-of-selection-path?))
+      (select! slot)
+    )
+    is-current-slot-part-of-selection-path?
   )
 
   ; ENTS
@@ -771,7 +776,7 @@
 
     (init cone-root-handle child-spawner!)
 
-    (define ui-thing* (make-object ui:const% this NO-STYLE "butt" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define ui-thing* (make-object ui:const% this NO-STYLE "butt" THING->NOOP this))
 
     (define/override (get-root-ui-item)
       ui-thing*
@@ -780,195 +785,215 @@
     (super-make-object cone-root-handle)
   ))
 
-  (define ent:basic-list% (class ent% ; abstract
+  (define ent:list% (class ent%
 
     (init cone-root-handle child-spawner!)
 
-    (define separator* (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (define ui-root* #f)
-
-    (define/override (get-root-ui-item)
-      ui-root*
-    )
-
-    (define/public (get-header)
-      #f
-    )
-
-    (define/public (get-separator)
-      separator*
-    )
-
-    (abstract db-insert!!)
-    (abstract db-remove!!)
-    (abstract db-get-items)
-    (abstract db-get-list-handle)
-
-    (define (db-insert*!! index)
-      (db-insert!! index)
-    )
-
-    (define (db-remove*!! index)
-      (db-remove!! index)
-    )
-
-    (define (get-insert-requestor* index)
-      (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index (db-get-list-handle) (db-get-items) index)))
-    )
-
-    (define (child-slot->event-handler* slot)
-      (define (get-slot-index) (send ui-root* get-child-index slot))
-      (combine-keyname-event-handlers (list
-        (create-insert-before-handler
-          ui-root*
-          slot
-          child-slot->event-handler*
-          (get-insert-requestor* (get-slot-index))
-          db-insert*!!
-        )
-        (create-insert-after-handler
-          ui-root*
-          slot
-          child-slot->event-handler*
-          (get-insert-requestor* (add1 (get-slot-index)))
-          db-insert*!!
-        )
-      ))
-    )
-
-    (define (list->list-event-handler* list-item)
-      (combine-keyname-event-handlers (list
-        (create-insert-start-handler
-          list-item
-          child-slot->event-handler*
-          (get-insert-requestor* 0)
-          db-insert*!!
-        )
-        (create-insert-end-handler
-          list-item
-          child-slot->event-handler*
-          (get-insert-requestor* (length (send list-item get-children-internal)))
-          db-insert*!!
-        )
-      ))
-    )
-
-    ; TODO this is painful, but if this is literally the only case that would violate zinal scoping rules,
-    ; then it'd be premature to relax the scoping rules just to clean up this one case
-    (set! ui-root* (make-object ui:list% this list->list-event-handler* this (get-header) (get-separator)))
-
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
     (super-make-object cone-root-handle)
 
-    (fill-ui-list-with-slots ui-root* (db-get-items) child-slot->event-handler* child-spawner!)
-  ))
+    (define this-ent* this)
+    (define separator* (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define ui-list* (make-object (class ui:dynamic-slotted-list%
 
-  (define ent:list% (class ent:basic-list%
+      (define/override (db-insert!! index)
+        (send (db-get-list-handle) insert!! index)
+      )
 
-    (init cone-root-handle child-spawner!)
+      (define/override (db-remove!! index)
+        (send (db-get-list-handle) remove!! index)
+      )
 
-    (define/override (db-insert!! index)
-      (send (db-get-list-handle) insert!! index)
+      (define/override (db-get-items)
+        (send (db-get-list-handle) get-items)
+      )
+
+      (define/override (db-get-list-handle)
+        (send this-ent* get-cone-root)
+      )
+
+      (super-make-object this-ent* this-ent* child-spawner! #f separator*)
+    )))
+
+    (define/override (get-root-ui-item)
+      ui-list*
     )
-
-    (define/override (db-remove!! index)
-      (send (db-get-list-handle) remove!! index)
-    )
-
-    (define/override (db-get-items)
-      (send (db-get-list-handle) get-items)
-    )
-
-    (define/override (db-get-list-handle)
-      (send this get-cone-root)
-    )
-
-    (super-make-object cone-root-handle child-spawner!)
   ))
 
   (define ent:invokation% ent:list%)
 
-  (define ent:quoted-list% (class ent:basic-list%
+  (define ent:quoted-list% (class ent%
 
     (init cone-root-handle child-spawner!)
 
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
+
+    (define this-ent* this)
+    (define separator* (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
     (define header* (make-object ui:const% this NO-STYLE "` " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define ui-list* (make-object (class ui:dynamic-slotted-list%
 
-    (define/override (db-insert!! index)
-      (send (db-get-list-handle) insert!! index)
+      (define/override (db-insert!! index)
+        (send (db-get-list-handle) insert!! index)
+      )
+
+      (define/override (db-remove!! index)
+        (send (db-get-list-handle) remove!! index)
+      )
+
+      (define/override (db-get-items)
+        (send (db-get-list-handle) get-items)
+      )
+
+      (define/override (db-get-list-handle)
+        (second (send (send this-ent* get-cone-root) get-items))
+      )
+
+      (super-make-object this-ent* this-ent* child-spawner! header* separator*)
+    )))
+
+    (send ui-list* set-horizontal! #t)
+
+    (define/override (get-root-ui-item)
+      ui-list*
     )
-
-    (define/override (db-remove!! index)
-      (send (db-get-list-handle) remove!! index)
-    )
-
-    (define/override (db-get-items)
-      (send (db-get-list-handle) get-items)
-    )
-
-    (define/override (db-get-list-handle)
-      (second (send (send this get-cone-root) get-items))
-    )
-
-    (define/override (get-header)
-      header*
-    )
-
-    (super-make-object cone-root-handle child-spawner!)
-
-    (send (send this get-root-ui-item) set-horizontal! #t)
   ))
 
-  (define ent:lambda% (class ent:basic-list%
+  ; TODO current much bug
+  (define ent:lambda% (class ent%
 
     (init cone-root-handle child-spawner!)
 
-    (define/override (db-insert!! index)
-      (send (db-get-list-handle) insert-into-body!! index)
-    )
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
 
-    (define/override (db-remove!! index)
-      (send (db-get-list-handle) remove-from-body!! index)
-    )
+    (define this-ent* this)
 
-    (define/override (db-get-items)
-      (send (db-get-list-handle) get-body)
-    )
-
-    (define/override (db-get-list-handle)
-      (send this get-cone-root)
-    )
-
-    (define/override (get-header)
-      header*
-    )
-
-    (define/public (get-params-header)
-      (make-object ui:const% this NO-STYLE "λ " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
-    )
-
-    ; TODO current
-    (define (params-list->list-event-handler* list-item)
-      (combine-keyname-event-handlers (list
-        (create-insert-start-handler
-          list-item
-          child-slot->event-handler*
-          (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index 0)))
-          db-insert*!!
-        )
-        (create-insert-end-handler
-          list-item
-          child-slot->event-handler*
-          (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index (length (send list-item get-children-internal)))))
-          db-insert*!!
-        )
-      ))
-    )
-
+    (define params-header* (make-object ui:const% this NO-STYLE "λ " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
     (define params-separator* (make-object ui:const% this NO-STYLE ", " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (define header* (make-object ui:list% this params-list->list-event-handler* NOOP-FALLBACK-EVENT-HANDLER (get-params-header) params-separator*))
-    (send header* set-horizontal! #t)
 
-    (super-make-object cone-root-handle child-spawner!)
+    (define ui-params* (make-object (class ui:dynamic-slotted-list%
+
+      (define/override (db-insert!! index)
+        (define first-opt-index (get-first-opt-index*))
+        (if (<= index first-opt-index)
+          (send (db-get-list-handle) insert-required-param!! index)
+          (send (db-get-list-handle) insert-required-param!! (- index first-opt-index))
+        )
+      )
+
+      (define/override (db-remove!! index)
+        (define first-opt-index (get-first-opt-index*))
+        (if (< index first-opt-index)
+          (send (db-get-list-handle) remove-required-param!! index)
+          (send (db-get-list-handle) remove-optional-param!! (- index first-opt-index))
+        )
+      )
+
+      (define/override (db-get-items)
+        (send (db-get-list-handle) get-all-params)
+      )
+
+      (define/override (db-get-list-handle)
+        (send this-ent* get-cone-root)
+      )
+
+      (define/override (get-event-handler)
+        (combine-keyname-event-handlers (list
+          (send this create-insert-start-handler new-param-creator)
+          (send this create-insert-end-handler new-param-creator)
+        ))
+      )
+
+      (define/override (child-slot->event-handler slot)
+        (combine-keyname-event-handlers (list
+          (send this create-insert-before-handler slot new-param-creator)
+          (send this create-insert-after-handler slot new-param-creator)
+          ; TODO current
+          ;(create-simple-event-handler "r"
+          ;  (thunk
+          ;    (define first-opt-index (get-first-opt-index*))
+          ;    ()
+          ;  )
+          ;)
+          (create-simple-event-handler "o"
+            (lambda (data event)
+              (define first-opt-index (get-first-opt-index*))
+              (define slot-index (send this get-child-index slot))
+              (when (= slot-index (sub1 first-opt-index))
+                (define reqd-param-to-delete (list-ref (db-get-items) slot-index))
+                (define short-desc (send reqd-param-to-delete get-short-desc))
+                ; TODO current BUG
+                (define reference-placeholders (map (lambda (r) (send r unassign!!)) (send reqd-param-to-delete get-references)))
+                (send (db-get-list-handle) remove-required-param!! slot-index)
+                (define new-param (send (db-get-list-handle) insert-optional-param!! 0 short-desc))
+                (for-each (lambda (r) (send r assign-param-ref!! new-param)) reference-placeholders)
+                (spawn-entity*! slot new-param this)
+                (select! slot)
+              )
+              #t
+            )
+          )
+        ))
+      )
+
+      (define (get-first-opt-index*)
+        (length (send (db-get-list-handle) get-required-params))
+      )
+
+      (define (new-param-creator visible-referables)
+        (define short-desc
+          (get-text-from-user
+            ; TODO we used to say "for ~ath (required|optional) param" but now we can't. Really we ought to be able to do this
+            "Enter short descriptor for param"
+            "A short descriptor, one or a few words, to identify this param"
+            #:validate non-empty-string?
+          )
+        )
+        (and
+          (and short-desc (non-empty-string? short-desc))
+          (lambda (param) (send param set-short-desc!! short-desc) param)
+        )
+      )
+
+      (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER child-spawner! params-header* params-separator*)
+    )))
+
+    (send ui-params* set-horizontal! #t)
+
+    (define body-separator* (make-object ui:const% this NO-STYLE "; " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+
+    (define ui-body* (make-object (class ui:dynamic-slotted-list%
+
+      (define/override (db-insert!! index)
+        (send (db-get-list-handle) insert-into-body!! index)
+      )
+
+      (define/override (db-remove!! index)
+        (send (db-get-list-handle) remove-from-body!! index)
+      )
+
+      (define/override (db-get-items)
+        (send (db-get-list-handle) get-body)
+      )
+
+      (define/override (db-get-list-handle)
+        (send this-ent* get-cone-root)
+      )
+
+      (super-make-object this-ent* this-ent* child-spawner! ui-params* body-separator*)
+    )))
+
+    (define/override (get-root-ui-item)
+      ui-body*
+    )
   ))
 
   (define ent:atom% (class ent%
@@ -994,6 +1019,7 @@
     )
 
     (define ui-scalar*
+      ; TODO make strings underlined
       (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Orchid") get-text THING->NOOP this)
     )
 
@@ -1014,6 +1040,25 @@
 
     (define ui-scalar*
       (make-object ui:var-scalar% this (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Cyan") get-text THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:required-param% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define (get-text)
+      (get-short-desc-or* (send this get-cone-root) "<?>")
+    )
+
+    (define ui-scalar*
+      (make-object ui:var-scalar% this (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Yellow") get-text THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -1065,7 +1110,9 @@
 
   (define ui:item% (class* object% (zinal:ui:item%% event-handler%% fallback-event-handler%%) ; abstract
 
-    (init parent-ent item->event-handler fallback-event-handler)
+    (init parent-ent fallback-event-handler)
+
+    (abstract get-event-handler)
 
     (define parent-ent* parent-ent)
     (define parent* #f)
@@ -1153,7 +1200,7 @@
         ; is that constructor params would wind up getting unmanageable. This solution feels kind of
         ; silly and has several questionable aspects but i feel it has less boilerplate and does not
         ; have any flaw as egregious as parameter blowup
-        (item->event-handler this)
+        (get-event-handler)
         (make-object keyname-event-handler% (list
           (list handle-left*! '("left" "h"))
           (list handle-right*! '("right" "l"))
@@ -1165,7 +1212,7 @@
     (define fallback-event-handler* fallback-event-handler)
 
     (define/public (selected?)
-      (eq? this selected*)
+      (eq? this (get-selected))
     )
 
     (define/public (highlighted?)
@@ -1214,9 +1261,14 @@
     (init parent-ent style-delta item->event-handler fallback-event-handler)
 
     (define style-delta* style-delta)
+    (define event-handler* (item->event-handler this))
 
     (define/override (accept visitor [data #f])
       (send visitor visit-scalar this data)
+    )
+
+    (define/override (get-event-handler)
+      event-handler*
     )
 
     (define/public (get-style-delta)
@@ -1225,7 +1277,7 @@
 
     (abstract get-text)
 
-    (super-make-object parent-ent item->event-handler fallback-event-handler)
+    (super-make-object parent-ent fallback-event-handler)
   ))
 
   (define ui:const% (class* ui:scalar% (zinal:ui:const%%)
@@ -1264,7 +1316,7 @@
 
   (define ui:list% (class* ui:item% (zinal:ui:list%%)
 
-    (init parent-ent item->event-handler fallback-event-handler [header #f] [separator #f])
+    (init parent-ent fallback-event-handler [header #f] [separator #f])
     (assert "Header must be an item or #f" (implies header (is-a? header zinal:ui:item%%)))
     (assert "Separator must be a const or #f" (implies separator (is-a? separator zinal:ui:const%%)))
 
@@ -1277,6 +1329,10 @@
 
     (define/override (accept visitor [data #f])
       (send visitor visit-list this data)
+    )
+
+    (define/override (get-event-handler)
+      NOOP
     )
 
     (define/public (get-children)
@@ -1347,80 +1403,97 @@
       index
     )
 
-    (super-make-object parent-ent item->event-handler fallback-event-handler)
+    (super-make-object parent-ent fallback-event-handler)
   ))
 
   (define ui:dynamic-slotted-list% (class ui:list% ; abstract
 
-    (init parent-ent fallback-event-handler [header #f] [separator #f])
-    ; TODO current [separator (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)]
+    (init parent-ent fallback-event-handler child-spawner! [header #f] [separator #f])
 
     (abstract db-insert!!)
     (abstract db-remove!!)
     (abstract db-get-items)
     (abstract db-get-list-handle)
 
-    (abstract child-slot->event-handler)
-    (abstract handle-list-event!!)
-
-    (define (handle-list-event*!! event)
-      (handle-list-event!! event)
+    (define/override (get-event-handler)
+      (combine-keyname-event-handlers (list (create-insert-start-handler) (create-insert-end-handler)))
     )
 
-    ; TODO current
-    ;(define (get-insert-requestor* index)
-    ;  (thunk (request-new-item-creator (get-visible-referables-for-hypothetical-index (db-get-list-handle) (db-get-items) index)))
-    ;)
+    (define/public (child-slot->event-handler slot)
+      (combine-keyname-event-handlers (list (create-insert-before-handler slot) (create-insert-after-handler slot)))
+    )
+
+    (define/public (create-insert-start-handler [new-item-creator request-new-item-creator])
+      (create-typical-insert-slot-handler (const 0) "I" new-item-creator)
+    )
+
+    (define/public (create-insert-end-handler [new-item-creator request-new-item-creator])
+      (create-typical-insert-slot-handler (thunk (length (send this get-children-internal))) "A" new-item-creator)
+    )
+
+    (define/public (create-insert-before-handler slot [new-item-creator request-new-item-creator])
+      (define (get-index) (send this get-child-index slot))
+      (create-typical-insert-slot-handler get-index "i" new-item-creator)
+    )
+
+    (define/public (create-insert-after-handler slot [new-item-creator request-new-item-creator])
+      (define (get-index) (add1 (send this get-child-index slot)))
+      (create-typical-insert-slot-handler get-index "a" new-item-creator)
+    )
+
+    (define (get-visible-referables-for-hypothetical-index index)
+      (if (zero? index)
+        (send (db-get-list-handle) get-visible-referables-underneath)
+        (send (list-ref (db-get-items) (sub1 index)) get-visible-referables-after)
+      )
+    )
+
+    (define (create-insert-slot-handler get-index interaction->new-handle-initializer!! keyname)
+      (define (result-handler new-handle-initializer!!)
+        (define index (get-index))
+        (define intermediate-handle (db-insert!! index))
+        ; TODO current this behavior is non-obvious and needs to be documented somehow
+        (define new-handle (new-handle-initializer!! intermediate-handle))
+        (insert-new-slot index new-handle)
+      )
+      (create-interaction-dependent-event-handler
+        interaction->new-handle-initializer!!
+        result-handler
+        keyname
+      )
+    )
+
+    (define (create-typical-insert-slot-handler get-index keyname [new-item-creator request-new-item-creator])
+      (define interaction->new-handle-initializer!!
+        (thunk (new-item-creator (get-visible-referables-for-hypothetical-index (get-index))))
+      )
+      (create-insert-slot-handler get-index interaction->new-handle-initializer!! keyname)
+    )
+
+    (define (insert-new-slot index slot-handle [child-spawner*! spawn-entity*!])
+      (define new-slot (make-object slot% child-slot->event-handler* this))
+      (child-spawner*! new-slot slot-handle this)
+      (send this insert! index new-slot)
+    )
 
     (define (child-slot->event-handler* slot)
-      (define (get-slot-index) (send ui-root* get-child-index slot))
-      (combine-keyname-event-handlers (list
-        (create-insert-before-handler
-          ui-root*
-          slot
-          child-slot->event-handler*
-          (get-insert-requestor* (get-slot-index))
-          db-insert*!!
-        )
-        (create-insert-after-handler
-          ui-root*
-          slot
-          child-slot->event-handler*
-          (get-insert-requestor* (add1 (get-slot-index)))
-          db-insert*!!
-        )
-      ))
+      (child-slot->event-handler slot)
     )
 
-    (define (list->list-event-handler* list-item)
-      (combine-keyname-event-handlers (list
-        (create-insert-start-handler
-          list-item
-          child-slot->event-handler*
-          (get-insert-requestor* 0)
-          db-insert*!!
-        )
-        (create-insert-end-handler
-          list-item
-          child-slot->event-handler*
-          (get-insert-requestor* (length (send list-item get-children-internal)))
-          db-insert*!!
-        )
-      ))
-    )
+    (super-make-object parent-ent fallback-event-handler header separator)
 
-    ; TODO current basic
-    (super-make-object parent-ent (lambda (list-item) handle-list-event*!!) fallback-event-handler)
+    (begin
+      (define handles (list->vector (db-get-items)))
+      (build-list
+        (vector-length handles)
+        (lambda (i)
+          (insert-new-slot i (vector-ref handles i) child-spawner!)
+        )
+      )
+    )
   ))
 
   ; HELPER FUNCTIONS
-
-  (define (get-visible-referables-for-hypothetical-index db-list-handle db-list-children index)
-    (if (zero? index)
-      (send db-list-handle get-visible-referables-underneath)
-      (send (list-ref db-list-children (sub1 index)) get-visible-referables-after)
-    )
-  )
 
   ; result-handler accepts a result from a user interaction and does something with it. Its return
   ; value is ignored.
@@ -1458,64 +1531,10 @@
     (create-interaction-dependent-event-handler interaction-function replacement-handler "s")
   )
 
-  (define (insert-new-slot ui-parent index root-handle child-slot->event-handler [child-spawner! spawn-entity*!])
-    (define new-slot (make-object slot% child-slot->event-handler ui-parent))
-    (child-spawner! new-slot root-handle ui-parent)
-    (send ui-parent insert! index new-slot)
-  )
-
-  (define (fill-ui-list-with-slots ui-list db-handles child-slot->event-handler child-spawner!)
-    (define handles (list->vector db-handles))
-    (build-list
-      (vector-length handles)
-      (lambda (i)
-        (insert-new-slot ui-list i (vector-ref handles i) child-slot->event-handler child-spawner!)
-      )
-    )
-  )
-
-  (define (create-insert-slot-handler ui-parent get-index child-slot->event-handler interaction->new-handle-initializer!! db-insert!! keyname)
-    (define (result-handler new-handle-initializer!!)
-      (define index (get-index))
-      (define intermediate-handle (db-insert!! index))
-      (define new-handle (new-handle-initializer!! intermediate-handle))
-      (insert-new-slot ui-parent index new-handle child-slot->event-handler)
-    )
-    (create-interaction-dependent-event-handler
-      interaction->new-handle-initializer!!
-      result-handler
-      keyname
-    )
-  )
-
-  (define (create-insert-start-handler ui-parent child-slot->event-handler db-insert!! [new-item-creator request-new-item-creator])
-    (define interaction->new-handle-initializer!!
-      (thunk (new-item-creator (get-visible-referables-for-hypothetical-index TODO current 0)))
-    )
-    (create-insert-slot-handler ui-parent (const 0) child-slot->event-handler interaction->new-handle-initializer!! db-insert!! "I")
-  )
-
-  (define (create-insert-start-handler ui-parent child-slot->event-handler interaction->new-handle-initializer!! db-insert!!)
-    (create-insert-slot-handler ui-parent (const 0) child-slot->event-handler interaction->new-handle-initializer!! db-insert!! "I")
-  )
-
-  (define (create-insert-end-handler ui-parent child-slot->event-handler interaction->new-handle-initializer!! db-insert!!)
-    (create-insert-slot-handler ui-parent (thunk (length (send ui-parent get-children-internal))) child-slot->event-handler interaction->new-handle-initializer!! db-insert!! "A")
-  )
-
-  (define (create-insert-before-handler ui-parent slot child-slot->event-handler interaction->new-handle-initializer!! db-insert!!)
-    (define (get-index) (send ui-parent get-child-index slot))
-    (create-insert-slot-handler ui-parent get-index child-slot->event-handler interaction->new-handle-initializer!! db-insert!! "i")
-  )
-
-  (define (create-insert-after-handler ui-parent slot child-slot->event-handler interaction->new-handle-initializer!! db-insert!!)
-    (define (get-index) (add1 (send ui-parent get-child-index slot)))
-    (create-insert-slot-handler ui-parent get-index child-slot->event-handler interaction->new-handle-initializer!! db-insert!! "a")
-  )
-
-  (define (spawn-or-reassign-entity*! slot cone-root-handle ui-parent existing-slots)
+  (define (spawn-or-reassign-entity*! slot ui-parent existing-slots)
+    (define cone-root-handle (send slot get-handle))
     (define existing-slot
-      (findf (lambda (s) (send cone-root-handle equals? (slot->db-handle s))) existing-slots)
+      (findf (lambda (s) (send cone-root-handle equals? (send s get-handle))) existing-slots)
     )
     (define new-ent
       (if existing-slot
@@ -1526,7 +1545,9 @@
     (send new-ent assign-to-slot! slot ui-parent)
   )
 
-  (define (spawn-entity*! slot cone-root-handle ui-parent [child-spawner! spawn-entity*!])
+  ; TODO current move inside slot% ? we can simplify some other stuff if we do
+  (define (spawn-entity*! slot ui-parent [child-spawner! spawn-entity*!])
+    (define cone-root-handle (send slot get-handle))
     (define new-ent (make-object (parse-entity*! cone-root-handle) cone-root-handle child-spawner!))
     (send new-ent assign-to-slot! slot ui-parent)
   )
@@ -1575,7 +1596,7 @@
       (define/override (visit-param db-param-handle meh)
         (if (send db-param-handle get-default)
           ent:fuckit% ; ent:optional-param%
-          ent:fuckit% ; ent:required-param%
+          ent:required-param%
         )
       )
 
