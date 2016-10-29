@@ -129,36 +129,17 @@
 
 ; SLOTS
 
-; TODO current use git diff for guidance
-; slot% now has a handle in it. spawning should perhaps become a slot% method.
-; reset-handle! also spawns
-; perhaps we should pass the parent, and a spawner, into slot init, and then the slot can spawn on init
-; not sure
-; still much work to do to make sure that the very basics of slots with handles make sense, etc.
 (define slot% (class* object% (fallback-event-handler%%)
 
-  (init slot->event-handler fallback-event-handler db-handle)
+  (init slot->event-handler fallback-event-handler)
 
   (define ent* #f)
   (define event-handler* (slot->event-handler this))
   (define fallback-event-handler* fallback-event-handler)
-  (define db-handle* db-handle)
 
   ; Must be called at least once immediately after creation
   (define/public (set-ent! new-ent)
-    (assert "cannot set an ent with the wrong handle" (send (send new-ent get-cone-root) equals? db-handle*))
     (set! ent* new-ent)
-  )
-
-  (define/public (reset-handle! new-db-handle)
-    (assert-valid*)
-    (define ui-parent (send (send ent* get-root-ui-item) get-parent))
-    (set! db-handle* new-db-handle)
-    (spawn-entity*! this ui-parent)
-  )
-
-  (define/public (get-handle)
-    db-handle*
   )
 
   (define/public (get-ent)
@@ -174,7 +155,7 @@
   )
 
   (define (assert-valid*)
-    (assert "ent must be set before using" ent*)
+    (assert "ent must be initialized before using" ent*)
   )
 
   (super-make-object)
@@ -185,6 +166,10 @@
     (send (send slot/ui-item get-ent) get-root-ui-item)
     slot/ui-item
   )
+)
+
+(define (slot->db-handle slot)
+  (send (send slot get-ent) get-cone-root)
 )
 
 ; INTERACTION GUI
@@ -660,28 +645,24 @@
   (define selected* #f)
 
   (define/public (get-initial-ui!)
-    (define root-slot (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER (send db* get-root)))
-    (spawn-entity*! root-slot  #f)
+    (define root-slot (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (spawn-entity*! root-slot (send db* get-root) #f)
     (select! root-slot)
-    (send (get-selected) get-root)
+    (send selected* get-root)
   )
 
   (define/public (handle-event!! event)
-    (assert "Something must always be selected" (get-selected))
+    (assert "Something must always be selected" selected*)
     ; TODO if we implement db transactions, then end-transaction could return "has changed",
     ; in which case we can avoid reparsing unless a change has actually occurred. If we do that,
     ; we should have reparse traverse the whole damn tree
-    (send (get-selected) handle-event!! event)
-    (maybe-reparse*! (send (send (send (get-selected) get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path (get-selected))))
-    (send (get-selected) get-root)
+    (send selected* handle-event!! event)
+    (maybe-reparse*! (send (send (send selected* get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path selected*)))
+    (send selected* get-root)
   )
 
   (define (select! slot/item)
-    (set! selected* slot/item)
-  )
-
-  (define (get-selected)
-    (slot/ui-item->ui-item selected*)
+    (set! selected* (slot/ui-item->ui-item slot/item))
   )
 
   (define (get-backwards-selection-path ui-item)
@@ -707,7 +688,7 @@
     (define cone-leaves (send current-ent get-cone-leaves))
     (define was-this-slot-respawned? #f)
     (unless (is-a? current-ent (parse-entity*! db-handle))
-      (spawn-entity*! slot ui-parent (curryr spawn-or-reassign-entity*! cone-leaves))
+      (spawn-entity*! slot db-handle ui-parent (curryr spawn-or-reassign-entity*! cone-leaves))
       ; Imperative style, but the functional alternatives are just so damn ugly
       (set! was-this-slot-respawned? #t)
     )
@@ -1212,7 +1193,7 @@
     (define fallback-event-handler* fallback-event-handler)
 
     (define/public (selected?)
-      (eq? this (get-selected))
+      (eq? this selected*)
     )
 
     (define/public (highlighted?)
@@ -1531,10 +1512,9 @@
     (create-interaction-dependent-event-handler interaction-function replacement-handler "s")
   )
 
-  (define (spawn-or-reassign-entity*! slot ui-parent existing-slots)
-    (define cone-root-handle (send slot get-handle))
+  (define (spawn-or-reassign-entity*! slot cone-root-handle ui-parent existing-slots)
     (define existing-slot
-      (findf (lambda (s) (send cone-root-handle equals? (send s get-handle))) existing-slots)
+      (findf (lambda (s) (send cone-root-handle equals? (slot->db-handle s))) existing-slots)
     )
     (define new-ent
       (if existing-slot
@@ -1545,9 +1525,7 @@
     (send new-ent assign-to-slot! slot ui-parent)
   )
 
-  ; TODO current move inside slot% ? we can simplify some other stuff if we do
-  (define (spawn-entity*! slot ui-parent [child-spawner! spawn-entity*!])
-    (define cone-root-handle (send slot get-handle))
+  (define (spawn-entity*! slot cone-root-handle ui-parent [child-spawner! spawn-entity*!])
     (define new-ent (make-object (parse-entity*! cone-root-handle) cone-root-handle child-spawner!))
     (send new-ent assign-to-slot! slot ui-parent)
   )
