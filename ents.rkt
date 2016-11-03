@@ -752,18 +752,35 @@
     (super-make-object)
   ))
 
-  ; TODO current delete
-  (define ent:fuckit% (class ent%
+  (define singleton-ent% (class ent% ; abstract
 
-    (init cone-root-handle child-spawner!)
+    (init cone-root-handle child-spawner! header)
 
-    (define ui-thing* (make-object ui:const% this NO-STYLE "butt" THING->NOOP this))
+    (abstract db-get-single-item)
+
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
+
+    (define this-ent* this)
+
+    (define ui-item* (make-object (class ui:slotted-list%
+
+      (define/override (get-visible-referables-for-slot slot)
+        (send (send this-ent* get-cone-root) get-visible-referables-underneath)
+      )
+
+      (super-make-object this-ent* this-ent* header)
+
+      (define item-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
+      (child-spawner! item-slot* (db-get-single-item) this)
+      (send this insert! 0 item-slot*)
+    )))
 
     (define/override (get-root-ui-item)
-      ui-thing*
+      ui-item*
     )
-
-    (super-make-object cone-root-handle)
   ))
 
   (define ent:list% (class ent%
@@ -781,6 +798,10 @@
 
       (define/override (db-insert!! index)
         (send (db-get-list-handle) insert!! index)
+      )
+
+      (define/override (db-can-remove? index)
+        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
       )
 
       (define/override (db-remove!! index)
@@ -803,6 +824,7 @@
     )
   ))
 
+  ; TODO current
   (define ent:invokation% ent:list%)
 
   (define ent:quoted-list% (class ent%
@@ -821,6 +843,10 @@
 
       (define/override (db-insert!! index)
         (send (db-get-list-handle) insert!! index)
+      )
+
+      (define/override (db-can-remove? index)
+        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
       )
 
       (define/override (db-remove!! index)
@@ -845,7 +871,6 @@
     )
   ))
 
-  ; TODO current much bug
   (define ent:lambda% (class ent%
 
     (init cone-root-handle child-spawner!)
@@ -866,7 +891,15 @@
         (define first-opt-index (get-first-opt-index*))
         (if (<= index first-opt-index)
           (send (db-get-list-handle) insert-required-param!! index)
-          (send (db-get-list-handle) insert-required-param!! (- index first-opt-index))
+          (send (db-get-list-handle) insert-optional-param!! (- index first-opt-index))
+        )
+      )
+
+      (define/override (db-can-remove? index)
+        (define first-opt-index (get-first-opt-index*))
+        (if (< index first-opt-index)
+          (send (db-get-list-handle) can-remove-required-param? index)
+          (send (db-get-list-handle) can-remove-optional-param? (- index first-opt-index))
         )
       )
 
@@ -897,26 +930,24 @@
         (combine-keyname-event-handlers (list
           (send this create-insert-before-handler slot new-param-creator)
           (send this create-insert-after-handler slot new-param-creator)
-          ; TODO current
-          ;(create-simple-event-handler "r"
-          ;  (thunk
-          ;    (define first-opt-index (get-first-opt-index*))
-          ;    ()
-          ;  )
-          ;)
+          (send this create-remove-handler slot)
+          (create-simple-event-handler "r"
+            (lambda (data event)
+              (define first-opt-index (get-first-opt-index*))
+              (define slot-index (send this get-child-index slot))
+              (when (= slot-index first-opt-index)
+                (send (db-get-list-handle) make-last-optional-param-required!!)
+                (select! slot)
+              )
+              #t
+            )
+          )
           (create-simple-event-handler "o"
             (lambda (data event)
               (define first-opt-index (get-first-opt-index*))
               (define slot-index (send this get-child-index slot))
               (when (= slot-index (sub1 first-opt-index))
-                (define reqd-param-to-delete (list-ref (db-get-items) slot-index))
-                (define short-desc (send reqd-param-to-delete get-short-desc))
-                ; TODO current BUG
-                (define reference-placeholders (map (lambda (r) (send r unassign!!)) (send reqd-param-to-delete get-references)))
-                (send (db-get-list-handle) remove-required-param!! slot-index)
-                (define new-param (send (db-get-list-handle) insert-optional-param!! 0 short-desc))
-                (for-each (lambda (r) (send r assign-param-ref!! new-param)) reference-placeholders)
-                (spawn-entity*! slot new-param this)
+                (send (db-get-list-handle) make-last-required-param-optional!!)
                 (select! slot)
               )
               #t
@@ -957,6 +988,10 @@
         (send (db-get-list-handle) insert-into-body!! index)
       )
 
+      (define/override (db-can-remove? index)
+        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
+      )
+
       (define/override (db-remove!! index)
         (send (db-get-list-handle) remove-from-body!! index)
       )
@@ -976,6 +1011,26 @@
       ui-body*
     )
   ))
+
+  (define ent:def% (class singleton-ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (db-get-single-item)
+      (send (send this get-cone-root) get-expr)
+    )
+
+    (define (get-header-text*)
+      (format "~a = " (get-short-desc-or* (send this get-cone-root) "<nameless def>"))
+    )
+
+    (define header* (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-header-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+
+    (super-make-object cone-root-handle child-spawner! header*)
+  ))
+
+  ; TODO current
+  (define ent:func-def% ent:def%)
 
   (define ent:atom% (class ent%
 
@@ -1028,6 +1083,25 @@
     )
 
     (super-make-object cone-root-handle)
+  ))
+
+  (define ent:optional-param% (class singleton-ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (db-get-single-item)
+      (define default (send (send this get-cone-root) get-default))
+      (assert "optional param has no default" default)
+      default
+    )
+
+    (define (get-header-text*)
+      (format "~a = " (get-short-desc-or* (send this get-cone-root) "<?>"))
+    )
+
+    (define header* (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-header-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+
+    (super-make-object cone-root-handle child-spawner! header*)
   ))
 
   (define ent:required-param% (class ent%
@@ -1348,7 +1422,6 @@
       (select! new-child)
     )
 
-    ; TODO current probably make an indexed version of this
     (define/public (remove! child)
       (define index (get-child-index child))
       (assert "cannot remove child that's not even in the list" index)
@@ -1360,7 +1433,7 @@
             (list-ref children* index)
           ]
           [(> num-children 0)
-            (list-ref children* (sub1 num-children))
+            (last children*)
           ]
           [else
             this
@@ -1387,11 +1460,54 @@
     (super-make-object parent-ent fallback-event-handler)
   ))
 
-  (define ui:dynamic-slotted-list% (class ui:list% ; abstract
+  (define ui:slotted-list% (class ui:list% ; abstract
+
+    (init parent-ent fallback-event-handler [header #f] [separator #f])
+
+    (abstract get-visible-referables-for-slot)
+
+    (define/public (child-slot->event-handler slot)
+      (combine-keyname-event-handlers (list
+        (create-replace-handler slot)
+        (create-unassign-handler slot)
+      ))
+    )
+
+    (define/public (reassign-slot!! slot [new-handle-initializer!! identity])
+      (define intermediate-handle (send (slot->db-handle slot) unassign!!))
+      (define new-handle (new-handle-initializer!! intermediate-handle))
+      (spawn-entity*! slot new-handle this)
+      (select! slot)
+    )
+
+    (define/public (create-unassign-handler slot)
+      (create-simple-event-handler "d"
+        (lambda (data event)
+          (when (unassignable? (slot->db-handle slot)) (reassign-slot!! slot))
+          #t
+        )
+      )
+    )
+
+    (define/public (create-replace-handler slot)
+      (define (interaction-function)
+        (and
+          (unassignable? (slot->db-handle slot))
+          (request-new-item-creator (get-visible-referables-for-slot slot))
+        )
+      )
+      (create-interaction-dependent-event-handler interaction-function (lambda (nhi) (reassign-slot!! slot nhi)) "s")
+    )
+
+    (super-make-object parent-ent fallback-event-handler header separator)
+  ))
+
+  (define ui:dynamic-slotted-list% (class ui:slotted-list% ; abstract
 
     (init parent-ent fallback-event-handler child-spawner! [header #f] [separator #f])
 
     (abstract db-insert!!)
+    (abstract db-can-remove?)
     (abstract db-remove!!)
     (abstract db-get-items)
     (abstract db-get-list-handle)
@@ -1400,8 +1516,24 @@
       (combine-keyname-event-handlers (list (create-insert-start-handler) (create-insert-end-handler)))
     )
 
-    (define/public (child-slot->event-handler slot)
-      (combine-keyname-event-handlers (list (create-insert-before-handler slot) (create-insert-after-handler slot)))
+    (define/override (child-slot->event-handler slot)
+      (combine-keyname-event-handlers (list
+        (create-insert-before-handler slot)
+        (create-insert-after-handler slot)
+        (create-insert-todo-handler slot)
+        (create-insert-list-handler slot)
+        (send this create-replace-handler slot)
+        (create-unassign-or-remove-handler slot)
+      ))
+    )
+
+    (define/override (get-visible-referables-for-slot slot)
+      (get-visible-referables-for-hypothetical-index (send this get-child-index slot))
+    )
+
+    (define/public (remove-slot!! slot)
+      (db-remove!! (send this get-child-index slot))
+      (send this remove! slot)
     )
 
     (define/public (create-insert-start-handler [new-item-creator request-new-item-creator])
@@ -1420,6 +1552,37 @@
     (define/public (create-insert-after-handler slot [new-item-creator request-new-item-creator])
       (define (get-index) (add1 (send this get-child-index slot)))
       (create-typical-insert-slot-handler get-index "a" new-item-creator)
+    )
+
+    (define/public (create-insert-todo-handler slot)
+      (define (get-index) (add1 (send this get-child-index slot)))
+      (create-typical-insert-slot-handler get-index "o" new-unassigned-creator)
+    )
+
+    (define/public (create-insert-list-handler slot)
+      (define (get-index) (add1 (send this get-child-index slot)))
+      (create-typical-insert-slot-handler get-index "(" new-list-creator)
+    )
+
+    (define/public (create-remove-handler slot)
+      (create-simple-event-handler "d"
+        (lambda (data event)
+          (when (db-can-remove? (send this get-child-index slot)) (remove-slot!! slot))
+          #t
+        )
+      )
+    )
+
+    (define/public (create-unassign-or-remove-handler slot)
+      (create-simple-event-handler "d"
+        (lambda (data event)
+          (cond
+            [(db-can-remove? (send this get-child-index slot)) (remove-slot!! slot)]
+            [(unassignable? (slot->db-handle slot)) (send this reassign-slot!! slot)]
+          )
+          #t
+        )
+      )
     )
 
     (define (get-visible-referables-for-hypothetical-index index)
@@ -1476,6 +1639,33 @@
 
   ; HELPER FUNCTIONS
 
+  (define (issue-warning title message)
+    (message-box title message #f '(ok caution))
+  )
+
+  (define (unassignable? handle)
+    (cond
+      [(send handle can-unassign?)
+        #t
+      ]
+      [(send handle get-parent)
+        (assert "can't unassign a non-referable, non-root handle" (is-a? handle zinal:db:referable%%))
+        (issue-warning
+          "Cannot unassign"
+          (format
+            "Referable ~a has at least one reference that is not a descendant, so it can't be unassigned"
+            (send handle get-short-desc)
+          )
+        )
+        #f
+      ]
+      [else
+        (issue-warning "Cannot unassign" "You cannot unassign the root node")
+        #f
+      ]
+    )
+  )
+
   ; result-handler accepts a result from a user interaction and does something with it. Its return
   ; value is ignored.
   ; interaction-function should return a result from the user interaction to be passed to,
@@ -1493,23 +1683,6 @@
 
   (define (create-simple-event-handler keyname handler-function)
     (make-object keyname-event-handler% (list (list handler-function (list keyname))))
-  )
-
-  (define (create-delete-handler can-delete? deletion-handler)
-    (define (handler-function data event)
-      (when (can-delete?)
-        (deletion-handler)
-      )
-      #t
-    )
-    (create-simple-event-handler "d" handler-function)
-  )
-
-  (define (create-replace-handler can-delete? replacement-acquisitioner replacement-handler)
-    (define (interaction-function)
-      (and (can-delete?) (replacement-acquisitioner))
-    )
-    (create-interaction-dependent-event-handler interaction-function replacement-handler "s")
   )
 
   (define (spawn-or-reassign-entity*! slot cone-root-handle ui-parent existing-slots)
@@ -1551,7 +1724,6 @@
     )
   )
 
-  ; TODO current
   (define (parse-entity*! db-handle)
     (send db-handle accept (make-object (class zinal:db:element-visitor% (super-make-object)
 
@@ -1573,7 +1745,7 @@
 
       (define/override (visit-param db-param-handle meh)
         (if (send db-param-handle get-default)
-          ent:fuckit% ; ent:optional-param%
+          ent:optional-param%
           ent:required-param%
         )
       )
@@ -1588,8 +1760,8 @@
       (define/override (visit-def db-def-handle meh)
         (define def-expr (send db-def-handle get-expr))
         (if (is-a? def-expr zinal:db:lambda%%)
-          ent:fuckit% ; ent:func-def%
-          ent:fuckit% ; ent:def%
+          ent:func-def%
+          ent:def%
         )
       )
 

@@ -45,14 +45,3 @@
     (define/public (visit-var-scalar vs data) (visit-scalar vs data))
   )
 )
-
-; TODO current delete ...
-; (send ui-item accept (make-object (class zinal:ui:element-visitor% (super-make-object)
-;
-;   (define/override (visit-item e meh)
-;     (error 'display-ui-item "Cannot display mysterious ui item")
-;   )
-;
-;   (define/override (visit-scalar s meh)
-;   )
-; )))
