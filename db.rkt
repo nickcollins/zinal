@@ -174,6 +174,11 @@
   ; short-desc is #f by default. If #f, the param will not have a short descriptor
   insert-required-param!! ; (index [short-desc])
 
+  ; Converts the last required param to an optional param, with an unassigned default. If
+  ; there are no required params, throws an exception. Does not affect or invalidate any
+  ; handles for the converted param. No meaningful return value.
+  make-last-required-param-optional!! ; ()
+
   get-optional-params ; ()
 
   ; Returns #f if the specified param cannot be deleted. An optional param can't be deleted
@@ -187,6 +192,11 @@
   ; short-desc is #f by default. If #f, the param will not have a short descriptor.
   ; The newly created param's default value is unassigned
   insert-optional-param!! ; (index [short-desc])
+
+  ; Converts the last optional param to a required param, completely deleting the default value.
+  ; If there are no optional params, throws an exception. Does not affect or invalidate any
+  ; handles for the converted param. No meaningful return value.
+  make-last-optional-param-required!! ; ()
 
   ; Returns a list of zinal:db:node%% handles representing the statements/expressions
   ; constituting the lambda's body.

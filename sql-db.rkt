@@ -22,7 +22,7 @@
 
 (define TABLES->NON-ID-COLS (hash
   "list_headers" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "cdr_id INT")
-  "lambdas" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "req_params_id INT" "opt_params_id INT" "body_id INT")
+  "lambdas" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "params_id INT" "body_id INT")
   "params" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "default_id INT")
   "defines" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "expr_id INT")
   "param_refs" '("param_id INT UNIQUE")
@@ -257,8 +257,7 @@
 
         (define/override (delete-and-invalidate*!!)
           (send (get-body-list*) delete-and-invalidate*!!)
-          (send (get-opt-params-list*) delete-and-invalidate*!!)
-          (send (get-reqd-params-list*) delete-and-invalidate*!!)
+          (send (get-params-list*) delete-and-invalidate*!!)
           (delete-id*!! (send this get-id))
           (super delete-and-invalidate*!!)
         )
@@ -270,47 +269,73 @@
 
         (define/public (get-all-params)
           (send this assert-valid)
-          (append (get-required-params) (get-optional-params))
+          (send (get-params-list*) get-items)
         )
 
         (define/public (get-required-params)
           (send this assert-valid)
-          (send (get-reqd-params-list*) get-items)
+          (takef (get-all-params) (lambda (p) (not (send p get-default))))
         )
 
         (define/public (can-remove-required-param? index)
           (send this assert-valid)
-          (can-remove-param*? (get-required-params) index)
+          (assert-valid-param-index* index #t)
+          (can-remove-param*? index)
         )
 
         (define/public (remove-required-param!! index)
           (send this assert-valid)
-          (remove-param*!! (get-reqd-params-list*) index)
+          (assert-valid-param-index* index #t)
+          (remove-param*!! index)
         )
 
         (define/public (insert-required-param!! index [short-desc #f])
           (send this assert-valid)
-          (send (get-reqd-params-list*) insert-param*!! index #t short-desc)
+          (send (get-params-list*) insert-param*!! index #t short-desc)
+        )
+
+        (define/public (make-last-required-param-optional!!)
+          (send this assert-valid)
+          (define reqd-params (get-required-params))
+          (assert "There is no required param to convert into an optional param" (pair? reqd-params))
+          (define last-reqd-param-default-loc (new loc% [id (send (last reqd-params) get-id)] [col "default_id"]))
+          (assert "attempt to convert optional param to optional" (= NIL-ID (send last-reqd-param-default-loc get-cell)))
+          (set-loc-dangerous*!! last-reqd-param-default-loc BOGUS-ID)
+          (create-unassigned!! last-reqd-param-default-loc)
+          (void)
         )
 
         (define/public (get-optional-params)
           (send this assert-valid)
-          (send (get-opt-params-list*) get-items)
+          (dropf (get-all-params) (lambda (p) (not (send p get-default)))) 
         )
 
         (define/public (can-remove-optional-param? index)
           (send this assert-valid)
-          (can-remove-param*? (get-optional-params) index)
+          (assert-valid-param-index* index #f)
+          (can-remove-param*? (get-optional-index* index))
         )
 
         (define/public (remove-optional-param!! index)
           (send this assert-valid)
-          (remove-param*!! (get-opt-params-list*) index)
+          (assert-valid-param-index* index #f)
+          (remove-param*!! (get-optional-index* index))
         )
 
         (define/public (insert-optional-param!! index [short-desc #f])
           (send this assert-valid)
-          (send (get-opt-params-list*) insert-param*!! index #f short-desc)
+          (send (get-params-list*) insert-param*!! (get-optional-index* index) #f short-desc)
+        )
+
+        (define/public (make-last-optional-param-required!!)
+          ; TODO current forgot to move!
+          (send this assert-valid)
+          (define opt-params (get-optional-params))
+          (assert "There is no optional param to convert into a required param" (pair? opt-params))
+          (define first-opt-param (car opt-params))
+          (send (send first-opt-param get-default) delete-and-invalidate*!!)
+          (set-id!! (new loc% [id (send first-opt-param get-id)] [col "default_id"]) NIL-ID)
+          (void)
         )
 
         (define/public (get-body)
@@ -328,30 +353,36 @@
           (send (get-body-list*) remove!! index)
         )
 
-        (define (remove-param*!! param-list index)
-          (define params (send param-list get-items))
+        (define (remove-param*!! index)
           (assert
             (format "Cannot delete ~ath required or optional param" index)
-            (can-remove-param*? params index)
+            (can-remove-param*? index)
           )
-          (send (list-ref params index) delete-and-invalidate*!!)
-          (send param-list remove*!! index #f)
+          (send (list-ref (get-all-params) index) delete-and-invalidate*!!)
+          (send (get-params-list*) remove*!! index #f)
         )
 
-        (define (can-remove-param*? params index)
-          (all-references-are-descendants*? (list-ref params index))
+        (define (can-remove-param*? index)
+          (all-references-are-descendants*? (list-ref (get-all-params) index))
         )
 
-        (define (get-reqd-params-list*)
-          (get-handle! (send this get-id) "req_params_id")
-        )
-
-        (define (get-opt-params-list*)
-          (get-handle! (send this get-id) "opt_params_id")
+        (define (get-params-list*)
+          (get-handle! (send this get-id) "params_id")
         )
 
         (define (get-body-list*)
           (get-handle! (send this get-id) "body_id")
+        )
+
+        (define (get-optional-index* index)
+          (+ index (length (get-required-params)))
+        )
+
+        (define (assert-valid-param-index* index required?)
+          (assert
+            (format "index ~a not a valid index for ~a param" index (if required? "required" "optional"))
+            (and (>= index 0) (< index (length (if required? (get-required-params) (get-optional-params)))))
+          )
         )
 
         (super-new)
@@ -825,14 +856,12 @@
                 short-desc
                 long-desc
                 (list
-                  (list "req_params_id" BOGUS-ID)
-                  (list "opt_params_id" BOGUS-ID)
+                  (list "params_id" BOGUS-ID)
                   (list "body_id" BOGUS-ID)
                 )
               )
             )
-            (create-list-header!! (new loc% [id lambda-id] [col "req_params_id"]))
-            (create-list-header!! (new loc% [id lambda-id] [col "opt_params_id"]))
+            (create-list-header!! (new loc% [id lambda-id] [col "params_id"]))
             (create-list-header!! (new loc% [id lambda-id] [col "body_id"]))
           ))
         )
