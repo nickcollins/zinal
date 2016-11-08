@@ -15,7 +15,6 @@
 
 ; TERMINOLOGY AND CONCEPTS
 
-; TODO current make sure docs discuss events and keymaps properly
 ; The db is a rather simple and minimalistic representation of the logic. Displaying it literally
 ; as a tree would be verbose and ugly. We want a middle layer that parses this "low-level" tree into
 ; a more concise, sophisticated, "high-level" tree. To do so, we will partition the db into a set of
@@ -29,13 +28,6 @@
 ; the event to the selected ui item, which uses an event handler provided to it by the ent and which
 ; can be changed or updated by the ent. So ui items store event handlers, but the assignment and
 ; implementation of those handlers are the responsibility of the ent.
-
-; Any operation which only affects the internals of a cone is the sole responsibility of the
-; corresponding ent. It's fairly straightforward for the ent to make db writes or change its ui cone
-; as necessary. But an operation which affects the root of a cone may involve two cones, and thus
-; two ents. For example, deletion of a cone root generally falls under the responsibility of the
-; parent ent. Such a deletion means cleanly deleting db, ent, and ui subtrees.
-; TODO current blah blah blah something about slots or something
 
 ; HELPER FUNCTIONS
 
@@ -751,7 +743,7 @@
     (super-make-object)
   ))
 
-  (define ent:variety:singleton% (class ent% ; abstract
+  (define ent:singleton% (class ent% ; abstract
 
     (init cone-root-handle child-spawner! header)
 
@@ -791,7 +783,7 @@
     )
 
     (define/public (db-can-remove? index)
-      (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
+      (is-a? (list-ref (send (db-get-list-handle) get-items) index) zinal:db:unassigned%%)
     )
 
     (define/public (db-remove!! index)
@@ -994,9 +986,12 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:lambda% (class ent%
+  (define ent:lambda-like% (class ent% ; abstract
 
     (init cone-root-handle child-spawner!)
+
+    (abstract get-params-header)
+    (abstract get-lambda-handle)
 
     ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
     ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
@@ -1005,7 +1000,6 @@
 
     (define this-ent* this)
 
-    (define params-header* (make-object ui:const% this NO-STYLE "λ" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
     (define params-separator* (make-object ui:const% this NO-STYLE ", " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
 
     (define ui-params* (make-object (class ui:dynamic-slotted-list%
@@ -1039,7 +1033,7 @@
       )
 
       (define/override (db-get-list-handle)
-        (send this-ent* get-cone-root)
+        (get-lambda-handle)
       )
 
       (define/override (get-event-handler)
@@ -1098,7 +1092,7 @@
         )
       )
 
-      (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER child-spawner! params-header* params-separator*)
+      (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER child-spawner! (get-params-header) params-separator*)
     )))
 
     (send ui-params* set-horizontal! #t)
@@ -1124,7 +1118,7 @@
       )
 
       (define/override (db-get-list-handle)
-        (send this-ent* get-cone-root)
+        (get-lambda-handle)
       )
 
       (super-make-object this-ent* this-ent* child-spawner! ui-params* body-separator*)
@@ -1135,7 +1129,40 @@
     )
   ))
 
-  (define ent:def% (class ent:variety:singleton%
+  (define ent:lambda% (class ent:lambda-like%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-params-header)
+      (make-object ui:const% this NO-STYLE "λ" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (define/override (get-lambda-handle)
+      (send this get-cone-root)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:func-def% (class ent:lambda-like%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-params-header)
+      (define (get-header-text*)
+        (format "~a = λ" (get-short-desc-or* (send this get-cone-root) "<nameless def>"))
+      )
+      (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-header-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (define/override (get-lambda-handle)
+      (send (send this get-cone-root) get-expr)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:def% (class ent:singleton%
 
     (init cone-root-handle child-spawner!)
 
@@ -1151,9 +1178,6 @@
 
     (super-make-object cone-root-handle child-spawner! header*)
   ))
-
-  ; TODO current
-  (define ent:func-def% ent:def%)
 
   (define ent:atom% (class ent%
 
@@ -1208,7 +1232,7 @@
     (super-make-object cone-root-handle)
   ))
 
-  (define ent:optional-param% (class ent:variety:singleton%
+  (define ent:optional-param% (class ent:singleton%
 
     (init cone-root-handle child-spawner!)
 
@@ -1713,7 +1737,6 @@
       (define (result-handler new-handle-initializer!!)
         (define index (get-index))
         (define intermediate-handle (db-insert!! index))
-        ; TODO current this behavior is non-obvious and needs to be documented somehow
         (define new-handle (new-handle-initializer!! intermediate-handle))
         (insert-new-slot index new-handle)
       )
