@@ -84,7 +84,10 @@
       (cond
         [(send ui-list horizontal?)
           (add-snip "(" no-delta selected?)
-          (when header (display-ui-item header preceeding-whitespace selected?))
+          (when header
+            (display-ui-item header preceeding-whitespace selected?)
+            (send this insert " ")
+          )
           (foldl
             (lambda (child prepend-separator?)
               (when prepend-separator? (display-ui-item separator preceeding-whitespace selected?))

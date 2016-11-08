@@ -623,11 +623,10 @@
 ; Returns #f to signify no action is to be taken (i.e. the user cancels the dialog)
 ; Returns a function that takes an unassigned db handle and will assign it to something else, returning the new handle
 ; The returned creator is not allowed to fail. A failure of this function should return #f instead of a creator
-(define (request-new-item-creator visible-referables)
-  (define friendly-types (hash-keys FRIENDLY-TYPE->CREATOR))
-  (define choice (get-choice-from-user "Choose the new node's type:" "Choose the node's type:" friendly-types))
+(define (request-new-item-creator visible-referables [allowed-types (hash-keys FRIENDLY-TYPE->CREATOR)])
+  (define choice (get-choice-from-user "Choose the new node's type:" "Choose the node's type:" allowed-types))
   (if choice
-    ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref friendly-types choice)) visible-referables)
+    ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref allowed-types choice)) visible-referables)
     #f
   )
 )
@@ -752,7 +751,7 @@
     (super-make-object)
   ))
 
-  (define singleton-ent% (class ent% ; abstract
+  (define ent:variety:singleton% (class ent% ; abstract
 
     (init cone-root-handle child-spawner! header)
 
@@ -787,88 +786,212 @@
 
     (init cone-root-handle child-spawner!)
 
+    (define/public (db-insert!! index)
+      (send (db-get-list-handle) insert!! index)
+    )
+
+    (define/public (db-can-remove? index)
+      (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
+    )
+
+    (define/public (db-remove!! index)
+      (send (db-get-list-handle) remove!! index)
+    )
+
+    (define/public (db-get-items)
+      (send (db-get-list-handle) get-items)
+    )
+
+    (define/public (db-get-list-handle)
+      (send this get-cone-root)
+    )
+
+    (define/public (get-header)
+      #f
+    )
+
+    (define/public (get-separator)
+      (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (define/public (horizontal-by-default?)
+      #f
+    )
+
     ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
     ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
     ; get-root-ui-item
     (super-make-object cone-root-handle)
 
     (define this-ent* this)
-    (define separator* (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
     (define ui-list* (make-object (class ui:dynamic-slotted-list%
 
       (define/override (db-insert!! index)
-        (send (db-get-list-handle) insert!! index)
+        (send this-ent* db-insert!! index)
       )
 
       (define/override (db-can-remove? index)
-        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
+        (send this-ent* db-can-remove? index)
       )
 
       (define/override (db-remove!! index)
-        (send (db-get-list-handle) remove!! index)
+        (send this-ent* db-remove!! index)
       )
 
       (define/override (db-get-items)
-        (send (db-get-list-handle) get-items)
+        (send this-ent* db-get-items)
       )
 
       (define/override (db-get-list-handle)
-        (send this-ent* get-cone-root)
+        (send this-ent* db-get-list-handle)
       )
 
-      (super-make-object this-ent* this-ent* child-spawner! #f separator*)
+      (super-make-object this-ent* this-ent* child-spawner! (get-header) (get-separator))
     )))
+
+    (when (horizontal-by-default?) (send ui-list* set-horizontal! #t))
 
     (define/override (get-root-ui-item)
       ui-list*
     )
   ))
 
-  ; TODO current
-  (define ent:invokation% ent:list%)
-
-  (define ent:quoted-list% (class ent%
+  (define ent:invokation% (class ent:list% ; abstract
 
     (init cone-root-handle child-spawner!)
 
-    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
-    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
-    ; get-root-ui-item
-    (super-make-object cone-root-handle)
+    (abstract should-underline?)
 
-    (define this-ent* this)
-    (define separator* (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (define header* (make-object ui:const% this NO-STYLE "` " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (define ui-list* (make-object (class ui:dynamic-slotted-list%
-
-      (define/override (db-insert!! index)
-        (send (db-get-list-handle) insert!! index)
-      )
-
-      (define/override (db-can-remove? index)
-        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
-      )
-
-      (define/override (db-remove!! index)
-        (send (db-get-list-handle) remove!! index)
-      )
-
-      (define/override (db-get-items)
-        (send (db-get-list-handle) get-items)
-      )
-
-      (define/override (db-get-list-handle)
-        (second (send (send this-ent* get-cone-root) get-items))
-      )
-
-      (super-make-object this-ent* this-ent* child-spawner! header* separator*)
-    )))
-
-    (send ui-list* set-horizontal! #t)
-
-    (define/override (get-root-ui-item)
-      ui-list*
+    (define/override (db-insert!! index)
+      (super db-insert!! (add1 index))
     )
+
+    (define/override (db-can-remove? index)
+      (super db-can-remove? (add1 index))
+    )
+
+    (define/override (db-remove!! index)
+      (super db-remove!! (add1 index))
+    )
+
+    (define/override (db-get-items)
+      (cdr (super db-get-items))
+    )
+
+    (define/override (get-header)
+      (make-object ui:var-scalar% this (send (make-object style-delta% (get-style-change-command*)) set-delta-foreground "Cyan") get-header-text* header->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (define/override (horizontal-by-default?)
+      #t
+    )
+
+    (define (get-header-text*)
+      (define func (get-func-handle*))
+      (cond
+        [(is-a? func zinal:db:legacy-link%%)
+          (send func get-name)
+        ]
+        [(is-a? func zinal:db:reference%%)
+          (get-short-desc-or* (send func get-referable) "<nameless ref>")
+        ]
+        [else
+          (error 'get-header-text* "invalid type")
+        ]
+      )
+    )
+
+    (define (header->event-handler* header)
+      (define (interaction-function)
+        (request-new-item-creator (send (send this db-get-list-handle) get-visible-referables-underneath) '("legacy" "reference"))
+      )
+      (define (result-handler new-handle-initializer!!)
+        (new-handle-initializer!! (send (get-func-handle*) unassign!!))
+      )
+      (create-interaction-dependent-event-handler interaction-function result-handler "s")
+    )
+
+    (define (get-func-handle*)
+      (car (super db-get-items))
+    )
+
+    (define (get-style-change-command*)
+      (if (should-underline?) 'change-toggle-underline 'change-nothing)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:legacy-invokation% (class ent:invokation% 
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (should-underline?)
+      #f
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:reference-invokation% (class ent:invokation% 
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (should-underline?)
+      #t
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:list-list% (class ent:list%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (db-insert!! index)
+      (super db-insert!! (add1 index))
+    )
+
+    (define/override (db-can-remove? index)
+      (super db-can-remove? (add1 index))
+    )
+
+    (define/override (db-remove!! index)
+      (super db-remove!! (add1 index))
+    )
+
+    (define/override (db-get-items)
+      (cdr (super db-get-items))
+    )
+
+    (define/override (get-header)
+      (make-object ui:const% this (make-object style-delta% 'change-bold) "[" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (define/override (horizontal-by-default?)
+      #t
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:quoted-list% (class ent:list%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (db-get-list-handle)
+      (second (send (send this get-cone-root) get-items))
+    )
+
+    (define/override (get-header)
+      (make-object ui:const% this NO-STYLE "`" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (define/override (horizontal-by-default?)
+      #t
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
   ))
 
   (define ent:lambda% (class ent%
@@ -882,7 +1005,7 @@
 
     (define this-ent* this)
 
-    (define params-header* (make-object ui:const% this NO-STYLE "λ " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define params-header* (make-object ui:const% this NO-STYLE "λ" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
     (define params-separator* (make-object ui:const% this NO-STYLE ", " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
 
     (define ui-params* (make-object (class ui:dynamic-slotted-list%
@@ -1012,7 +1135,7 @@
     )
   ))
 
-  (define ent:def% (class singleton-ent%
+  (define ent:def% (class ent:variety:singleton%
 
     (init cone-root-handle child-spawner!)
 
@@ -1021,7 +1144,7 @@
     )
 
     (define (get-header-text*)
-      (format "~a = " (get-short-desc-or* (send this get-cone-root) "<nameless def>"))
+      (format "~a =" (get-short-desc-or* (send this get-cone-root) "<nameless def>"))
     )
 
     (define header* (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-header-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
@@ -1085,7 +1208,7 @@
     (super-make-object cone-root-handle)
   ))
 
-  (define ent:optional-param% (class singleton-ent%
+  (define ent:optional-param% (class ent:variety:singleton%
 
     (init cone-root-handle child-spawner!)
 
@@ -1096,7 +1219,7 @@
     )
 
     (define (get-header-text*)
-      (format "~a = " (get-short-desc-or* (send this get-cone-root) "<?>"))
+      (format "~a =" (get-short-desc-or* (send this get-cone-root) "<?>"))
     )
 
     (define header* (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-header-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
@@ -1521,7 +1644,6 @@
         (create-insert-before-handler slot)
         (create-insert-after-handler slot)
         (create-insert-todo-handler slot)
-        (create-insert-list-handler slot)
         (send this create-replace-handler slot)
         (create-unassign-or-remove-handler slot)
       ))
@@ -1557,11 +1679,6 @@
     (define/public (create-insert-todo-handler slot)
       (define (get-index) (add1 (send this get-child-index slot)))
       (create-typical-insert-slot-handler get-index "o" new-unassigned-creator)
-    )
-
-    (define/public (create-insert-list-handler slot)
-      (define (get-index) (add1 (send this get-child-index slot)))
-      (create-typical-insert-slot-handler get-index "(" new-list-creator)
     )
 
     (define/public (create-remove-handler slot)
@@ -1708,17 +1825,22 @@
     (define first-item (first items))
     (cond
       [(is-a? first-item zinal:db:legacy-link%%)
-        (if
-          (and
-            (= 2 (length items))
-            (standard-with-name*? first-item "quote")
-            (is-a? (second items) zinal:db:list%%)
-          )
-          ent:quoted-list%
-          ; TODO we should probably have some sort of quote-context to make this an ordinary
-          ; list when underneath something quoted ... or something
-          ent:invokation%
+        (cond
+          [(and (= 2 (length items)) (standard-with-name*? first-item "quote") (is-a? (second items) zinal:db:list%%))
+            ent:quoted-list%
+          ]
+          [(standard-with-name*? first-item "list")
+            ent:list-list%
+          ]
+          [else
+            ; TODO we should probably have some sort of quote-context to make this an ordinary
+            ; list when underneath something quoted ... or something
+            ent:legacy-invokation%
+          ]
         )
+      ]
+      [(is-a? first-item zinal:db:reference%%)
+        ent:reference-invokation%
       ]
       [else ent:list%]
     )

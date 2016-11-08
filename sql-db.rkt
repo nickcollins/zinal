@@ -328,7 +328,6 @@
         )
 
         (define/public (make-last-optional-param-required!!)
-          ; TODO current forgot to move!
           (send this assert-valid)
           (define opt-params (get-optional-params))
           (assert "There is no optional param to convert into a required param" (pair? opt-params))
