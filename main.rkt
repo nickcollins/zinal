@@ -86,7 +86,7 @@
           (add-snip "(" no-delta selected?)
           (when header
             (display-ui-item header preceeding-whitespace selected?)
-            (send this insert " ")
+            (add-snip " " no-delta selected?)
           )
           (foldl
             (lambda (child prepend-separator?)
