@@ -1293,7 +1293,7 @@
     )
 
     (define ui-scalar*
-      (make-object ui:var-scalar% this (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Yellow") get-text THING->NOOP this)
+      (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-text THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
