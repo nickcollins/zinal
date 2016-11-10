@@ -647,8 +647,10 @@
     ; TODO if we implement db transactions, then end-transaction could return "has changed",
     ; in which case we can avoid reparsing unless a change has actually occurred. If we do that,
     ; we should have reparse traverse the whole damn tree
-    (send selected* handle-event!! event)
-    (maybe-reparse*! (send (send (send selected* get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path selected*)))
+    (define event-result (send selected* handle-event!! event))
+    (when (equal? event-result 'destructive)
+      (maybe-reparse*! (send (send (send selected* get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path selected*)))
+    )
     (send selected* get-root)
   )
 
@@ -1056,7 +1058,7 @@
                 (send (db-get-list-handle) make-last-optional-param-required!!)
                 (select! slot)
               )
-              #t
+              'destructive
             )
           )
           (create-simple-event-handler "o"
@@ -1067,7 +1069,7 @@
                 (send (db-get-list-handle) make-last-required-param-optional!!)
                 (select! slot)
               )
-              #t
+              'destructive
             )
           )
         ))
@@ -1357,7 +1359,7 @@
           (select! parent*)
         ]
       )
-      #t
+      'noop
     )
 
     (define (handle-right*! thing event)
@@ -1368,7 +1370,7 @@
         (select! (car (get-all-children)))
         (select-next-sibling this)
       )
-      #t
+      'noop
     )
 
     (define (get-child-of-first-vertical-ancestor* item)
@@ -1381,7 +1383,7 @@
 
     (define (handle-down*! thing event)
       (select-next-sibling (get-child-of-first-vertical-ancestor* this))
-      #t
+      'noop
     )
 
     (define (handle-up*! thing event)
@@ -1393,7 +1395,7 @@
         ))
         vert-child
       )
-      #t
+      'noop
     )
 
     (define event-handler*
@@ -1446,7 +1448,8 @@
     )
 
     (define/public (handle-event!! event)
-      (unless (send event-handler* handle-event!! event)
+      (or
+        (send event-handler* handle-event!! event)
         (send fallback-event-handler* handle-child-event!! event)
       )
     )
@@ -1631,7 +1634,7 @@
       (create-simple-event-handler "d"
         (lambda (data event)
           (when (unassignable? (slot->db-handle slot)) (reassign-slot!! slot))
-          #t
+          'destructive
         )
       )
     )
@@ -1709,7 +1712,7 @@
       (create-simple-event-handler "d"
         (lambda (data event)
           (when (db-can-remove? (send this get-child-index slot)) (remove-slot!! slot))
-          #t
+          'destructive
         )
       )
     )
@@ -1721,7 +1724,7 @@
             [(db-can-remove? (send this get-child-index slot)) (remove-slot!! slot)]
             [(unassignable? (slot->db-handle slot)) (send this reassign-slot!! slot)]
           )
-          #t
+          'destructive
         )
       )
     )
@@ -1816,7 +1819,7 @@
     (define (handler-function data event)
       (define interaction-result (interaction-function))
       (when interaction-result (result-handler interaction-result))
-      #t
+      'destructive
     )
     (make-object keyname-event-handler% (list (list handler-function (list keyname))))
   )
