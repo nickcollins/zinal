@@ -57,6 +57,32 @@
   handle-child-event!! ; (event)
 ))
 
+; Everything is terrible
+(define dirty-bit% (class object%
+
+  (define dirty-status* #f)
+
+  (define/public (set-dirty!)
+    (assert (format "Can't set dirty status twice: ~a" dirty-status*) (not dirty-status*))
+    (set! dirty-status* 'dirty)
+    ; for convenience; also terrible
+    #t
+  )
+
+  (define/public (set-not-dirty!)
+    (assert (format "Can't set dirty status twice: ~a" dirty-status*) (not dirty-status*))
+    (set! dirty-status* 'not-dirty)
+    #t
+  )
+
+  (define/public (dirty?)
+    (assert "Must set dirty status at least once" dirty-status*)
+    (equal? dirty-status* 'dirty)
+  )
+
+  (super-make-object)
+))
+
 (define keyname-event-handler% (class* object% (event-handler%%)
 
   ; handler-function&keynames=pairs is a list of pairs, first item is an event handler function
@@ -91,10 +117,14 @@
   )
 
   (define/public (handle-event!! event)
-    (if (is-a? event key-event%)
-      (send keymap* handle-key-event #f event)
-      (send keymap* handle-mouse-event #f event)
+    (define dirty-bit (make-object dirty-bit%))
+    (define was-handled?
+      (if (is-a? event key-event%)
+        (send keymap* handle-key-event dirty-bit event)
+        (send keymap* handle-mouse-event dirty-bit event)
+      )
     )
+    (and was-handled? dirty-bit)
   )
 
   (define/public (get-handler-function&keynames=pairs*)
@@ -141,7 +171,8 @@
 
   (define/public (handle-child-event!! event)
     (assert-valid*)
-    (unless (send event-handler* handle-event!! event)
+    (or
+      (send event-handler* handle-event!! event)
       (send fallback-event-handler* handle-child-event!! event)
     )
   )
@@ -648,7 +679,7 @@
     ; in which case we can avoid reparsing unless a change has actually occurred. If we do that,
     ; we should have reparse traverse the whole damn tree
     (define event-result (send selected* handle-event!! event))
-    (when (equal? event-result 'destructive)
+    (when (and event-result (send event-result dirty?))
       (maybe-reparse*! (send (send (send selected* get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path selected*)))
     )
     (send selected* get-root)
@@ -1051,25 +1082,25 @@
           (send this create-insert-after-handler slot new-param-creator)
           (send this create-remove-handler slot)
           (create-simple-event-handler "r"
-            (lambda (data event)
+            (lambda (dirty-bit event)
               (define first-opt-index (get-first-opt-index*))
               (define slot-index (send this get-child-index slot))
               (when (= slot-index first-opt-index)
                 (send (db-get-list-handle) make-last-optional-param-required!!)
                 (select! slot)
               )
-              'destructive
+              (send dirty-bit set-dirty!)
             )
           )
           (create-simple-event-handler "o"
-            (lambda (data event)
+            (lambda (dirty-bit event)
               (define first-opt-index (get-first-opt-index*))
               (define slot-index (send this get-child-index slot))
               (when (= slot-index (sub1 first-opt-index))
                 (send (db-get-list-handle) make-last-required-param-optional!!)
                 (select! slot)
               )
-              'destructive
+              (send dirty-bit set-dirty!)
             )
           )
         ))
@@ -1345,7 +1376,7 @@
       )
     )
 
-    (define (handle-left*! thing event)
+    (define (handle-left*! dirty-bit event)
       (cond
         [(not parent*)
           (void)
@@ -1359,10 +1390,10 @@
           (select! parent*)
         ]
       )
-      'noop
+      (send dirty-bit set-not-dirty!)
     )
 
-    (define (handle-right*! thing event)
+    (define (handle-right*! dirty-bit event)
       (define (get-all-children)
         (send this get-children-with-header-internal)
       )
@@ -1370,7 +1401,7 @@
         (select! (car (get-all-children)))
         (select-next-sibling this)
       )
-      'noop
+      (send dirty-bit set-not-dirty!)
     )
 
     (define (get-child-of-first-vertical-ancestor* item)
@@ -1381,12 +1412,12 @@
       )
     )
 
-    (define (handle-down*! thing event)
+    (define (handle-down*! dirty-bit event)
       (select-next-sibling (get-child-of-first-vertical-ancestor* this))
-      'noop
+      (send dirty-bit set-not-dirty!)
     )
 
-    (define (handle-up*! thing event)
+    (define (handle-up*! dirty-bit event)
       (define vert-child (get-child-of-first-vertical-ancestor* this))
       (define vert-parent (send vert-child get-parent))
       (if vert-parent
@@ -1395,7 +1426,7 @@
         ))
         vert-child
       )
-      'noop
+      (send dirty-bit set-not-dirty!)
     )
 
     (define event-handler*
@@ -1632,9 +1663,9 @@
 
     (define/public (create-unassign-handler slot)
       (create-simple-event-handler "d"
-        (lambda (data event)
+        (lambda (dirty-bit event)
           (when (unassignable? (slot->db-handle slot)) (reassign-slot!! slot))
-          'destructive
+          (send dirty-bit set-dirty!)
         )
       )
     )
@@ -1710,21 +1741,21 @@
 
     (define/public (create-remove-handler slot)
       (create-simple-event-handler "d"
-        (lambda (data event)
+        (lambda (dirty-bit event)
           (when (db-can-remove? (send this get-child-index slot)) (remove-slot!! slot))
-          'destructive
+          (send dirty-bit set-dirty!)
         )
       )
     )
 
     (define/public (create-unassign-or-remove-handler slot)
       (create-simple-event-handler "d"
-        (lambda (data event)
+        (lambda (dirty-bit event)
           (cond
             [(db-can-remove? (send this get-child-index slot)) (remove-slot!! slot)]
             [(unassignable? (slot->db-handle slot)) (send this reassign-slot!! slot)]
           )
-          'destructive
+          (send dirty-bit set-dirty!)
         )
       )
     )
@@ -1816,10 +1847,10 @@
   ; Regardless of what happens, the handler always returns #t, indicating that the action has been
   ; handled
   (define (create-interaction-dependent-event-handler interaction-function result-handler keyname)
-    (define (handler-function data event)
+    (define (handler-function dirty-bit event)
       (define interaction-result (interaction-function))
       (when interaction-result (result-handler interaction-result))
-      'destructive
+      (send dirty-bit set-dirty!)
     )
     (make-object keyname-event-handler% (list (list handler-function (list keyname))))
   )
