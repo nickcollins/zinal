@@ -1659,6 +1659,13 @@
       bookends*
     )
 
+    (define/public (create-expand-and-collapse-handler)
+      (make-object keyname-event-handler% (list
+        (list collapse*! '("s:left" "H"))
+        (list expand*! '("s:right" "L"))
+      ))
+    )
+
     (define/public (set-horizontal! new-value)
       (set! horizontal*? new-value)
     )
@@ -1704,6 +1711,21 @@
       (define index (list-index (curry eq? child) children*))
       (assert "no such child" index)
       index
+    )
+
+    (define (collapse*! dirty-bit event)
+      (set-horizontal! #t)
+      (send dirty-bit set-not-dirty!)
+    )
+
+    (define (expand*! dirty-bit event)
+      (define (expand ui-list)
+        (send ui-list set-horizontal! #f)
+        (define parent (send ui-list get-parent))
+        (when parent (expand parent))
+      )
+      (expand this)
+      (send dirty-bit set-not-dirty!)
     )
 
     (super-make-object parent-ent fallback-event-handler)
@@ -1796,7 +1818,11 @@
     (abstract db-get-list-handle)
 
     (define/override (get-event-handler)
-      (combine-keyname-event-handlers (list (create-insert-start-handler) (create-insert-end-handler)))
+      (combine-keyname-event-handlers (list
+        (create-insert-start-handler)
+        (create-insert-end-handler)
+        (send this create-expand-and-collapse-handler)
+      ))
     )
 
     (define/override (child-slot->event-handler slot)
