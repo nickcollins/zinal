@@ -31,6 +31,8 @@
   horizontal? ; ()
 
   get-horizontal-separator ; () -> zinal:ui:const%% OR #f
+
+  get-bookends ; () -> [zinal:ui:const%% zinal:ui:const%%] OR #f
 ))
 
 (define zinal:ui:element-visitor%

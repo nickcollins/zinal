@@ -778,7 +778,7 @@
 
   (define ent:singleton% (class ent% ; abstract
 
-    (init cone-root-handle child-spawner! header)
+    (init cone-root-handle child-spawner! header [bookends #f])
 
     (abstract db-get-single-item)
 
@@ -795,7 +795,7 @@
         (send (send this-ent* get-cone-root) get-visible-referables-underneath)
       )
 
-      (super-make-object this-ent* this-ent* header)
+      (super-make-object this-ent* this-ent* header bookends)
 
       (define item-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
       (child-spawner! item-slot* (db-get-single-item) this)
@@ -839,6 +839,10 @@
       #f
     )
 
+    (define/public (get-bookends)
+      #f
+    )
+
     (define/public (horizontal-by-default?)
       #f
     )
@@ -871,7 +875,7 @@
         (send this-ent* db-get-list-handle)
       )
 
-      (super-make-object this-ent* this-ent* child-spawner! (get-header) (get-separator))
+      (super-make-object this-ent* this-ent* child-spawner! (get-header) (get-separator) (get-bookends))
     )))
 
     (when (horizontal-by-default?) (send ui-list* set-horizontal! #t))
@@ -905,6 +909,13 @@
 
     (define/override (get-header)
       (make-object ui:var-scalar% this (send (make-object style-delta% (get-style-change-command*)) set-delta-foreground "Cyan") get-header-text* header->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (define/override (get-bookends)
+      (list
+        (make-object ui:const% this NO-STYLE "(")
+        (make-object ui:const% this NO-STYLE ")")
+      )
     )
 
     (define/override (horizontal-by-default?)
@@ -947,7 +958,7 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:legacy-invokation% (class ent:invokation% 
+  (define ent:legacy-invokation% (class ent:invokation%
 
     (init cone-root-handle child-spawner!)
 
@@ -958,7 +969,7 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:reference-invokation% (class ent:invokation% 
+  (define ent:reference-invokation% (class ent:invokation%
 
     (init cone-root-handle child-spawner!)
 
@@ -989,8 +1000,11 @@
       (cdr (super db-get-items))
     )
 
-    (define/override (get-header)
-      (make-object ui:const% this (make-object style-delta% 'change-bold) "[")
+    (define/override (get-bookends)
+      (list
+        (make-object ui:const% this (make-object style-delta% 'change-bold) "[")
+        (make-object ui:const% this (make-object style-delta% 'change-bold) "]")
+      )
     )
 
     (define/override (horizontal-by-default?)
@@ -1008,8 +1022,11 @@
       (second (send (send this get-cone-root) get-items))
     )
 
-    (define/override (get-header)
-      (make-object ui:const% this NO-STYLE "`")
+    (define/override (get-bookends)
+      (list
+        (make-object ui:const% this (make-object style-delta% 'change-bold) "'(")
+        (make-object ui:const% this (make-object style-delta% 'change-bold) ")")
+      )
     )
 
     (define/override (horizontal-by-default?)
@@ -1132,6 +1149,11 @@
 
     (define body-separator* (make-object ui:const% this NO-STYLE "; "))
 
+    (define bookends* (list
+      (make-object ui:const% this NO-STYLE "{")
+      (make-object ui:const% this NO-STYLE "}")
+    ))
+
     (define ui-body* (make-object (class ui:dynamic-slotted-list%
 
       (define/override (db-insert!! index)
@@ -1167,7 +1189,7 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-params-header)
-      (make-object ui:const% this NO-STYLE "λ")
+      (make-object ui:const% this NO-STYLE "λ:")
     )
 
     (define/override (get-lambda-handle)
@@ -1188,7 +1210,7 @@
       (define header (make-object ui:list% this NOOP-FALLBACK-EVENT-HANDLER))
       (send header set-horizontal! #t)
       (send header insert! 0 (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-name-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-      (send header insert! 1 (make-object ui:const% this NO-STYLE "= λ"))
+      (send header insert! 1 (make-object ui:const% this NO-STYLE "= λ:"))
       header
     )
 
@@ -1570,14 +1592,20 @@
 
   (define ui:list% (class* ui:item% (zinal:ui:list%%)
 
-    (init parent-ent fallback-event-handler [header #f] [separator #f])
-    (assert "Header must be an item or #f" (implies header (is-a? header zinal:ui:item%%)))
-    (assert "Separator must be a const or #f" (implies separator (is-a? separator zinal:ui:const%%)))
+    (init parent-ent fallback-event-handler [header #f] [separator #f] [bookends #f])
+    (assert "header must be an item or #f" (implies header (is-a? header zinal:ui:item%%)))
+    (assert "separator must be a const or #f" (implies separator (is-a? separator zinal:ui:const%%)))
+    (assert
+      "bookends must be a pair of consts or #f"
+      (implies bookends (and (pair? bookends) (= 2 (length bookends)) (andmap (curryr is-a? zinal:ui:const%%) bookends)))
+    )
 
     (define header* header)
     (when header* (send header* set-parent! this))
     (define separator* (or separator (make-object ui:const% this NO-STYLE " ")))
     (send separator* set-parent! this)
+    (define bookends* bookends)
+    (when bookends* (for-each (lambda (b) (send b set-parent! this)) bookends*))
     (define children* '())
     (define horizontal*? #f)
 
@@ -1607,6 +1635,10 @@
 
     (define/public (get-horizontal-separator)
       separator*
+    )
+
+    (define/public (get-bookends)
+      bookends*
     )
 
     (define/public (set-horizontal! new-value)
@@ -1661,7 +1693,7 @@
 
   (define ui:slotted-list% (class ui:list% ; abstract
 
-    (init parent-ent fallback-event-handler [header #f] [separator #f])
+    (init parent-ent fallback-event-handler [header #f] [separator #f] [bookends #f])
 
     (abstract get-visible-referables-for-slot)
 
@@ -1698,12 +1730,12 @@
       (create-interaction-dependent-event-handler interaction-function (lambda (nhi) (reassign-slot!! slot nhi)) "s")
     )
 
-    (super-make-object parent-ent fallback-event-handler header separator)
+    (super-make-object parent-ent fallback-event-handler header separator bookends)
   ))
 
   (define ui:dynamic-slotted-list% (class ui:slotted-list% ; abstract
 
-    (init parent-ent fallback-event-handler child-spawner! [header #f] [separator #f])
+    (init parent-ent fallback-event-handler child-spawner! [header #f] [separator #f] [bookends #f])
 
     (abstract db-insert!!)
     (abstract db-can-remove?)
@@ -1816,7 +1848,7 @@
       (child-slot->event-handler slot)
     )
 
-    (super-make-object parent-ent fallback-event-handler header separator)
+    (super-make-object parent-ent fallback-event-handler header separator bookends)
 
     (begin
       (define handles (list->vector (db-get-items)))

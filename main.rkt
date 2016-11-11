@@ -81,29 +81,42 @@
       (define children (send ui-list get-children))
       (define header (send ui-list get-header))
       (define separator (send ui-list get-horizontal-separator))
+      (define bookends (send ui-list get-bookends))
       (cond
         [(send ui-list horizontal?)
-          (add-snip "(" no-delta selected?)
+          (when bookends (display-ui-item (first bookends) preceeding-whitespace selected?))
           (when header
             (display-ui-item header preceeding-whitespace selected?)
             (add-snip " " no-delta selected?)
           )
-          (foldl
-            (lambda (child prepend-separator?)
-              (when prepend-separator? (display-ui-item separator preceeding-whitespace selected?))
-              (display-ui-item child preceeding-whitespace selected?)
-              #t
+          (if (pair? children)
+            (foldl
+              (lambda (child prepend-separator?)
+                (when prepend-separator? (display-ui-item separator preceeding-whitespace selected?))
+                (display-ui-item child preceeding-whitespace selected?)
+                #t
+              )
+              #f
+              children
             )
-            #f
-            children
+            (unless (or header bookends)
+              (add-snip "()" no-delta selected?)
+            )
           )
-          (add-snip ")" no-delta selected?)
+          (when bookends (display-ui-item (second bookends) preceeding-whitespace selected?))
         ]
-        [else
+        [else ; vertical
           (define child-whitespace (string-append preceeding-whitespace "    "))
-          (if header
-            (display-ui-item header preceeding-whitespace selected?)
-            (add-snip "(" no-delta selected?)
+          (cond
+            [header
+              (display-ui-item header preceeding-whitespace selected?)
+            ]
+            [bookends
+              (display-ui-item (first bookends) preceeding-whitespace selected?)
+            ]
+            [else
+              (add-snip "(" no-delta selected?)
+            ]
           )
           (if (pair? children)
             (for-each
@@ -114,7 +127,12 @@
               )
               children
             )
-            (add-snip ")" no-delta selected?)
+            (unless header
+              (if bookends
+                (display-ui-item (second bookends) preceeding-whitespace selected?)
+                (add-snip ")" no-delta selected?)
+              )
+            )
           )
         ]
       )

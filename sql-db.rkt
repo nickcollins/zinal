@@ -307,7 +307,7 @@
 
         (define/public (get-optional-params)
           (send this assert-valid)
-          (dropf (get-all-params) (lambda (p) (not (send p get-default)))) 
+          (dropf (get-all-params) (lambda (p) (not (send p get-default))))
         )
 
         (define/public (can-remove-optional-param? index)
