@@ -1203,15 +1203,21 @@
 
     (init cone-root-handle child-spawner!)
 
+    (define this-ent* this)
+
     (define/override (get-params-header)
-      (define (get-name-text*)
-        (get-short-desc-or* (send this get-cone-root) "<nameless def>")
-      )
-      (define header (make-object ui:list% this NOOP-FALLBACK-EVENT-HANDLER))
-      (send header set-horizontal! #t)
-      (send header insert! 0 (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-name-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-      (send header insert! 1 (make-object ui:const% this NO-STYLE "= λ:"))
-      header
+      (make-object (class ui:def-list%
+
+        (define/override (get-default-name-text)
+          "<nameless def>"
+        )
+
+        (define/override (get-bridge-text)
+          "= λ:"
+        )
+
+        (super-make-object this-ent*)
+      ))
     )
 
     (define/override (get-lambda-handle)
@@ -1229,14 +1235,18 @@
       (send (send this get-cone-root) get-expr)
     )
 
-    (define (get-name-text*)
-      (get-short-desc-or* (send this get-cone-root) "<nameless def>")
-    )
+    (define this-ent* this)
 
-    (define header* (make-object ui:list% this NOOP-FALLBACK-EVENT-HANDLER))
-    (send header* set-horizontal! #t)
-    (send header* insert! 0 (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-name-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (send header* insert! 1 (make-object ui:const% this NO-STYLE "="))
+    (define header*
+      (make-object (class ui:def-list%
+
+        (define/override (get-default-name-text)
+          "<nameless def>"
+        )
+
+        (super-make-object this-ent*)
+      ))
+    )
 
     (super-make-object cone-root-handle child-spawner! header*)
   ))
@@ -1304,14 +1314,18 @@
       default
     )
 
-    (define (get-name-text*)
-      (get-short-desc-or* (send this get-cone-root) "<?>")
-    )
+    (define this-ent* this)
 
-    (define header* (make-object ui:list% this NOOP-FALLBACK-EVENT-HANDLER))
-    (send header* set-horizontal! #t)
-    (send header* insert! 0 (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-name-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (send header* insert! 1 (make-object ui:const% this NO-STYLE "="))
+    (define header*
+      (make-object (class ui:def-list%
+
+        (define/override (get-default-name-text)
+          "<?>"
+        )
+
+        (super-make-object this-ent*)
+      ))
+    )
 
     (super-make-object cone-root-handle child-spawner! header*)
   ))
@@ -1324,8 +1338,12 @@
       (get-short-desc-or* (send this get-cone-root) "<?>")
     )
 
+    (define (name-ui->event-handler* name-ui)
+      (create-name-change-handler (thunk (send this get-cone-root)))
+    )
+
     (define ui-scalar*
-      (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-text THING->NOOP this)
+      (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-text name-ui->event-handler* this)
     )
 
     (define/override (get-root-ui-item)
@@ -1691,6 +1709,40 @@
     (super-make-object parent-ent fallback-event-handler)
   ))
 
+  (define ui:def-list% (class ui:list% ; abstract
+
+    (init parent-ent)
+
+    (abstract get-default-name-text)
+
+    (define parent-ent* parent-ent)
+
+    (define/public (db-get-def-handle)
+      (send parent-ent* get-cone-root)
+    )
+
+    (define/public (get-bridge-text)
+      "="
+    )
+
+    (define (name-ui->event-handler* name-ui)
+      (create-name-change-handler (thunk (db-get-def-handle)))
+    )
+
+    (define (get-name-text*)
+      (get-short-desc-or* (db-get-def-handle) (get-default-name-text))
+    )
+
+    (define header* (make-object ui:list% parent-ent NOOP-FALLBACK-EVENT-HANDLER))
+    (send header* set-horizontal! #t)
+    (send header* insert! 0
+      (make-object ui:var-scalar% parent-ent (send (make-object style-delta%) set-delta-foreground "Yellow") get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
+    )
+    (send header* insert! 1 (make-object ui:const% parent-ent NO-STYLE (get-bridge-text)))
+
+    (super-make-object parent-ent NOOP-FALLBACK-EVENT-HANDLER header*)
+  ))
+
   (define ui:slotted-list% (class ui:list% ; abstract
 
     (init parent-ent fallback-event-handler [header #f] [separator #f] [bookends #f])
@@ -1907,6 +1959,23 @@
 
   (define (create-simple-event-handler keyname handler-function)
     (make-object keyname-event-handler% (list (list handler-function (list keyname))))
+  )
+
+  (define (create-name-change-handler get-describable-handle)
+    (define (interaction-function)
+      (define new-name
+        (get-text-from-user
+          "Enter the new name"
+          "A short descriptor, one or a few words, to name this thing"
+          #:validate non-empty-string?
+        )
+      )
+      (and (non-empty-string? new-name) new-name)
+    )
+    (define (result-handler new-name)
+      (send (get-describable-handle) set-short-desc!! new-name)
+    )
+    (create-interaction-dependent-event-handler interaction-function result-handler "s")
   )
 
   (define (spawn-or-reassign-entity*! slot cone-root-handle ui-parent existing-slots)
