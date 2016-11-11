@@ -211,8 +211,6 @@
       )
     )
 
-    ; TODO we should probably do mixins for this but not sure i want to have much OOP functionality
-    ; before boostrapping
     (define db-describable-node%
       (class* db-node% (zinal:db:describable%%)
         (define/public (get-short-desc)

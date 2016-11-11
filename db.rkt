@@ -1,6 +1,5 @@
 #lang racket
 
-; TODO use prefix-out
 (provide (all-defined-out))
 
 ; TODO write more complete/thorough/detailed comments
