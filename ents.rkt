@@ -836,7 +836,7 @@
     )
 
     (define/public (get-separator)
-      (make-object ui:const% this NO-STYLE " " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+      #f
     )
 
     (define/public (horizontal-by-default?)
@@ -990,7 +990,7 @@
     )
 
     (define/override (get-header)
-      (make-object ui:const% this (make-object style-delta% 'change-bold) "[" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+      (make-object ui:const% this (make-object style-delta% 'change-bold) "[")
     )
 
     (define/override (horizontal-by-default?)
@@ -1009,7 +1009,7 @@
     )
 
     (define/override (get-header)
-      (make-object ui:const% this NO-STYLE "`" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+      (make-object ui:const% this NO-STYLE "`")
     )
 
     (define/override (horizontal-by-default?)
@@ -1033,7 +1033,7 @@
 
     (define this-ent* this)
 
-    (define params-separator* (make-object ui:const% this NO-STYLE ", " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define params-separator* (make-object ui:const% this NO-STYLE ", "))
 
     (define ui-params* (make-object (class ui:dynamic-slotted-list%
 
@@ -1130,7 +1130,7 @@
 
     (send ui-params* set-horizontal! #t)
 
-    (define body-separator* (make-object ui:const% this NO-STYLE "; " THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define body-separator* (make-object ui:const% this NO-STYLE "; "))
 
     (define ui-body* (make-object (class ui:dynamic-slotted-list%
 
@@ -1167,7 +1167,7 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-params-header)
-      (make-object ui:const% this NO-STYLE "λ" THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+      (make-object ui:const% this NO-STYLE "λ")
     )
 
     (define/override (get-lambda-handle)
@@ -1182,10 +1182,14 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-params-header)
-      (define (get-header-text*)
-        (format "~a = λ" (get-short-desc-or* (send this get-cone-root) "<nameless def>"))
+      (define (get-name-text*)
+        (get-short-desc-or* (send this get-cone-root) "<nameless def>")
       )
-      (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-header-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
+      (define header (make-object ui:list% this NOOP-FALLBACK-EVENT-HANDLER))
+      (send header set-horizontal! #t)
+      (send header insert! 0 (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-name-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+      (send header insert! 1 (make-object ui:const% this NO-STYLE "= λ"))
+      header
     )
 
     (define/override (get-lambda-handle)
@@ -1203,11 +1207,14 @@
       (send (send this get-cone-root) get-expr)
     )
 
-    (define (get-header-text*)
-      (format "~a =" (get-short-desc-or* (send this get-cone-root) "<nameless def>"))
+    (define (get-name-text*)
+      (get-short-desc-or* (send this get-cone-root) "<nameless def>")
     )
 
-    (define header* (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-header-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define header* (make-object ui:list% this NOOP-FALLBACK-EVENT-HANDLER))
+    (send header* set-horizontal! #t)
+    (send header* insert! 0 (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-name-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (send header* insert! 1 (make-object ui:const% this NO-STYLE "="))
 
     (super-make-object cone-root-handle child-spawner! header*)
   ))
@@ -1275,11 +1282,14 @@
       default
     )
 
-    (define (get-header-text*)
-      (format "~a =" (get-short-desc-or* (send this get-cone-root) "<?>"))
+    (define (get-name-text*)
+      (get-short-desc-or* (send this get-cone-root) "<?>")
     )
 
-    (define header* (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-header-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (define header* (make-object ui:list% this NOOP-FALLBACK-EVENT-HANDLER))
+    (send header* set-horizontal! #t)
+    (send header* insert! 0 (make-object ui:var-scalar% this (send (make-object style-delta%) set-delta-foreground "Yellow") get-name-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (send header* insert! 1 (make-object ui:const% this NO-STYLE "="))
 
     (super-make-object cone-root-handle child-spawner! header*)
   ))
@@ -1526,7 +1536,7 @@
 
   (define ui:const% (class* ui:scalar% (zinal:ui:const%%)
 
-    (init parent-ent style-delta text item->event-handler fallback-event-handler)
+    (init parent-ent style-delta text)
 
     (define text* text)
 
@@ -1538,7 +1548,7 @@
       text*
     )
 
-    (super-make-object parent-ent style-delta item->event-handler fallback-event-handler)
+    (super-make-object parent-ent style-delta THING->NOOP NOOP-FALLBACK-EVENT-HANDLER)
   ))
 
   (define ui:var-scalar% (class* ui:scalar% (zinal:ui:var-scalar%%)
@@ -1566,8 +1576,8 @@
 
     (define header* header)
     (when header* (send header* set-parent! this))
-    (define separator* separator)
-    (when separator* (send separator* set-parent! this))
+    (define separator* (or separator (make-object ui:const% this NO-STYLE " ")))
+    (send separator* set-parent! this)
     (define children* '())
     (define horizontal*? #f)
 
