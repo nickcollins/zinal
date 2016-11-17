@@ -31,6 +31,10 @@
 
 ; HELPER FUNCTIONS
 
+(define (handles-equal? handle1 handle2)
+  (send handle1 equals? handle2)
+)
+
 (define (standard*? db-legacy-link-handle)
   (not (send db-legacy-link-handle get-library))
 )
@@ -278,7 +282,7 @@
             ]
             [(#\backspace #\rubout)
               (cond
-                [(cons? chars)
+                [(pair? chars)
                   (set! chars (take chars (sub1 (length chars))))
                   (build-choices*! cur-selection-key)
                   #t
@@ -575,7 +579,7 @@
 ; to 16.04.1
 (define (new-value-read-creator visible-referables)
   (cond
-    [(cons? visible-referables)
+    [(pair? visible-referables)
       (define handles&choices
         (map
           (lambda (handle) (list handle (get-short-desc-or* handle "<no desc>")))
@@ -587,7 +591,7 @@
           [title "What definition or parameter do you want to read?"]
           [message "Start typing bits and pieces of the desired referable's short descriptor"]
           [keys&choices handles&choices]
-          [key-equalifier (lambda (a b) (send a equals? b))]
+          [key-equalifier handles-equal?]
         )
       )
       (send dialog show #t)
@@ -667,20 +671,35 @@
   (define selected* #f)
 
   (define/public (get-initial-ui!)
-    (define root-slot (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (spawn-entity*! root-slot (send db* get-root) #f)
-    (select! root-slot)
+    (define (create-first-module!!)
+      (or (create-module*!!) (create-first-module!!))
+    )
+    (define (get-first-module-from-user)
+      (or (get-module-from-user) (get-first-module-from-user))
+    )
+    (define first-module
+      (or
+        (send db* get-main-module)
+        (if (pair? (send db* get-all-modules))
+          (get-first-module-from-user)
+          (create-first-module!!)
+        )
+      )
+    )
+    (spawn-module*! first-module)
     (send selected* get-root)
   )
 
   (define/public (handle-event!! event)
     (assert "Something must always be selected" selected*)
-    ; TODO if we implement db transactions, then end-transaction could return "has changed",
-    ; in which case we can avoid reparsing unless a change has actually occurred. If we do that,
-    ; we should have reparse traverse the whole damn tree
-    (define event-result (send selected* handle-event!! event))
-    (when (and event-result (send event-result dirty?))
-      (maybe-reparse*! (send (send (send selected* get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path selected*)))
+    (unless (handle-global-event*!! event)
+      ; TODO if we implement db transactions, then end-transaction could return "has changed",
+      ; in which case we can avoid reparsing unless a change has actually occurred. If we do that,
+      ; we should have reparse traverse the whole damn tree
+      (define event-result (send selected* handle-event!! event))
+      (when (and event-result (send event-result dirty?))
+        (maybe-reparse*! (send (send (send selected* get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path* selected*)))
+      )
     )
     (send selected* get-root)
   )
@@ -689,11 +708,19 @@
     (set! selected* (slot/ui-item->ui-item slot/item))
   )
 
-  (define (get-backwards-selection-path ui-item)
+  (define (spawn-module*! module)
+    (assert "can't spawn #f module" module)
+    (define root-slot (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (spawn-entity*! root-slot module #f)
+    (select! root-slot)
+    root-slot
+  )
+
+  (define (get-backwards-selection-path* ui-item)
     (cond
       [ui-item
         (define slot (send (send ui-item get-parent-ent) get-slot))
-        (define sub-chain (get-backwards-selection-path (send ui-item get-parent)))
+        (define sub-chain (get-backwards-selection-path* (send ui-item get-parent)))
         (if (and (pair? sub-chain) (eq? (car sub-chain) slot))
           sub-chain
           (cons slot sub-chain)
@@ -725,6 +752,29 @@
       (select! slot)
     )
     is-current-slot-part-of-selection-path?
+  )
+
+  (define (change-module*! data event)
+    (define module-to-go-to (get-module-from-user))
+    (when module-to-go-to (spawn-module*! module-to-go-to))
+    #t
+  )
+
+  (define (create-new-module*!! data event)
+    (define module-to-go-to (create-module*!!))
+    (when module-to-go-to (spawn-module*! module-to-go-to))
+    #t
+  )
+
+  (define global-event-handler*
+    (make-object keyname-event-handler% (list
+      (list change-module*! '("e"))
+      (list create-new-module*!! '("E"))
+    ))
+  )
+
+  (define (handle-global-event*!! event)
+    (send global-event-handler* handle-event!! event)
   )
 
   ; ENTS
@@ -883,6 +933,53 @@
     (define/override (get-root-ui-item)
       ui-list*
     )
+  ))
+
+  (define ent:module% (class ent:list%
+
+    (init cone-root-handle child-spawner!)
+
+    (define (get-module-text*)
+      (define prefix
+        (if (send (send this db-get-list-handle) is-main-module?)
+          "Main module"
+          "Module"
+        )
+      )
+      (format "~a: ~a" prefix (get-short-desc-or* (send this db-get-list-handle) "<nameless module>"))
+    )
+
+    (define (header->event-handler* header)
+      (define (get-db-list-handle)
+        (send this db-get-list-handle)
+      )
+      (combine-keyname-event-handlers (list
+        (create-name-change-handler get-db-list-handle)
+        (create-simple-event-handler "m"
+          (lambda (dirty-bit event)
+            (define module-handle (get-db-list-handle))
+            (cond
+              [(send module-handle is-main-module?)
+                (send module-handle set-main-module!! #f)
+              ]
+              [(send (send module-handle get-db) get-main-module)
+                (issue-warning "Cannot make main" "Only one module can be the main module")
+              ]
+              [else
+                (send module-handle set-main-module!! #t)
+              ]
+            )
+            (send dirty-bit set-dirty!)
+          )
+        )
+      ))
+    )
+
+    (define/override (get-header)
+      (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* header->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
   ))
 
   (define ent:invokation% (class ent:list% ; abstract
@@ -1941,6 +2038,39 @@
 
   ; HELPER FUNCTIONS
 
+  (define (create-module*!!)
+    (define module-name
+      (get-text-from-user
+        "Enter the new module's name"
+        "A short descriptor, one or a few words, to name this module"
+        #:validate non-empty-string?
+      )
+    )
+    (and module-name (non-empty-string? module-name) (send db* create-module!! module-name))
+  )
+
+  (define (get-module-from-user)
+    (define handles&choices
+      (map
+        (lambda (module)
+          (define name (get-short-desc-or* module "<unnamed module>"))
+          (list module (if (send module is-main-module?) (format "~a (Main)" name) name))
+        )
+        (send db* get-all-modules)
+      )
+    )
+    (define dialog
+      (new auto-complete-dialog%
+        [title "Choose a module to go to"]
+        [message "Start typing bits and pieces of the desired module's name"]
+        [keys&choices handles&choices]
+        [key-equalifier handles-equal?]
+      )
+    )
+    (send dialog show #t)
+    (send dialog get-choice)
+  )
+
   (define (issue-warning title message)
     (message-box title message #f '(ok caution))
   )
@@ -2006,7 +2136,7 @@
 
   (define (spawn-or-reassign-entity*! slot cone-root-handle ui-parent existing-slots)
     (define existing-slot
-      (findf (lambda (s) (send cone-root-handle equals? (slot->db-handle s))) existing-slots)
+      (findf (compose1 (curry handles-equal? cone-root-handle) slot->db-handle) existing-slots)
     )
     (define new-ent
       (if existing-slot
@@ -2075,10 +2205,14 @@
       )
 
       (define/override (visit-list db-list-handle meh)
-        (if (cons? (send db-list-handle get-items))
+        (if (pair? (send db-list-handle get-items))
           (parse-non-nil-list-entity*! db-list-handle)
           ent:list%
         )
+      )
+
+      (define/override (visit-module db-module-handle meh)
+        ent:module%
       )
 
       (define/override (visit-def db-def-handle meh)

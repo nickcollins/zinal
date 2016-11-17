@@ -20,7 +20,8 @@
   (or v sql-null)
 )
 
-(define TABLES->NON-ID-COLS (hash
+(define ID-TABLES->NON-ID-COLS (hash
+  "modules" '("list_id INT" "is_main INT")
   "list_headers" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "cdr_id INT")
   "lambdas" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "params_id INT" "body_id INT")
   "params" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "default_id INT")
@@ -33,16 +34,17 @@
   "unassigned" '("short_desc TEXT" "long_desc TEXT")
 ))
 
-(define TABLES (list->vector (hash-keys TABLES->NON-ID-COLS)))
+(define ID-TABLES (list->vector (hash-keys ID-TABLES->NON-ID-COLS)))
+
+(define WEIRD-TABLES->COLS (hash
+  "public_defs" '("module_id INT" "public_def_id INT")
+))
 
 (define (get-table-mod* table)
-  (define mod (vector-member table TABLES))
+  (define mod (vector-member table ID-TABLES))
   (assert (format "Invalid table ~a" table) mod)
   mod
 )
-
-; note PROG-START-ID is not necessarily the very first id, merely the id of the root list
-(define PROG-START-ID (+ (vector-length TABLES) (get-table-mod* "list_headers")))
 
 (define DEFAULT-LIBRARY "")
 
@@ -50,16 +52,45 @@
 
 (define NIL-ID 0)
 
+(define SQL-FALSE 0)
+
+(define SQL-TRUE 1)
+
 (define sql-db%
   (class* object% (zinal:db%%)
 
     (init filename)
 
-    (define/public (get-root)
-      (get-handle! ROOT-LOC)
+    (super-make-object)
+
+    (define filename* filename)
+    (unless (file-exists? filename*) (close-output-port (open-output-file filename*)))
+    (define db* (sqlite3-connect #:database filename*))
+    (define sql-db* this)
+    ; This should hold values weakly, but racket seems to only support weak keys.
+    (define handles* (make-hash))
+
+    (define/public (get-all-modules)
+      (map get-module-handle! (query-list db* "SELECT id FROM modules"))
     )
 
-    (define/public (get-referables)
+    (define/public (get-main-module)
+      (define main-module-id (query-maybe-value db* "SELECT id FROM modules WHERE is_main"))
+      (and main-module-id (get-module-handle! main-module-id))
+    )
+
+    (define/public (create-module!! [short-desc #f])
+      (define new-module-id
+        (create-something!! "modules" (list
+          (list "list_id" BOGUS-ID)
+          (list "is_main" SQL-FALSE)
+        ))
+      )
+      (create-list-header!! (new loc% [id new-module-id] [col "list_id"]) short-desc)
+      (get-module-handle! new-module-id)
+    )
+
+    (define/public (get-all-referables)
       (map get-handle! (append (get-referables-of-type* "params") (get-referables-of-type* "defines")))
     )
 
@@ -69,7 +100,7 @@
 
     ; DB ELEMENT IMPLEMENTATION CLASSES
 
-    (define db-element%
+    (define db-element% ; abstract
       (class* object% (zinal:db:element%%)
 
         (init id)
@@ -143,36 +174,27 @@
 
         (define/public (get-parent)
           (send this assert-valid)
-          (cond
-            [(send loc* root?)
-              #f
-            ]
-            [else
-              (define loc-id (send loc* get-id))
-              (define direct-parent-id
-                (if (equal? "list_nodes" (get-table loc-id))
-                  (get-cell* loc-id "owner_id")
-                  loc-id
-                )
-              )
-              (cond
-                [(= direct-parent-id PROG-START-ID)
-                  (get-handle! ROOT-LOC)
-                ]
-                [else
-                  ; We want the parent of a lambda body expr to be the lambda, not the list it's hidden in
-                  (define direct-grandparent-id (get-cell* direct-parent-id "parent_id"))
-                  (define parent-id
-                    (if (equal? "lambdas" (get-table direct-grandparent-id))
-                      direct-grandparent-id
-                      direct-parent-id
-                    )
-                  )
-                  (get-handle! (get-cell* parent-id "parent_id") (get-cell* parent-id "parent_col"))
-                ]
-              )
-            ]
+          (define loc-id (send loc* get-id))
+          (define direct-parent-id
+            (if (equal? "list_nodes" (get-table loc-id))
+              (get-cell* loc-id "owner_id")
+              loc-id
+            )
           )
+          ; We want the parent of a lambda body expr to be the lambda, not the list it's hidden in
+          (define direct-grandparent-id (get-cell* direct-parent-id "parent_id"))
+          (define parent-id
+            (if (equal? "lambdas" (get-table direct-grandparent-id))
+              direct-grandparent-id
+              direct-parent-id
+            )
+          )
+          (id->handle! parent-id)
+        )
+
+        (define/public (get-module)
+          (send this assert-valid)
+          (send (get-parent) get-module)
         )
 
         (define/public (get-visible-referables-underneath)
@@ -404,6 +426,7 @@
 
         (define/override (delete-and-invalidate*!!)
           (define id (send this get-id))
+          (query-exec db* "DELETE FROM public_defs WHERE public_def_id = ?1" id)
           (send (get-expr) delete-and-invalidate*!!)
           (delete-id*!! (get-definition-id id))
           (delete-id*!! id)
@@ -538,6 +561,101 @@
         (super-new)
       )
     )
+
+    (define db-module% (class* db-list% (zinal:db:module%%)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-module this data)
+      )
+
+      (define/override (can-unassign?)
+        (send this assert-valid)
+        #f
+      )
+
+      (define/override (get-parent)
+        (send this assert-valid)
+        #f
+      )
+
+      (define/override (get-module)
+        (send this assert-valid)
+        this
+      )
+
+      (define/override (delete-and-invalidate*!!)
+        (define module-id (get-module-id*))
+        (query-exec db* "DELETE FROM public_defs WHERE module_id = ?1" module-id)
+        ; Normally, this should be the last action, but in this case we need the module
+        ; row to still exist when deleting the loc
+        (super delete-and-invalidate*!!)
+        (delete-id*!! module-id)
+      )
+
+      (define/public (get-public-defs)
+        (send this assert-valid)
+        (map id->handle! (query-list db* "SELECT public_def_id FROM public_defs WHERE module_id = ?1" (get-module-id*)))
+      )
+
+      (define/public (set-public!! index/def-handle new-value)
+        (send this assert-valid)
+        (define children (send this get-items))
+        (define def-handle (if (number? index/def-handle) (list-ref children index/def-handle) index/def-handle))
+        (define module-id (get-module-id*))
+        (define def-handle-id (send def-handle get-id))
+        (assert (format "You can only set the publicity of a define: ~a, ~a" module-id def-handle-id) (is-a? def-handle zinal:db:def%%))
+        (assert (format "You can only set the publicity of a module's direct child: ~a, ~a" module-id def-handle-id) (findf (curry equals*? def-handle) children))
+        (if new-value
+          (unless (query-maybe-value db* "SELECT 1 FROM public_defs WHERE module_id = ?1 AND public_def_id = ?2" module-id def-handle-id)
+            ; probably the correct way to do this is to use UNIQUE or IF NOT EXISTS or something, but whatever
+            (query-exec db* "INSERT INTO public_defs(module_id, public_def_id) values(?1, ?2)" module-id def-handle-id)
+          )
+          (query-exec db* "DELETE FROM public_defs WHERE module_id = ?1 AND public_def_id = ?2" module-id def-handle-id)
+        )
+        (void)
+      )
+
+      (define/public (is-main-module?)
+        (send this assert-valid)
+        (define main-module (get-main-module*))
+        (and main-module (equals*? this main-module))
+      )
+
+      (define/public (set-main-module!! new-value)
+        (send this assert-valid)
+        (define main-module-handle (get-main-module*))
+        (define module-id (get-module-id*))
+        (assert
+          (format "Attempt to set module ~a to be main even though ~a is already main" module-id (send main-module-handle get-id))
+          (implies (and new-value main-module-handle) (is-main-module?))
+        )
+        (q!! query-exec "UPDATE ~a SET is_main = ?2" module-id (if new-value SQL-TRUE SQL-FALSE))
+        (void)
+      )
+
+      (define/public (can-delete?)
+        (send this assert-valid)
+        (andmap (curryr all-references-are-descendants*? this) (get-public-defs))
+      )
+
+      (define/public (delete!!)
+        (send this assert-valid)
+        (assert (format "Cannot delete module:~a" (get-module-id*)) (can-delete?))
+        (delete-and-invalidate*!!)
+        (void)
+      )
+
+      (define (get-module-id*)
+        (get-module-id (send this get-id))
+      )
+
+      (define (get-main-module*)
+        (send (send this get-db) get-main-module)
+      )
+
+      (super-new)
+    ))
 
     (define db-param%
       (class* db-describable-node% (zinal:db:param%%)
@@ -772,13 +890,13 @@
         (define/public (get-referable)
           (send this assert-valid)
           (define referable-id (get-cell* (send this get-id) (get-referable-id-col)))
-          (get-handle! (get-cell* referable-id "parent_id") (get-cell* referable-id "parent_col"))
+          (id->handle! referable-id)
         )
 
         (define/public (is-referable-visible?)
           (send this assert-valid)
           (define referable (get-referable))
-          (findf (lambda (r) (send r equals? referable)) (send this get-visible-referables-after))
+          (findf (curry equals*? referable) (send this get-visible-referables-after))
         )
 
         (abstract get-referable-id-col)
@@ -966,35 +1084,26 @@
         (define col* col)
         (define/public (get-id) id*)
         (define/public (get-col) col*)
-        (define/public (root?) (eq? this ROOT-LOC))
-        (define/public (get-cell)
-          (if (root?)
-            PROG-START-ID
-            (get-cell* id* col*)
-          )
-        )
-        (define/public (get-id&col)
-          (list id* col*)
-        )
+        (define/public (get-cell) (get-cell* id* col*))
+        (define/public (get-id&col) (list id* col*))
       )
     )
-    (define ROOT-LOC (new loc% [id NIL-ID] [col #f]))
 
     ; HELPER FUNCTIONS
+
+    (define (id->handle! id)
+      (get-handle! (get-cell* id "parent_id") (get-cell* id "parent_col"))
+    )
 
     ; id&col is a horrible abomination but it seems the least painful way to use locs as hash keys
     ; TODO we may be able to fix this if we wind up supporting init-field after all
     (define (id&col->loc id&col)
-      (define id (first id&col))
-      (if (= id (send ROOT-LOC get-id))
-        ROOT-LOC
-        (new loc% [id id] [col (second id&col)])
-      )
+      (new loc% [id (first id&col)] [col (second id&col)])
     )
 
     (define (get-table id)
       (assert-real-id id)
-      (vector-ref TABLES (modulo id (vector-length TABLES)))
+      (vector-ref ID-TABLES (modulo id (vector-length ID-TABLES)))
     )
 
     ; query is executed "WHERE id = 'id'". Use ~a for the table, and ?2 ... for other q-parms
@@ -1032,7 +1141,13 @@
         (case table
           [("lambdas") (new db-lambda% [loc loc])]
           [("defines") (new db-def% [loc loc])]
-          [("list_headers") (new db-list% [loc loc])]
+          [("list_headers")
+            (define module-id (get-module-id id))
+            (if module-id
+              (new db-module% [loc loc])
+              (new db-list% [loc loc])
+            )
+          ]
           [("params") (new db-param% [loc loc])]
           [("param_refs") (new db-param-ref% [loc loc])]
           [("definitions") (new db-def-ref% [loc loc])]
@@ -1071,7 +1186,7 @@
     )
 
     (define (get-next-id table)
-      (+ (vector-length TABLES) (sql:// (query-value db* (format "SELECT MAX(id) FROM ~a" table)) (get-table-mod* table)))
+      (+ (vector-length ID-TABLES) (sql:// (query-value db* (format "SELECT MAX(id) FROM ~a" table)) (get-table-mod* table)))
     )
 
     ; loc must be empty (i.e. BOGUS-ID) before calling this
@@ -1176,6 +1291,14 @@
       (query-value db* "SELECT id FROM definitions WHERE define_id = ?1" define-id)
     )
 
+    (define (get-module-id list-id)
+      (query-maybe-value db* "SELECT id FROM modules WHERE list_id = ?1" list-id)
+    )
+
+    (define (get-module-handle! module-id)
+      (get-handle! module-id "list_id")
+    )
+
     (define (get-references* id)
       (append
         (get-references-of-type* "list_nodes" "car_id" id)
@@ -1216,21 +1339,24 @@
     )
 
     (define (get-visible-referables* location-node [check-younger-siblings? #f])
+      (define this-module (send location-node get-module))
+      (define all-other-modules (remove this-module (send sql-db* get-all-modules) equals*?))
+      (define all-foreign-public-defs (map (lambda (m) (send m get-public-defs)) all-other-modules))
       (define parent (send location-node get-parent))
-      (if parent
-        (append
-          (get-visible-sibling-referables* location-node (send parent get-children) check-younger-siblings?)
-          (get-visible-referables* parent #t)
+      (append
+        all-foreign-public-defs
+        (if parent
+          (append
+            (get-visible-sibling-referables* location-node (send parent get-children) check-younger-siblings?)
+            (get-visible-referables* parent #t)
+          )
+          '()
         )
-        ; We assume root is not a referable
-        '()
       )
     )
 
     (define (get-visible-sibling-referables* location-node siblings check-younger-siblings?)
-      (define (not-location-node? sib)
-        (not (send sib equals? location-node))
-      )
+      (define not-location-node? (negate (curry equals*? location-node)))
       (define older (takef siblings not-location-node?))
       (append
         (filter
@@ -1253,9 +1379,9 @@
       (and (is-a? handle zinal:db:def%%) (is-a? (send handle get-expr) zinal:db:lambda%%))
     )
 
-    (define (all-references-are-descendants*? referable)
+    (define (all-references-are-descendants*? referable [ancestor referable])
       (andmap
-        (curryr descendant? referable)
+        (curryr descendant? ancestor)
         (send referable get-references)
       )
     )
@@ -1263,7 +1389,7 @@
     (define (descendant? child subroot)
       (define parent (send child get-parent))
       (or
-        (send child equals? subroot)
+        (equals*? child subroot)
         (and
           parent
           (descendant? parent subroot)
@@ -1271,38 +1397,23 @@
       )
     )
 
-    (super-new)
+    (define (equals*? elem1 elem2)
+      (send elem1 equals? elem2)
+    )
 
-    (define filename* filename)
-    (unless (file-exists? filename*) (close-output-port (open-output-file filename*)))
-    (define db* (sqlite3-connect #:database filename*))
-    (define sql-db* this)
-    ; This should hold values weakly, but racket seems to only support weak keys.
-    (define handles* (make-hash))
+    ; INIT
 
     (unless (positive? (file-size filename*))
-      (vector-map
-        (lambda (t)
-          (query-exec db* (format "CREATE TABLE ~a(id INTEGER PRIMARY KEY, ~a)" t (string-join (hash-ref TABLES->NON-ID-COLS t) ", ")))
-        )
-        TABLES
-      )
-
-      (define first-id
-        (create-something!! "list_headers"
-          (list
-            (list "parent_id" NIL-ID)
-            (list "parent_col" sql-null)
-            (list "short_desc" "Main Program")
-            (list "long_desc" "")
-            (list "cdr_id" NIL-ID)
+      (define (create-tables tables->cols [extra-cols '()])
+        (hash-map
+          tables->cols
+          (lambda (table cols)
+            (query-exec db* (format "CREATE TABLE ~a(~a)" table (string-join (append extra-cols cols) ", ")))
           )
         )
       )
-      (assert
-        (format "first created item should have id ~a but has id ~a" PROG-START-ID)
-        (= PROG-START-ID first-id)
-      )
+      (create-tables ID-TABLES->NON-ID-COLS '("id INTEGER PRIMARY KEY"))
+      (create-tables WEIRD-TABLES->COLS)
     )
   )
 )

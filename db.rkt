@@ -43,13 +43,21 @@
 ;      a dependency cycle that does not necessarily involve intentional recursion.
 ;      If "do-something" was instead replaced by "define blah", then invis would be visible to
 ;      R2-5.
+;   2) If the referable is not public and the reference and referable are not in the same module.
 (define zinal:db%% (interface ()
 
-  ; Returns a zinal:db:list%% handle for the root node
-  get-root ; ()
+  ; Returns zinal:db:module%% handles for all modules
+  get-all-modules ; ()
+
+  ; Returns a zinal:db:module%% for the main module, for #f if there's no main module
+  get-main-module ; ()
+
+  ; short-desc may be #f to indicate no short descriptor. Returns a zinal:db:module%% handle
+  ; for the newly minted module
+  create-module!! ; ([short-desc])
 
   ; Returns a list of all zinal:db:referable%% in this db
-  get-referables ; ()
+  get-all-referables ; ()
 ))
 
 (define zinal:db:element%% (interface ()
@@ -83,8 +91,11 @@
 
 (define zinal:db:node%% (interface (zinal:db:element%%)
 
-  ; Returns a zinal:db:node%% handle to the parent of this node. Returns #f for the root node.
+  ; Returns a zinal:db:node%% handle to the parent of this node. Returns #f for a module
   get-parent ; ()
+
+  ; returns the containing zinal:db:module%%
+  get-module ; ()
 
   ; Returns a list of all zinal:db:referable%% that are visible underneath this node.
   ; Included in the list is this node (if it's a referable) and its params (if it's a lambda).
@@ -97,9 +108,9 @@
   get-visible-referables-after ; ()
 
   ; Returns true iff unassign!! can be called without throwing an exception. Returns #f if this
-  ; node is the root node, of if deleting this node as well as all associated data and children
-  ; would "orphan" any extant references. Returns #t for unassigned nodes, as for them unassign!!
-  ; is a no-op.
+  ; node is a module, or if deleting this node as well as all associated data and children would
+  ; "orphan" any extant references. Returns #t for unassigned nodes, as for them unassign!! is a
+  ; no-op.
   can-unassign? ; ()
 
   ; Deletes all the data associated with this node and any children it may have, converting
@@ -240,6 +251,43 @@
   remove!! ; (non-negative-integer)
 ))
 
+; A module is comparable in scope to a scheme file. It is a list of nodes,
+; which are evaluated in order by any program which uses one of its defines.
+; There can be any number of modules, but only one main module. If the program is run,
+; it is the main module that is executed; if there is no main module, then the program
+; cannot be run as an executable. Generally, referables are only visible within their
+; own module, but each get-public-defs exposes a set of direct children that can
+; be referred to by other modules.
+(define zinal:db:module%% (interface (zinal:db:list%%)
+
+  ; Returns a list of all direct child zinal:db:def%% that can be referenced in other
+  ; modules, in no particular order. Each public child must be a direct child, not an
+  ; indirect descendant.
+  get-public-defs ; ()
+
+  ; The first argument specifies which direct child to change the publicity of. If the
+  ; index is out of bounds, or the node is not a direct child of this module, an
+  ; exception is thrown. new-value is #t if the child should be public, #f otherwise.
+  ; No meaningful return value.
+  set-public!! ; (index OR zinal:db:def%% , new-value)
+
+  is-main-module? ; ()
+
+  ; If new-value is #f, makes this not the main module, otherwise it becomes the main
+  ; module. If new-value is true, but some other module is already the main module, an
+  ; exception is thrown. No meaningful return value
+  set-main-module!! ; (new-value)
+
+  ; Returns #t if this module can be deleted via delete!! , #f otherwise. The module
+  ; can be deleted so long as no other module contains a reference to one of its
+  ; public children
+  can-delete? ; ()
+
+  ; If can-delete? would return #t, deletes this module. Otherwise, throws an exception.
+  ; No meaningful return value.
+  delete!! ; ()
+))
+
 (define zinal:db:def%% (interface (zinal:db:parent-node%% zinal:db:referable%%)
 
   ; Returns a zinal:db:node%% handle for the expression of this define
@@ -318,6 +366,9 @@
     (define/public (visit-reference r data) (visit-node r data))
     (define/public (visit-atom a data) (visit-node a data))
 
+    (define/public (visit-list l data) (visit-node l data))
+    (define/public (visit-module m data) (visit-list m data))
+
     (define/public (visit-lambda l data) (visit-node l data))
     (define/public (visit-number n data) (visit-atom n data))
     (define/public (visit-char c data) (visit-atom c data))
@@ -325,7 +376,6 @@
     (define/public (visit-bool b data) (visit-atom b data))
     (define/public (visit-symbol s data) (visit-atom s data))
     (define/public (visit-keyword k data) (visit-atom k data))
-    (define/public (visit-list l data) (visit-node l data))
     (define/public (visit-def d data) (visit-node d data))
     (define/public (visit-def-ref dr data) (visit-reference dr data))
     (define/public (visit-param p data) (visit-node p data))
