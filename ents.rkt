@@ -720,7 +720,7 @@
     (define ui-parent (send (send current-ent get-root-ui-item) get-parent))
     (define cone-leaves (send current-ent get-cone-leaves))
     (define was-this-slot-respawned? #f)
-    (unless (is-a? current-ent (parse-entity*! db-handle))
+    (unless (is-a? current-ent (parse-entity* db-handle))
       (spawn-entity*! slot db-handle ui-parent (curryr spawn-or-reassign-entity*! cone-leaves))
       ; Imperative style, but the functional alternatives are just so damn ugly
       (set! was-this-slot-respawned? #t)
@@ -839,103 +839,6 @@
     )
   ))
 
-  (define ent:module% (class ent%
-
-    (init cone-root-handle child-spawner!)
-
-    ; Ugh. fucking circular deps. But this at least gives me ideas of how to solve this problem in the db ... define _delayed_
-    (define event-handler* #f)
-
-    (define ui-list* (make-object (class ui:list%
-
-      (define/override (get-event-handler)
-        event-handler*
-      )
-
-      (super-make-object this-ent* this-ent* header*)
-    )))
-
-    (define (insert-new-todo*!! index)
-      (send (send this get-cone-root) insert!! index)
-      (send ui-list* insert! index
-        ; TODO currently, ui:const% can't be selected, so we're going with ui:var-scalar% , even tho the value never changes.
-        ; This is absurd - we should have a selectable? criteria or something, but we'll have to do that later
-        (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Chocolate") (const "<?>") child->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
-      )
-    )
-
-    (define (child->event-handler* child)
-      (create-simple-event-handler "o"
-        (lambda (dirty-bit event)
-          (define index (send ui-list* get-child-index child))
-          (insert-new-todo*!! (add1 index))
-          (send dirty-bit set-dirty!)
-        )
-      )
-    )
-
-    (set! event-handler*
-      (combine-keyname-event-handlers (list
-        (create-name-change-handler (send this get-cone-root))
-        (create-simple-event-handler "m"
-          (lambda (dirty-bit event)
-            (define module-handle (send this get-cone-root))
-            (cond
-              [(send module-handle is-main-module?)
-                (send module-handle set-main-module!! #f)
-              ]
-              [(send db* get-main-module)
-                (issue-warning "Cannot make main" "Only one module can be the main module")
-              ]
-              [else
-                (send module-handle set-main-module!! #t)
-              ]
-            )
-            (send dirty-bit set-dirty!)
-          )
-        )
-        (create-simple-event-handler "d"
-          (lambda (dirty-bit event)
-            (define module-handle (send this get-cone-root))
-            (if (send module-handle can-delete?)
-              (when (navigate-to-fresh-module*! (get-all-modules* module-handle)) (send module-handle delete!!))
-              (issue-warning "Cannot delete module" "Either other modules require this module or contain references to defs in this module")
-            )
-            (send dirty-bit set-dirty!)
-          )
-        )
-        (create-simple-event-handler "o"
-          (lambda (dirty-bit event)
-            (insert-new-todo*!! 0)
-            (send dirty-bit set-dirty!)
-          )
-        )
-      ))
-    )
-
-    (define (get-module-text*)
-      (define prefix
-        (if (send (send this get-cone-root) is-main-module?)
-          "Main module"
-          "Module"
-        )
-      )
-      (format "~a: ~a" prefix (get-short-desc-or* (send this get-cone-root) "<nameless module>"))
-    )
-
-    (define header*
-      (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
-    )
-
-    (define/override (get-root-ui-item)
-      ui-list*
-    )
-
-    (super-make-object cone-root-handle)
-
-    ; TODO current
-  ))
-
   (define ent:typical-list% (class ent%
 
     (init cone-root-handle child-spawner!)
@@ -1012,6 +915,64 @@
     (define/override (get-root-ui-item)
       ui-list*
     )
+  ))
+
+  (define ent:module% (class ent:typical-list%
+
+    (init cone-root-handle child-spawner!)
+
+    (define (get-module-text*)
+      (define prefix
+        (if (send (send this db-get-list-handle) is-main-module?)
+          "Main module"
+          "Module"
+        )
+      )
+      (format "~a: ~a" prefix (get-short-desc-or* (send this db-get-list-handle) "<nameless module>"))
+    )
+
+    (define (get-db-list-handle*)
+      (send this db-get-list-handle)
+    )
+
+    (define event-handler*
+      (combine-keyname-event-handlers (list
+        (create-name-change-handler get-db-list-handle*)
+        (create-simple-event-handler "m"
+          (lambda (dirty-bit event)
+            (define module-handle (get-db-list-handle*))
+            (cond
+              [(send module-handle is-main-module?)
+                (send module-handle set-main-module!! #f)
+              ]
+              [(send (send module-handle get-db) get-main-module)
+                (issue-warning "Cannot make main" "Only one module can be the main module")
+              ]
+              [else
+                (send module-handle set-main-module!! #t)
+              ]
+            )
+            (send dirty-bit set-dirty!)
+          )
+        )
+        (create-simple-event-handler "d"
+          (lambda (dirty-bit event)
+            (define module-handle (get-db-list-handle*))
+            (if (send module-handle can-delete?)
+              (when (navigate-to-fresh-module*! (get-all-modules* module-handle)) (send module-handle delete!!))
+              (issue-warning "Cannot delete module" "Either other modules require this module or contain references to defs in this module")
+            )
+            (send dirty-bit set-dirty!)
+          )
+        )
+      ))
+    )
+
+    (define/override (get-header)
+      (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
   ))
 
   (define ent:invokation% (class ent:typical-list% ; abstract
@@ -1337,10 +1298,6 @@
     (define/override (get-params-header)
       (make-object (class ui:def-list%
 
-        (define/override (get-default-name-text)
-          "<nameless def>"
-        )
-
         (define/override (get-bridge-text)
           "= λ:"
         )
@@ -1366,16 +1323,7 @@
 
     (define this-ent* this)
 
-    (define header*
-      (make-object (class ui:def-list%
-
-        (define/override (get-default-name-text)
-          "<nameless def>"
-        )
-
-        (super-make-object this-ent*)
-      ))
-    )
+    (define header* (make-object ui:def-list% this-ent*))
 
     (super-make-object cone-root-handle child-spawner! header*)
   ))
@@ -1449,7 +1397,7 @@
       (make-object (class ui:def-list%
 
         (define/override (get-default-name-text)
-          "<?>"
+          "<nameless param>"
         )
 
         (super-make-object this-ent*)
@@ -1515,6 +1463,85 @@
 
     (define/override (get-root-ui-item)
       ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:module-lambda% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define ui-scalar*
+      ; TODO We need some sort of selectable? criteria - currently ui:const% is never selectable, so we're forced to use ui:var-scalar% for something that never changes
+      (make-object ui:var-scalar% this NO-STYLE (const "(λ ...)") THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:module-list% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define ui-scalar*
+      ; TODO We need some sort of selectable? criteria - currently ui:const% is never selectable, so we're forced to use ui:var-scalar% for something that never changes
+      (make-object ui:var-scalar% this NO-STYLE (const "(...)") THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:module-def% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define this-ent* this)
+
+    (define ui-def-list% (make-object (class ui:def-list%
+
+      (define/override (get-bridge-text)
+        "= ..."
+      )
+
+      (super-make-object this-ent*)
+    )))
+    (send ui-def-list% set-horizontal! #t)
+
+    (define/override (get-root-ui-item)
+      ui-def-list%
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:module-lambda-def% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define this-ent* this)
+
+    (define ui-def-list% (make-object (class ui:def-list%
+
+      (define/override (get-bridge-text)
+        (define lambda-handle (send (send this-ent* get-cone-root) get-expr))
+        (format "= λ ~a" (string-join (map (curryr get-short-desc-or* "<nameless param>") (send lambda-handle get-all-params)) ", "))
+      )
+
+      (super-make-object this-ent*)
+    )))
+    (send ui-def-list% set-horizontal! #t)
+
+    (define/override (get-root-ui-item)
+      ui-def-list%
     )
 
     (super-make-object cone-root-handle)
@@ -1864,12 +1891,14 @@
 
     (init parent-ent)
 
-    (abstract get-default-name-text)
-
     (define parent-ent* parent-ent)
 
     (define/public (db-get-def-handle)
       (send parent-ent* get-cone-root)
+    )
+
+    (define/public (get-default-name-text)
+      "<nameless def>"
     )
 
     (define/public (get-bridge-text)
@@ -2193,14 +2222,17 @@
     (define new-ent
       (if existing-slot
         (send existing-slot get-ent)
-        (make-object (parse-entity*! cone-root-handle) cone-root-handle spawn-entity*!)
+        (make-object (parse-entity* cone-root-handle) cone-root-handle spawn-entity*!)
       )
     )
     (send new-ent assign-to-slot! slot ui-parent)
   )
 
   (define (spawn-entity*! slot cone-root-handle ui-parent [child-spawner! spawn-entity*!])
-    (define new-ent (make-object (parse-entity*! cone-root-handle) cone-root-handle child-spawner!))
+    (define cone-root-parent (send cone-root-handle get-parent))
+    ; TODO it's pretty unreasonable to do special casing on modules here - it should probably be properly factored at some point
+    (define parser (if (and cone-root-parent (is-a? cone-root-parent zinal:db:module%%)) module-parse-entity* parse-entity*))
+    (define new-ent (make-object (parser cone-root-handle) cone-root-handle child-spawner!))
     (send new-ent assign-to-slot! slot ui-parent)
   )
 
@@ -2211,7 +2243,7 @@
     (select! root-slot)
   )
 
-  (define (parse-non-nil-list-entity*! db-list-handle)
+  (define (parse-non-nil-list-entity* db-list-handle)
     (define items (send db-list-handle get-items))
     (define first-item (first items))
     (cond
@@ -2237,11 +2269,11 @@
     )
   )
 
-  (define (parse-entity*! db-handle)
+  (define (parse-entity* db-handle)
     (send db-handle accept (make-object (class zinal:db:element-visitor% (super-make-object)
 
       (define/override (visit-element e meh)
-        (error 'parse-entity*! "Cannot parse entity for mysterious db handle")
+        (error 'parse-entity* "Cannot parse entity for mysterious db handle")
       )
 
       (define/override (visit-reference db-ref-handle meh)
@@ -2265,7 +2297,7 @@
 
       (define/override (visit-list db-list-handle meh)
         (if (pair? (send db-list-handle get-items))
-          (parse-non-nil-list-entity*! db-list-handle)
+          (parse-non-nil-list-entity* db-list-handle)
           ent:typical-list%
         )
       )
@@ -2288,6 +2320,39 @@
 
       (define/override (visit-unassigned db-unassigned-handle meh)
         ent:unassigned%
+      )
+    )))
+  )
+
+  (define (module-parse-entity* db-handle)
+    (send db-handle accept (make-object (class zinal:db:element-visitor% (super-make-object)
+
+      (define/override (visit-element e meh)
+        (parse-entity* db-handle)
+      )
+
+      (define/override (visit-lambda db-lambda-handle meh)
+        ent:module-lambda%
+      )
+
+      (define/override (visit-param db-param-handle meh)
+        (error 'module-parse-entity* "It should be impossible for a param to be a direct module child")
+      )
+
+      (define/override (visit-list db-list-handle meh)
+        ent:module-list%
+      )
+
+      (define/override (visit-module db-module-handle meh)
+        (error 'module-parse-entity* "It should be impossible for a module to be a direct module child")
+      )
+
+      (define/override (visit-def db-def-handle meh)
+        (define def-expr (send db-def-handle get-expr))
+        (if (is-a? def-expr zinal:db:lambda%%)
+          ent:module-lambda-def%
+          ent:module-def%
+        )
       )
     )))
   )
