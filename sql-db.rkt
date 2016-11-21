@@ -38,6 +38,7 @@
 
 (define WEIRD-TABLES->COLS (hash
   "public_defs" '("module_id INT" "public_def_id INT")
+  "requires" '("requirer_id INT" "required_id INT")
 ))
 
 (define (get-table-mod* table)
@@ -71,12 +72,12 @@
     (define handles* (make-hash))
 
     (define/public (get-all-modules)
-      (map get-module-handle! (query-list db* "SELECT id FROM modules"))
+      (map module-id->handle! (query-list db* "SELECT id FROM modules"))
     )
 
     (define/public (get-main-module)
       (define main-module-id (query-maybe-value db* "SELECT id FROM modules WHERE is_main"))
-      (and main-module-id (get-module-handle! main-module-id))
+      (and main-module-id (module-id->handle! main-module-id))
     )
 
     (define/public (create-module!! [short-desc #f])
@@ -87,7 +88,7 @@
         ))
       )
       (create-list-header!! (new loc% [id new-module-id] [col "list_id"]) short-desc)
-      (get-module-handle! new-module-id)
+      (module-id->handle! new-module-id)
     )
 
     (define/public (get-all-referables)
@@ -585,8 +586,13 @@
       )
 
       (define/override (delete-and-invalidate*!!)
+        (assert
+          (format "delete-and-invalidate*!! should not have even been called if ~a is required by something" (get-module-id*))
+          (null? (get-requiring-modules))
+        )
         (define module-id (get-module-id*))
         (query-exec db* "DELETE FROM public_defs WHERE module_id = ?1" module-id)
+        (query-exec db* "DELETE FROM requires WHERE requirer_id = ?1" module-id)
         ; Normally, this should be the last action, but in this case we need the module
         ; row to still exist when deleting the loc
         (super delete-and-invalidate*!!)
@@ -622,26 +628,69 @@
         (and main-module (equals*? this main-module))
       )
 
+      (define/public (can-be-main-module?)
+        (send this assert-valid)
+        (and
+          (implies (get-main-module*) (is-main-module?))
+          (null? (get-requiring-modules))
+        )
+      )
+
       (define/public (set-main-module!! new-value)
         (send this assert-valid)
-        (define main-module-handle (get-main-module*))
         (define module-id (get-module-id*))
-        (assert
-          (format "Attempt to set module ~a to be main even though ~a is already main" module-id (send main-module-handle get-id))
-          (implies (and new-value main-module-handle) (is-main-module?))
-        )
+        (assert (format "Module ~a cannot be main module" module-id) (implies new-value (can-be-main-module?)))
         (q!! query-exec "UPDATE ~a SET is_main = ?2" module-id (if new-value SQL-TRUE SQL-FALSE))
+        (void)
+      )
+
+      (define/public (get-required-modules)
+        (send this assert-valid)
+        (map module-id->handle! (query-list db* "SELECT required_id FROM requires WHERE requirer_id = ?1" (get-module-id*)))
+      )
+
+      (define/public (get-requiring-modules)
+        (send this assert-valid)
+        (map module-id->handle! (query-list db* "SELECT requirer_id FROM requires WHERE required_id = ?1" (get-module-id*)))
+      )
+
+      (define/public (can-require? to-be-required)
+        (send this assert-valid)
+        (and
+          (not (send to-be-required is-main-module?))
+          (not (requires*? to-be-required this))
+        )
+      )
+
+      (define/public (require!! to-be-required)
+        (send this assert-valid)
+        (define module-id (get-module-id*))
+        (define to-be-required-id (send to-be-required get-id))
+        (assert (format "Module ~a cannot require module ~a" module-id to-be-required-id) (can-require? to-be-required))
+        (unless (query-maybe-value db* "SELECT 1 FROM requires WHERE requirer_id = ?1 AND required_id = ?2" module-id to-be-required-id)
+          ; probably the correct way to do this is to use UNIQUE or IF NOT EXISTS or something, but whatever
+          (query-exec db* "INSERT INTO requires(requirer_id, required_id) values(?1, ?2)" module-id to-be-required-id)
+        )
+        (void)
+      )
+
+      (define/public (unrequire!! to-unrequire)
+        (send this assert-valid)
+        (query-exec db* "DELETE FROM requires WHERE requirer_id = ?1 AND required_id = ?2" (get-module-id*) (send to-unrequire get-id))
         (void)
       )
 
       (define/public (can-delete?)
         (send this assert-valid)
-        (andmap (curryr all-references-are-descendants*? this) (get-public-defs))
+        (and
+          (null? (get-requiring-modules))
+          (andmap (curryr all-references-are-descendants*? this) (filter (curryr is-a? zinal:db:def%%) (send this get-items)))
+        )
       )
 
       (define/public (delete!!)
         (send this assert-valid)
-        (assert (format "Cannot delete module:~a" (get-module-id*)) (can-delete?))
+        (assert (format "Cannot delete module: ~a" (get-module-id*)) (can-delete?))
         (delete-and-invalidate*!!)
         (void)
       )
@@ -895,8 +944,7 @@
 
         (define/public (is-referable-visible?)
           (send this assert-valid)
-          (define referable (get-referable))
-          (findf (curry equals*? referable) (send this get-visible-referables-after))
+          (is-referable-visible*? this (get-referable))
         )
 
         (abstract get-referable-id-col)
@@ -994,11 +1042,11 @@
         )
 
         (define/public (assign-def-ref!! def-handle)
-          (assign-ref*!! (get-definition-id (send def-handle get-id)))
+          (assign-ref*!! def-handle (get-definition-id (send def-handle get-id)))
         )
 
         (define/public (assign-param-ref!! param-handle)
-          (assign-ref*!! (get-param-ref-id (send param-handle get-id)))
+          (assign-ref*!! param-handle (get-param-ref-id (send param-handle get-id)))
         )
 
         (define/public (assign-number!! value)
@@ -1055,7 +1103,11 @@
           ))
         )
 
-        (define/private (assign-ref*!! ref-id)
+        (define/private (assign-ref*!! ref-handle ref-id)
+          (assert
+            (format "You cannot create a reference (at ~a) to point to a referable (~a) that's not visible to it" (send this get-id) ref-id)
+            (is-referable-visible*? this ref-handle)
+          )
           (assign*!! (lambda (loc)
             (set-id!! loc ref-id)
           ))
@@ -1295,7 +1347,7 @@
       (query-maybe-value db* "SELECT id FROM modules WHERE list_id = ?1" list-id)
     )
 
-    (define (get-module-handle! module-id)
+    (define (module-id->handle! module-id)
       (get-handle! module-id "list_id")
     )
 
@@ -1338,13 +1390,14 @@
       (q!! query-exec "DELETE FROM ~a" id)
     )
 
+    (define (is-referable-visible*? location-node referable)
+      (findf (curry equals*? referable) (send location-node get-visible-referables-after))
+    )
+
     (define (get-visible-referables* location-node [check-younger-siblings? #f])
-      (define this-module (send location-node get-module))
-      (define all-other-modules (remove this-module (send sql-db* get-all-modules) equals*?))
-      (define all-foreign-public-defs (map (lambda (m) (send m get-public-defs)) all-other-modules))
       (define parent (send location-node get-parent))
       (append
-        all-foreign-public-defs
+        (flatten (map (lambda (m) (send m get-public-defs)) (send (send location-node get-module) get-required-modules)))
         (if parent
           (append
             (get-visible-sibling-referables* location-node (send parent get-children) check-younger-siblings?)
@@ -1377,6 +1430,18 @@
 
     (define (function-definition? handle)
       (and (is-a? handle zinal:db:def%%) (is-a? (send handle get-expr) zinal:db:lambda%%))
+    )
+
+    (define (requires*? requirer-module required-module)
+      (ormap
+        (lambda (direct-required-module)
+          (or
+            (equals*? direct-required-module requirer-module)
+            (requires*? direct-required-module requirer-module)
+          )
+        )
+        (send requirer-module get-required-modules)
+      )
     )
 
     (define (all-references-are-descendants*? referable [ancestor referable])
