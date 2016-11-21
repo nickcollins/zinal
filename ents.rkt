@@ -32,7 +32,10 @@
 ; HELPER FUNCTIONS
 
 (define (handles-equal? handle1 handle2)
-  (send handle1 equals? handle2)
+  (or
+    (and (not handle1) (not handle2))
+    (and handle1 handle2 (send handle1 equals? handle2))
+  )
 )
 
 (define (standard*? db-legacy-link-handle)
@@ -671,22 +674,9 @@
   (define selected* #f)
 
   (define/public (get-initial-ui!)
-    (define (create-first-module!!)
-      (or (create-module*!!) (create-first-module!!))
+    (unless (navigate-to-fresh-module*!)
+      (get-initial-ui!)
     )
-    (define (get-first-module-from-user)
-      (or (get-module-from-user) (get-first-module-from-user))
-    )
-    (define first-module
-      (or
-        (send db* get-main-module)
-        (if (pair? (send db* get-all-modules))
-          (get-first-module-from-user)
-          (create-first-module!!)
-        )
-      )
-    )
-    (spawn-module*! first-module)
     (send selected* get-root)
   )
 
@@ -706,14 +696,6 @@
 
   (define (select! slot/item)
     (set! selected* (slot/ui-item->ui-item slot/item))
-  )
-
-  (define (spawn-module*! module)
-    (assert "can't spawn #f module" module)
-    (define root-slot (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (spawn-entity*! root-slot module #f)
-    (select! root-slot)
-    root-slot
   )
 
   (define (get-backwards-selection-path* ui-item)
@@ -857,7 +839,104 @@
     )
   ))
 
-  (define ent:list% (class ent%
+  (define ent:module% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    ; Ugh. fucking circular deps. But this at least gives me ideas of how to solve this problem in the db ... define _delayed_
+    (define event-handler* #f)
+
+    (define ui-list* (make-object (class ui:list%
+
+      (define/override (get-event-handler)
+        event-handler*
+      )
+
+      (super-make-object this-ent* this-ent* header*)
+    )))
+
+    (define (insert-new-todo*!! index)
+      (send (send this get-cone-root) insert!! index)
+      (send ui-list* insert! index
+        ; TODO currently, ui:const% can't be selected, so we're going with ui:var-scalar% , even tho the value never changes.
+        ; This is absurd - we should have a selectable? criteria or something, but we'll have to do that later
+        (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Chocolate") (const "<?>") child->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
+      )
+    )
+
+    (define (child->event-handler* child)
+      (create-simple-event-handler "o"
+        (lambda (dirty-bit event)
+          (define index (send ui-list* get-child-index child))
+          (insert-new-todo*!! (add1 index))
+          (send dirty-bit set-dirty!)
+        )
+      )
+    )
+
+    (set! event-handler*
+      (combine-keyname-event-handlers (list
+        (create-name-change-handler (send this get-cone-root))
+        (create-simple-event-handler "m"
+          (lambda (dirty-bit event)
+            (define module-handle (send this get-cone-root))
+            (cond
+              [(send module-handle is-main-module?)
+                (send module-handle set-main-module!! #f)
+              ]
+              [(send db* get-main-module)
+                (issue-warning "Cannot make main" "Only one module can be the main module")
+              ]
+              [else
+                (send module-handle set-main-module!! #t)
+              ]
+            )
+            (send dirty-bit set-dirty!)
+          )
+        )
+        (create-simple-event-handler "d"
+          (lambda (dirty-bit event)
+            (define module-handle (send this get-cone-root))
+            (if (send module-handle can-delete?)
+              (when (navigate-to-fresh-module*! (get-all-modules* module-handle)) (send module-handle delete!!))
+              (issue-warning "Cannot delete module" "Either other modules require this module or contain references to defs in this module")
+            )
+            (send dirty-bit set-dirty!)
+          )
+        )
+        (create-simple-event-handler "o"
+          (lambda (dirty-bit event)
+            (insert-new-todo*!! 0)
+            (send dirty-bit set-dirty!)
+          )
+        )
+      ))
+    )
+
+    (define (get-module-text*)
+      (define prefix
+        (if (send (send this get-cone-root) is-main-module?)
+          "Main module"
+          "Module"
+        )
+      )
+      (format "~a: ~a" prefix (get-short-desc-or* (send this get-cone-root) "<nameless module>"))
+    )
+
+    (define header*
+      (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-list*
+    )
+
+    (super-make-object cone-root-handle)
+
+    ; TODO current
+  ))
+
+  (define ent:typical-list% (class ent%
 
     (init cone-root-handle child-spawner!)
 
@@ -935,54 +1014,7 @@
     )
   ))
 
-  (define ent:module% (class ent:list%
-
-    (init cone-root-handle child-spawner!)
-
-    (define (get-module-text*)
-      (define prefix
-        (if (send (send this db-get-list-handle) is-main-module?)
-          "Main module"
-          "Module"
-        )
-      )
-      (format "~a: ~a" prefix (get-short-desc-or* (send this db-get-list-handle) "<nameless module>"))
-    )
-
-    (define (header->event-handler* header)
-      (define (get-db-list-handle)
-        (send this db-get-list-handle)
-      )
-      (combine-keyname-event-handlers (list
-        (create-name-change-handler get-db-list-handle)
-        (create-simple-event-handler "m"
-          (lambda (dirty-bit event)
-            (define module-handle (get-db-list-handle))
-            (cond
-              [(send module-handle is-main-module?)
-                (send module-handle set-main-module!! #f)
-              ]
-              [(send (send module-handle get-db) get-main-module)
-                (issue-warning "Cannot make main" "Only one module can be the main module")
-              ]
-              [else
-                (send module-handle set-main-module!! #t)
-              ]
-            )
-            (send dirty-bit set-dirty!)
-          )
-        )
-      ))
-    )
-
-    (define/override (get-header)
-      (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* header->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
-    )
-
-    (super-make-object cone-root-handle child-spawner!)
-  ))
-
-  (define ent:invokation% (class ent:list% ; abstract
+  (define ent:invokation% (class ent:typical-list% ; abstract
 
     (init cone-root-handle child-spawner!)
 
@@ -1077,7 +1109,7 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:list-list% (class ent:list%
+  (define ent:list-list% (class ent:typical-list%
 
     (init cone-root-handle child-spawner!)
 
@@ -1111,7 +1143,7 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:quoted-list% (class ent:list%
+  (define ent:quoted-list% (class ent:typical-list%
 
     (init cone-root-handle child-spawner!)
 
@@ -2011,7 +2043,7 @@
         (define index (get-index))
         (define intermediate-handle (db-insert!! index))
         (define new-handle (new-handle-initializer!! intermediate-handle))
-        (insert-new-slot index new-handle)
+        (insert-new-slot!! index new-handle)
       )
       (create-interaction-dependent-event-handler
         interaction->new-handle-initializer!!
@@ -2027,7 +2059,7 @@
       (create-insert-slot-handler get-index interaction->new-handle-initializer!! keyname)
     )
 
-    (define (insert-new-slot index slot-handle [child-spawner*! spawn-entity*!])
+    (define (insert-new-slot!! index slot-handle [child-spawner*! spawn-entity*!])
       (define new-slot (make-object slot% child-slot->event-handler* this))
       (child-spawner*! new-slot slot-handle this)
       (send this insert! index new-slot)
@@ -2044,7 +2076,7 @@
       (build-list
         (vector-length handles)
         (lambda (i)
-          (insert-new-slot i (vector-ref handles i) child-spawner!)
+          (insert-new-slot!! i (vector-ref handles i) child-spawner!)
         )
       )
     )
@@ -2063,14 +2095,14 @@
     (and module-name (non-empty-string? module-name) (send db* create-module!! module-name))
   )
 
-  (define (get-module-from-user)
+  (define (get-module-from-user [selectable-modules (get-all-modules*)])
     (define handles&choices
       (map
         (lambda (module)
           (define name (get-short-desc-or* module "<unnamed module>"))
           (list module (if (send module is-main-module?) (format "~a (Main)" name) name))
         )
-        (send db* get-all-modules)
+        selectable-modules
       )
     )
     (define dialog
@@ -2083,6 +2115,26 @@
     )
     (send dialog show #t)
     (send dialog get-choice)
+  )
+
+  (define (navigate-to-fresh-module*! [selectable-modules (get-all-modules*)])
+    (define main-module (send db* get-main-module))
+    (define next-module
+      (or
+        (and (member main-module selectable-modules handles-equal?) main-module)
+        (if (pair? selectable-modules)
+          (get-module-from-user selectable-modules)
+          (create-module*!!)
+        )
+      )
+    )
+    (when next-module (spawn-module*! next-module))
+    next-module
+  )
+
+  (define (get-all-modules* [module-to-exclude #f])
+    ; UGH - srfi/1 redefines remove, so this uses the filter-like definition it provides rather than the standard lib definition
+    (remove (curry handles-equal? module-to-exclude) (send db* get-all-modules))
   )
 
   (define (issue-warning title message)
@@ -2166,6 +2218,13 @@
     (send new-ent assign-to-slot! slot ui-parent)
   )
 
+  (define (spawn-module*! module)
+    (assert "can't spawn #f module" module)
+    (define root-slot (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (spawn-entity*! root-slot module #f)
+    (select! root-slot)
+  )
+
   (define (parse-non-nil-list-entity*! db-list-handle)
     (define items (send db-list-handle get-items))
     (define first-item (first items))
@@ -2188,7 +2247,7 @@
       [(is-a? first-item zinal:db:reference%%)
         ent:reference-invokation%
       ]
-      [else ent:list%]
+      [else ent:typical-list%]
     )
   )
 
@@ -2221,7 +2280,7 @@
       (define/override (visit-list db-list-handle meh)
         (if (pair? (send db-list-handle get-items))
           (parse-non-nil-list-entity*! db-list-handle)
-          ent:list%
+          ent:typical-list%
         )
       )
 
