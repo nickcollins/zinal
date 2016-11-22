@@ -917,30 +917,25 @@
     )
   ))
 
-  (define ent:module% (class ent:typical-list%
+  (define ent:module% (class ent%
 
     (init cone-root-handle child-spawner!)
 
-    (define (get-module-text*)
-      (define prefix
-        (if (send (send this db-get-list-handle) is-main-module?)
-          "Main module"
-          "Module"
-        )
-      )
-      (format "~a: ~a" prefix (get-short-desc-or* (send this db-get-list-handle) "<nameless module>"))
-    )
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
 
-    (define (get-db-list-handle*)
-      (send this db-get-list-handle)
+    (define (get-cone-root*)
+      (send this get-cone-root)
     )
 
     (define event-handler*
       (combine-keyname-event-handlers (list
-        (create-name-change-handler get-db-list-handle*)
+        (create-name-change-handler get-cone-root*)
         (create-simple-event-handler "m"
           (lambda (dirty-bit event)
-            (define module-handle (get-db-list-handle*))
+            (define module-handle (get-cone-root*))
             (cond
               [(send module-handle is-main-module?)
                 (send module-handle set-main-module!! #f)
@@ -957,7 +952,7 @@
         )
         (create-simple-event-handler "d"
           (lambda (dirty-bit event)
-            (define module-handle (get-db-list-handle*))
+            (define module-handle (get-cone-root*))
             (if (send module-handle can-delete?)
               (when (navigate-to-fresh-module*! (get-all-modules* module-handle)) (send module-handle delete!!))
               (issue-warning "Cannot delete module" "Either other modules require this module or contain references to defs in this module")
@@ -968,8 +963,70 @@
       ))
     )
 
-    (define/override (get-header)
+    (define (get-module-text*)
+      (define prefix
+        (if (send (get-cone-root*) is-main-module?)
+          "Main module"
+          "Module"
+        )
+      )
+      (format "~a: ~a" prefix (get-short-desc-or* (get-cone-root*) "<nameless module>"))
+    )
+
+    (define header*
       (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
+    )
+
+    (define this-ent* this)
+
+    (define ui-list* (make-object (class ui:dynamic-slotted-list%
+
+      ; TODO lots of redundancy here with ent:typical-list% , couldn't figure out a better way
+
+      (define/override (db-insert!! index)
+        (send (get-cone-root*) insert!! index)
+      )
+
+      (define/override (db-can-remove? index)
+        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
+      )
+
+      (define/override (db-remove!! index)
+        (send (get-cone-root*) remove!! index)
+      )
+
+      (define/override (db-get-items)
+        (send (get-cone-root*) get-items)
+      )
+
+      (define/override (db-get-list-handle)
+        (get-cone-root*)
+      )
+
+      (define/override (get-event-handler)
+        (combine-keyname-event-handlers (list
+          (super get-event-handler)
+          (send this create-expand-and-collapse-handler)
+          (create-insert-start-handler)
+          (create-insert-end-handler)
+        ))
+      )
+
+      (define/override (child-slot->event-handler slot)
+        (combine-keyname-event-handlers (list
+          (create-insert-before-handler slot)
+          (create-insert-after-handler slot)
+          (create-insert-todo-handler slot)
+          (send this create-replace-handler slot)
+          (create-unassign-or-remove-handler slot)
+        ))
+      )
+
+      (super-make-object this-ent* this-ent* child-spawner! header*)
+    )))
+
+    (define/override (get-root-ui-item)
+      ui-list*
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -1178,6 +1235,7 @@
 
       (define/override (get-event-handler)
         (combine-keyname-event-handlers (list
+          (send this create-movement-handler)
           (send this create-insert-start-handler new-param-creator)
           (send this create-insert-end-handler new-param-creator)
         ))
@@ -1553,8 +1611,6 @@
 
     (init parent-ent fallback-event-handler)
 
-    (abstract get-event-handler)
-
     (define parent-ent* parent-ent)
     (define parent* #f)
 
@@ -1643,23 +1699,6 @@
       (send dirty-bit set-not-dirty!)
     )
 
-    (define event-handler*
-      (combine-keyname-event-handlers (list
-        ; This is a weird pattern. Shouldn't we just use inheritance? The biggest problem
-        ; is that constructor params would wind up getting unmanageable. This solution feels kind of
-        ; silly and has several questionable aspects but i feel it has less boilerplate and does not
-        ; have any flaw as egregious as parameter blowup
-        (get-event-handler)
-        (make-object keyname-event-handler% (list
-          (list handle-left*! '("left" "h"))
-          (list handle-right*! '("right" "l"))
-          (list handle-up*! '("up" "k"))
-          (list handle-down*! '("down" "j"))
-        ))
-      ))
-    )
-    (define fallback-event-handler* fallback-event-handler)
-
     (define/public (selected?)
       (eq? this selected*)
     )
@@ -1692,6 +1731,13 @@
       (set! parent* new-parent)
     )
 
+    (define/public (get-event-handler)
+      (create-movement-handler)
+    )
+
+    (define event-handler* (get-event-handler))
+    (define fallback-event-handler* fallback-event-handler)
+
     (define/public (handle-event!! event)
       (or
         (send event-handler* handle-event!! event)
@@ -1701,6 +1747,31 @@
 
     (define/public (handle-child-event!! event)
       (send event-handler* handle-event!! event)
+    )
+
+    (define/public (create-movement-handler)
+      (combine-keyname-event-handlers (list
+        (create-left-handler)
+        (create-right-handler)
+        (create-up-handler)
+        (create-down-handler)
+      ))
+    )
+
+    (define/public (create-left-handler)
+      (make-object keyname-event-handler% (list (list handle-left*! '("left" "h"))))
+    )
+
+    (define/public (create-right-handler)
+      (make-object keyname-event-handler% (list (list handle-right*! '("right" "l"))))
+    )
+
+    (define/public (create-up-handler)
+      (make-object keyname-event-handler% (list (list handle-up*! '("up" "k"))))
+    )
+
+    (define/public (create-down-handler)
+      (make-object keyname-event-handler% (list (list handle-down*! '("down" "j"))))
     )
 
     (super-make-object)
@@ -1718,7 +1789,10 @@
     )
 
     (define/override (get-event-handler)
-      event-handler*
+      (combine-keyname-event-handlers (list
+        (super get-event-handler)
+        event-handler*
+      ))
     )
 
     (define/public (get-style-delta)
@@ -1785,10 +1859,6 @@
 
     (define/override (accept visitor [data #f])
       (send visitor visit-list this data)
-    )
-
-    (define/override (get-event-handler)
-      NOOP
     )
 
     (define/public (get-children)
@@ -1977,9 +2047,10 @@
 
     (define/override (get-event-handler)
       (combine-keyname-event-handlers (list
+        (super get-event-handler)
+        (send this create-expand-and-collapse-handler)
         (create-insert-start-handler)
         (create-insert-end-handler)
-        (send this create-expand-and-collapse-handler)
       ))
     )
 
