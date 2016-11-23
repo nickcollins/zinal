@@ -917,25 +917,30 @@
     )
   ))
 
-  (define ent:module% (class ent%
+  (define ent:module% (class ent:typical-list%
 
     (init cone-root-handle child-spawner!)
 
-    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
-    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
-    ; get-root-ui-item
-    (super-make-object cone-root-handle)
+    (define (get-module-text*)
+      (define prefix
+        (if (send (send this db-get-list-handle) is-main-module?)
+          "Main module"
+          "Module"
+        )
+      )
+      (format "~a: ~a" prefix (get-short-desc-or* (send this db-get-list-handle) "<nameless module>"))
+    )
 
-    (define (get-cone-root*)
-      (send this get-cone-root)
+    (define (get-db-list-handle*)
+      (send this db-get-list-handle)
     )
 
     (define event-handler*
       (combine-keyname-event-handlers (list
-        (create-name-change-handler get-cone-root*)
+        (create-name-change-handler get-db-list-handle*)
         (create-simple-event-handler "m"
           (lambda (dirty-bit event)
-            (define module-handle (get-cone-root*))
+            (define module-handle (get-db-list-handle*))
             (cond
               [(send module-handle is-main-module?)
                 (send module-handle set-main-module!! #f)
@@ -952,7 +957,7 @@
         )
         (create-simple-event-handler "d"
           (lambda (dirty-bit event)
-            (define module-handle (get-cone-root*))
+            (define module-handle (get-db-list-handle*))
             (if (send module-handle can-delete?)
               (when (navigate-to-fresh-module*! (get-all-modules* module-handle)) (send module-handle delete!!))
               (issue-warning "Cannot delete module" "Either other modules require this module or contain references to defs in this module")
@@ -963,70 +968,8 @@
       ))
     )
 
-    (define (get-module-text*)
-      (define prefix
-        (if (send (get-cone-root*) is-main-module?)
-          "Main module"
-          "Module"
-        )
-      )
-      (format "~a: ~a" prefix (get-short-desc-or* (get-cone-root*) "<nameless module>"))
-    )
-
-    (define header*
+    (define/override (get-header)
       (make-object ui:var-scalar% this (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
-    )
-
-    (define this-ent* this)
-
-    (define ui-list* (make-object (class ui:dynamic-slotted-list%
-
-      ; TODO lots of redundancy here with ent:typical-list% , couldn't figure out a better way
-
-      (define/override (db-insert!! index)
-        (send (get-cone-root*) insert!! index)
-      )
-
-      (define/override (db-can-remove? index)
-        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
-      )
-
-      (define/override (db-remove!! index)
-        (send (get-cone-root*) remove!! index)
-      )
-
-      (define/override (db-get-items)
-        (send (get-cone-root*) get-items)
-      )
-
-      (define/override (db-get-list-handle)
-        (get-cone-root*)
-      )
-
-      (define/override (get-event-handler)
-        (combine-keyname-event-handlers (list
-          (super get-event-handler)
-          (send this create-expand-and-collapse-handler)
-          (create-insert-start-handler)
-          (create-insert-end-handler)
-        ))
-      )
-
-      (define/override (child-slot->event-handler slot)
-        (combine-keyname-event-handlers (list
-          (create-insert-before-handler slot)
-          (create-insert-after-handler slot)
-          (create-insert-todo-handler slot)
-          (send this create-replace-handler slot)
-          (create-unassign-or-remove-handler slot)
-        ))
-      )
-
-      (super-make-object this-ent* this-ent* child-spawner! header*)
-    )))
-
-    (define/override (get-root-ui-item)
-      ui-list*
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -1532,7 +1475,7 @@
 
     (define ui-scalar*
       ; TODO We need some sort of selectable? criteria - currently ui:const% is never selectable, so we're forced to use ui:var-scalar% for something that never changes
-      (make-object ui:var-scalar% this NO-STYLE (const "(λ ...)") THING->NOOP this)
+      (make-object ui:var-scalar% this NO-STYLE (const "(λ ...)") (curry get-module-child-event-handler* cone-root-handle) this)
     )
 
     (define/override (get-root-ui-item)
@@ -1548,7 +1491,7 @@
 
     (define ui-scalar*
       ; TODO We need some sort of selectable? criteria - currently ui:const% is never selectable, so we're forced to use ui:var-scalar% for something that never changes
-      (make-object ui:var-scalar% this NO-STYLE (const "(...)") THING->NOOP this)
+      (make-object ui:var-scalar% this NO-STYLE (const "(...)") (curry get-module-child-event-handler* cone-root-handle) this)
     )
 
     (define/override (get-root-ui-item)
@@ -1562,12 +1505,21 @@
 
     (init cone-root-handle child-spawner!)
 
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
+
     (define this-ent* this)
 
     (define ui-def-list% (make-object (class ui:def-list%
 
       (define/override (get-bridge-text)
         "= ..."
+      )
+
+      (define/override (get-event-handler)
+        (get-module-child-event-handler* (send this-ent* get-cone-root) this)
       )
 
       (super-make-object this-ent*)
@@ -1577,13 +1529,16 @@
     (define/override (get-root-ui-item)
       ui-def-list%
     )
-
-    (super-make-object cone-root-handle)
   ))
 
   (define ent:module-lambda-def% (class ent%
 
     (init cone-root-handle child-spawner!)
+
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
 
     (define this-ent* this)
 
@@ -1594,6 +1549,10 @@
         (format "= λ ~a" (string-join (map (curryr get-short-desc-or* "<nameless param>") (send lambda-handle get-all-params)) ", "))
       )
 
+      (define/override (get-event-handler)
+        (get-module-child-event-handler* (send this-ent* get-cone-root) this)
+      )
+
       (super-make-object this-ent*)
     )))
     (send ui-def-list% set-horizontal! #t)
@@ -1601,8 +1560,6 @@
     (define/override (get-root-ui-item)
       ui-def-list%
     )
-
-    (super-make-object cone-root-handle)
   ))
 
   ; UI IMPL
@@ -2221,6 +2178,22 @@
   (define (get-all-modules* [module-to-exclude #f])
     ; UGH - srfi/1 redefines remove, so this uses the filter-like definition it provides rather than the standard lib definition
     (remove (curry handles-equal? module-to-exclude) (send db* get-all-modules))
+  )
+
+  (define (handle-module-right*! child-root-handle dirty-bit event)
+    (define root-slot (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+    (spawn-entity*! root-slot child-root-handle #f)
+    (select! root-slot)
+    (send dirty-bit set-not-dirty!)
+  )
+
+  (define (get-module-child-event-handler* child-root-handle ui-item)
+    (combine-keyname-event-handlers (list
+      (send ui-item create-left-handler)
+      (send ui-item create-up-handler)
+      (send ui-item create-down-handler)
+      (make-object keyname-event-handler% (list (list (curry handle-module-right*! child-root-handle) '("right" "l"))))
+    ))
   )
 
   (define (issue-warning title message)
