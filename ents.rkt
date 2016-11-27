@@ -1185,6 +1185,7 @@
 
       (define/override (get-event-handler)
         (combine-keyname-event-handlers (list
+          (send this create-movement-handler)
           (send this create-insert-start-handler new-param-creator)
           (send this create-insert-end-handler new-param-creator)
         ))
@@ -1494,8 +1495,6 @@
 
     (init parent-ent fallback-event-handler)
 
-    (abstract get-event-handler)
-
     (define parent-ent* parent-ent)
     (define parent* #f)
 
@@ -1584,23 +1583,6 @@
       (send dirty-bit set-not-dirty!)
     )
 
-    (define event-handler*
-      (combine-keyname-event-handlers (list
-        ; This is a weird pattern. Shouldn't we just use inheritance? The biggest problem
-        ; is that constructor params would wind up getting unmanageable. This solution feels kind of
-        ; silly and has several questionable aspects but i feel it has less boilerplate and does not
-        ; have any flaw as egregious as parameter blowup
-        (get-event-handler)
-        (make-object keyname-event-handler% (list
-          (list handle-left*! '("left" "h"))
-          (list handle-right*! '("right" "l"))
-          (list handle-up*! '("up" "k"))
-          (list handle-down*! '("down" "j"))
-        ))
-      ))
-    )
-    (define fallback-event-handler* fallback-event-handler)
-
     (define/public (selected?)
       (eq? this selected*)
     )
@@ -1633,6 +1615,13 @@
       (set! parent* new-parent)
     )
 
+    (define/public (get-event-handler)
+      (create-movement-handler)
+    )
+
+    (define event-handler* (get-event-handler))
+    (define fallback-event-handler* fallback-event-handler)
+
     (define/public (handle-event!! event)
       (or
         (send event-handler* handle-event!! event)
@@ -1642,6 +1631,31 @@
 
     (define/public (handle-child-event!! event)
       (send event-handler* handle-event!! event)
+    )
+
+    (define/public (create-movement-handler)
+      (combine-keyname-event-handlers (list
+        (create-left-handler)
+        (create-right-handler)
+        (create-up-handler)
+        (create-down-handler)
+      ))
+    )
+
+    (define/public (create-left-handler)
+      (make-object keyname-event-handler% (list (list handle-left*! '("left" "h"))))
+    )
+
+    (define/public (create-right-handler)
+      (make-object keyname-event-handler% (list (list handle-right*! '("right" "l"))))
+    )
+
+    (define/public (create-up-handler)
+      (make-object keyname-event-handler% (list (list handle-up*! '("up" "k"))))
+    )
+
+    (define/public (create-down-handler)
+      (make-object keyname-event-handler% (list (list handle-down*! '("down" "j"))))
     )
 
     (super-make-object)
@@ -1659,7 +1673,10 @@
     )
 
     (define/override (get-event-handler)
-      event-handler*
+      (combine-keyname-event-handlers (list
+        (super get-event-handler)
+        event-handler*
+      ))
     )
 
     (define/public (get-style-delta)
@@ -1726,10 +1743,6 @@
 
     (define/override (accept visitor [data #f])
       (send visitor visit-list this data)
-    )
-
-    (define/override (get-event-handler)
-      NOOP
     )
 
     (define/public (get-children)
@@ -1916,9 +1929,10 @@
 
     (define/override (get-event-handler)
       (combine-keyname-event-handlers (list
+        (super get-event-handler)
+        (send this create-expand-and-collapse-handler)
         (create-insert-start-handler)
         (create-insert-end-handler)
-        (send this create-expand-and-collapse-handler)
       ))
     )
 
