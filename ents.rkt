@@ -1241,7 +1241,10 @@
     )
 
     (define/public (get-bookends)
-      #f
+      (list
+        (make-object ui:const% this NO-STYLE "(")
+        (make-object ui:const% this NO-STYLE ")")
+      )
     )
 
     (define/public (horizontal-by-default?)
