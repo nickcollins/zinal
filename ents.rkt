@@ -380,7 +380,6 @@
     (super-new [label title])
 
     (define keys&choices* (sort keys&choices (lambda (a b) (string<? (second a) (second b)))))
-    (define num-all-choices* (length keys&choices))
     (define chooser*
       (new auto-complete-list-box%
         [label message]
@@ -389,6 +388,26 @@
         [style '(single vertical-label)]
       )
     )
+  )
+)
+
+(define (auto-complete* title message keys&choices [key-equalifier equal?])
+  (cond
+    [(pair? keys&choices)
+      (define dialog
+        (new auto-complete-dialog%
+          [title title]
+          [message message]
+          [keys&choices keys&choices]
+          [key-equalifier key-equalifier]
+        )
+      )
+      (send dialog show #t)
+      (send dialog get-choice)
+    ]
+    [else
+      #f
+    ]
   )
 )
 
@@ -463,9 +482,16 @@
 )
 
 (define (get-choice-from-user title message choices)
-  (define dialog (new discrete-choice-dialog% [title title] [message message] [choices choices]))
-  (send dialog show #t)
-  (send dialog get-choice)
+  (cond
+    [(pair? choices)
+      (define dialog (new discrete-choice-dialog% [title title] [message message] [choices choices]))
+      (send dialog show #t)
+      (send dialog get-choice)
+    ]
+    [else
+      #f
+    ]
+  )
 )
 
 ; new-blah-creator is a function of form
@@ -594,16 +620,9 @@
           visible-referables
         )
       )
-      (define dialog
-        (new auto-complete-dialog%
-          [title "What definition or parameter do you want to read?"]
-          [message "Start typing bits and pieces of the desired referable's short descriptor"]
-          [keys&choices handles&choices]
-          [key-equalifier handles-equal?]
-        )
+      (define chosen-handle
+        (auto-complete* "What definition or parameter do you want to read?" "Start typing bits and pieces of the desired referable's short descriptor" handles&choices handles-equal?)
       )
-      (send dialog show #t)
-      (define chosen-handle (send dialog get-choice))
       (if chosen-handle
         (lambda (unassigned)
           (if (is-a? chosen-handle zinal:db:param%%)
@@ -2334,16 +2353,7 @@
         selectable-modules
       )
     )
-    (define dialog
-      (new auto-complete-dialog%
-        [title "Choose a module to go to"]
-        [message "Start typing bits and pieces of the desired module's name"]
-        [keys&choices handles&choices]
-        [key-equalifier handles-equal?]
-      )
-    )
-    (send dialog show #t)
-    (send dialog get-choice)
+    (auto-complete* "Choose a module to go to" "Start typing bits and pieces of the desired module's name" handles&choices handles-equal?)
   )
 
   (define (navigate-to-fresh-module*! [selectable-modules (get-all-modules*)])
