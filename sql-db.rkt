@@ -656,7 +656,9 @@
 
       (define/public (can-require? to-be-required)
         (send this assert-valid)
+        (assert-is-module* to-be-required)
         (and
+          (not (equals*? to-be-required this))
           (not (send to-be-required is-main-module?))
           (not (requires*? to-be-required this))
         )
@@ -665,7 +667,8 @@
       (define/public (require!! to-be-required)
         (send this assert-valid)
         (define module-id (get-module-id*))
-        (define to-be-required-id (send to-be-required get-id))
+        (define to-be-required-id (get-module-id (send to-be-required get-id)))
+        (assert-is-module* to-be-required)
         (assert (format "Module ~a cannot require module ~a" module-id to-be-required-id) (can-require? to-be-required))
         (unless (query-maybe-value db* "SELECT 1 FROM requires WHERE requirer_id = ?1 AND required_id = ?2" module-id to-be-required-id)
           ; probably the correct way to do this is to use UNIQUE or IF NOT EXISTS or something, but whatever
@@ -676,7 +679,8 @@
 
       (define/public (unrequire!! to-unrequire)
         (send this assert-valid)
-        (query-exec db* "DELETE FROM requires WHERE requirer_id = ?1 AND required_id = ?2" (get-module-id*) (send to-unrequire get-id))
+        (assert-is-module* to-unrequire)
+        (query-exec db* "DELETE FROM requires WHERE requirer_id = ?1 AND required_id = ?2" (get-module-id*) (get-module-id (send to-unrequire get-id)))
         (void)
       )
 
@@ -693,6 +697,10 @@
         (assert (format "Cannot delete module: ~a" (get-module-id*)) (can-delete?))
         (delete-and-invalidate*!!)
         (void)
+      )
+
+      (define (assert-is-module* module-handle)
+        (assert (format "not a module: ~a" (get-module-id (send module-handle get-id))) (is-a? module-handle zinal:db:module%%))
       )
 
       (define (get-module-id*)
@@ -1394,17 +1402,21 @@
       (findf (curry equals*? referable) (send location-node get-visible-referables-after))
     )
 
-    (define (get-visible-referables* location-node [check-younger-siblings? #f])
-      (define parent (send location-node get-parent))
+    (define (get-visible-referables* location-node)
       (append
         (flatten (map (lambda (m) (send m get-public-defs)) (send (send location-node get-module) get-required-modules)))
-        (if parent
-          (append
-            (get-visible-sibling-referables* location-node (send parent get-children) check-younger-siblings?)
-            (get-visible-referables* parent #t)
-          )
-          '()
+        (get-visible-referables-recursive* location-node #f)
+      )
+    )
+
+    (define (get-visible-referables-recursive* location-node check-younger-siblings?)
+      (define parent (send location-node get-parent))
+      (if parent
+        (append
+          (get-visible-sibling-referables* location-node (send parent get-children) check-younger-siblings?)
+          (get-visible-referables-recursive* parent #t)
         )
+        '()
       )
     )
 
@@ -1436,8 +1448,8 @@
       (ormap
         (lambda (direct-required-module)
           (or
-            (equals*? direct-required-module requirer-module)
-            (requires*? direct-required-module requirer-module)
+            (equals*? direct-required-module required-module)
+            (requires*? direct-required-module required-module)
           )
         )
         (send requirer-module get-required-modules)

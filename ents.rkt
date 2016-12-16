@@ -1058,9 +1058,26 @@
 
     (super-make-object cone-root-handle)
 
+    (define header* #f)
+
+    (define add-require-event-handler*
+      (create-simple-event-handler "R"
+        (lambda (handle-event-info event)
+          (define this-module (send this get-cone-root))
+          (define module-to-require (get-module-from-user (filter (lambda (m) (send this-module can-require? m)) (get-all-modules*))))
+          (when module-to-require
+            (send (send this get-cone-root) require!! module-to-require)
+            (send header* reset-list*!)
+          )
+          #t
+        )
+      )
+    )
+
     (define event-handler*
       (combine-keyname-event-handlers (list
         (create-name-change-handler (send this get-cone-root))
+        add-require-event-handler*
         (create-simple-event-handler "m"
           (lambda (handle-event-info event)
             (define module-handle (send this get-cone-root))
@@ -1107,29 +1124,7 @@
       (format "~a: ~a requires" prefix (get-short-desc-or* (send this get-cone-root) "<nameless module>"))
     )
 
-    (define header* (make-object (class ui:dynamic-slotted-list%
-
-      ; TODO current
-      (define/override (db-insert!! index)
-        ; TODO current
-        (send (get-module-handle*) )
-      )
-
-      (define/override (db-can-remove? handle)
-        (send this-ent* db-can-remove? (get-child-handle-index handle))
-      )
-
-      (define/override (db-remove!! handle)
-        (send this-ent* db-remove!! (get-child-handle-index handle))
-      )
-
-      (define/override (db-get-items)
-        (send this-ent* db-get-items)
-      )
-
-      (define/override (db-get-list-handle)
-        (send this-ent* db-get-list-handle)
-      )
+    (set! header* (make-object (class ui:list%
 
       (define/override (get-event-handler)
         (combine-keyname-event-handlers (list
@@ -1138,37 +1133,56 @@
         ))
       )
 
-      (define (get-module-handle*)
-        (send this-ent* get-cone-root)
-      )
-
-      ; abuse of the ent system, but whatever
-      (define ent:required-module% (class ent%
-
-         (init cone-root-handle)
-
-         (define ui-root* (make-object ui:var-scalar% this REF-STYLE (thunk (get-short-desc-or* cone-root-handle "<nameless module>")) THING->NOOP this))
-
-         (define/public (get-root-ui-item)
-           ui-root*
-         )
-
-         (super-make-object cone-root-handle)
-      ))
-
-      ; abuse of the spawn-entity*! system, but whatever
-      (define (spawn-require*! slot required-module-handle ui-parent)
-        (assert "spawn-require*! can only be used on required modules" (is-a? required-module-handle zinal:db:module%%))
-        (send (make-object ent:required-module% required-module-handle) assign-to-slot! slot ui-parent)
-      )
-
       (define header-header*
-        (make-object ui:var-scalar% this-ent* (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) this-ent*)
+        (make-object ui:var-scalar% this-ent* (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
       )
 
-      (super-make-object this-ent* this-ent* spawn-require*! header-header* (make-object ui:const% this NO-STYLE ", "))
-    )))
+      (define (required-module->event-handler* required-module-handle required-module-ui)
+        (combine-keyname-event-handlers (list
+          add-require-event-handler*
+          (create-simple-event-handler "d"
+            (lambda (handle-event-info event)
+              (send (send this-ent* get-cone-root) unrequire!! required-module-handle)
+              (reset-list*!)
+              (when (null? (send this get-children))
+                (select! this)
+              )
+              #t
+            )
+          )
+        ))
+      )
 
+      (define (module<? module-handle-1 module-handle-2)
+        (define (mdesc mh) (get-short-desc-or* mh ""))
+        (string<? (mdesc module-handle-1) (mdesc module-handle-2))
+      )
+
+      (define/public (reset-list*!)
+        (send this clear!)
+        (define handles (list->vector (sort (send (send this-ent* get-cone-root) get-required-modules) module<?)))
+        (build-list
+          (vector-length handles)
+          (lambda (i)
+            (send this insert! i (get-module-required-ui* (vector-ref handles i)))
+          )
+        )
+      )
+
+      (define (get-module-required-ui* required-module-handle)
+        (make-object ui:var-scalar%
+          this-ent*
+          REF-STYLE
+          (thunk (get-short-desc-or* required-module-handle "<nameless module>"))
+          (curry required-module->event-handler* required-module-handle)
+          NOOP-FALLBACK-EVENT-HANDLER
+        )
+      )
+
+      (super-make-object this-ent* this-ent* header-header*)
+
+      (reset-list*!)
+    )))
     (send header* set-horizontal! #t)
 
     (set! ui-list* (make-object (class ui:list%
@@ -1246,12 +1260,12 @@
         (send this-ent* db-insert!! index)
       )
 
-      (define/override (db-can-remove? handle)
-        (send this-ent* db-can-remove? (get-child-handle-index handle))
+      (define/override (db-can-remove? index)
+        (send this-ent* db-can-remove? index)
       )
 
-      (define/override (db-remove!! handle)
-        (send this-ent* db-remove!! (get-child-handle-index handle))
+      (define/override (db-remove!! index)
+        (send this-ent* db-remove!! index)
       )
 
       (define/override (db-get-items)
@@ -1449,8 +1463,7 @@
         )
       )
 
-      (define/override (db-can-remove? handle)
-        (define index (get-child-handle-index handle))
+      (define/override (db-can-remove? index)
         (define first-opt-index (get-first-opt-index*))
         (if (< index first-opt-index)
           (send (db-get-list-handle) can-remove-required-param? index)
@@ -1458,8 +1471,7 @@
         )
       )
 
-      (define/override (db-remove!! handle)
-        (define index (get-child-handle-index handle))
+      (define/override (db-remove!! index)
         (define first-opt-index (get-first-opt-index*))
         (if (< index first-opt-index)
           (send (db-get-list-handle) remove-required-param!! index)
@@ -1550,12 +1562,12 @@
         (send (db-get-list-handle) insert-into-body!! index)
       )
 
-      (define/override (db-can-remove? handle)
-        (is-a? handle zinal:db:unassigned%%)
+      (define/override (db-can-remove? index)
+        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
       )
 
-      (define/override (db-remove!! handle)
-        (send (db-get-list-handle) remove-from-body!! (get-child-handle-index handle))
+      (define/override (db-remove!! index)
+        (send (db-get-list-handle) remove-from-body!! index)
       )
 
       (define/override (db-get-items)
@@ -2078,6 +2090,10 @@
       (select! selection)
     )
 
+    (define/public (clear!)
+      (set! children* '())
+    )
+
     (define/public (get-children-internal)
       children*
     )
@@ -2195,13 +2211,8 @@
       (get-visible-referables-for-hypothetical-index (send this get-child-index slot))
     )
 
-    (define/public (get-child-handle-index handle)
-      (define result (list-index (curry handles-equal? handle) (db-get-items)))
-      (assert "Attempt to get the index of a non-child handle" result)
-    )
-
     (define/public (remove-slot!! slot)
-      (db-remove!! (slot->db-handle))
+      (db-remove!! (send this get-child-index slot))
       (send this remove! slot)
     )
 
@@ -2231,7 +2242,7 @@
     (define/public (create-remove-handler slot)
       (create-simple-event-handler "d"
         (lambda (handle-event-info event)
-          (when (db-can-remove? (slot->db-handle)) (remove-slot!! slot))
+          (when (db-can-remove? (send this get-child-index slot)) (remove-slot!! slot))
           #t
         )
       )
@@ -2241,7 +2252,7 @@
       (create-simple-event-handler "d"
         (lambda (handle-event-info event)
           (cond
-            [(db-can-remove? (slot->db-handle)) (remove-slot!! slot)]
+            [(db-can-remove? (send this get-child-index slot)) (remove-slot!! slot)]
             [(unassignable? (slot->db-handle slot)) (reassign-slot*!! slot this)]
           )
           #t
