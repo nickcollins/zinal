@@ -8,11 +8,21 @@
 
 (provide transpile)
 
-; TODO current don't forget transpilation when doing module stuff!
 (define (transpile db)
+  (define main-module (send db get-main-module))
+  (assert "Currently, we can only transpile programs with a main module, libraries will be supported later" main-module)
   (define referables (send db get-all-referables))
-  (define root-elem (send db get-root))
-  (db-elem->scheme root-elem referables)
+  (define included-modules '())
+  (define transpilation '())
+  (define (include-module module)
+    (for-each include-module (send module get-required-modules))
+    (unless (findf (lambda (im) (send im equals? module)) included-modules)
+      (set! transpilation (append transpilation (db-elem->scheme module referables)))
+      (set! included-modules (cons module included-modules))
+    )
+  )
+  (include-module main-module)
+  transpilation
 )
 
 (define (db-elem->scheme elem referables)

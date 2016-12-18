@@ -175,4 +175,4 @@
 (send main-window maximize #t)
 (send main-canvas focus)
 
-; (transpile main-db)
+(transpile main-db)
