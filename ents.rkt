@@ -815,7 +815,7 @@
   (define DEF-STYLE (send (make-object style-delta%) set-delta-foreground "Yellow"))
 
   (define LEGACY-STYLE (send (make-object style-delta%) set-delta-foreground "Cyan"))
-  
+
   (define UNASSIGNED-STYLE (send (make-object style-delta% 'change-bold) set-delta-foreground "Chocolate"))
 
   (define (get-unassigned-text unassigned-handle)
