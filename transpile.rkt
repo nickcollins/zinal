@@ -8,6 +8,8 @@
 
 (provide transpile)
 
+; reads the db, transpiles its contents into scheme, and returns a scheme list of all expressions required by the main
+; module in an appropriate order
 (define (transpile db)
   (define main-module (send db get-main-module))
   (assert "Currently, we can only transpile programs with a main module, libraries will be supported later" main-module)
@@ -58,6 +60,10 @@
 
   (define/override (visit-atom a referables)
     (send a get-val)
+  )
+
+  (define/override (visit-symbol s referables)
+    (list 'quote (send s get-val))
   )
 
   (define/override (visit-list l referables)
