@@ -1,4 +1,6 @@
-#lang racket
+; We'd rather use #lang racket, but sadly the read function has a hard time with that, so we use
+; the uglier module syntax instead
+(module db racket
 
 (provide (all-defined-out))
 
@@ -440,4 +442,5 @@
 
     (define/public (visit-unassigned u data) (visit-node u data))
   )
+)
 )

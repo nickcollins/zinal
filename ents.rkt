@@ -1,4 +1,6 @@
-#lang racket
+; We'd rather use #lang racket, but sadly the read function has a hard time with that, so we use
+; the uglier module syntax instead
+(module ents racket
 
 (require racket/gui/base)
 ; for hash-union
@@ -2578,3 +2580,4 @@
     )))
   )
 ))
+)

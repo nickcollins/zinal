@@ -1,4 +1,6 @@
-#lang racket
+; We'd rather use #lang racket, but sadly the read function has a hard time with that, so we use
+; the uglier module syntax instead
+(module sql-db racket
 
 (require db)
 
@@ -1493,4 +1495,5 @@
       (create-tables WEIRD-TABLES->COLS)
     )
   )
+)
 )

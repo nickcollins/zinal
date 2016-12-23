@@ -1,4 +1,6 @@
-#lang racket
+; We'd rather use #lang racket, but sadly the read function has a hard time with that, so we use
+; the uglier module syntax instead
+(module main racket
 
 (require racket/gui/base)
 
@@ -175,4 +177,5 @@
 (send main-window maximize #t)
 (send main-canvas focus)
 
-(transpile main-db)
+; (transpile main-db)
+)

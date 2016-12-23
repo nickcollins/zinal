@@ -1,4 +1,6 @@
-#lang racket
+; We'd rather use #lang racket, but sadly the read function has a hard time with that, so we use
+; the uglier module syntax instead
+(module transpile racket
 
 ; for list-index
 (require srfi/1)
@@ -120,3 +122,4 @@
     (string->symbol (format "zinal-id:_~a" (add1 num-id)))
   )
 )))
+)

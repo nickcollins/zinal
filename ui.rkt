@@ -1,4 +1,6 @@
-#lang racket
+; We'd rather use #lang racket, but sadly the read function has a hard time with that, so we use
+; the uglier module syntax instead
+(module ui racket
 
 (provide (all-defined-out))
 
@@ -46,4 +48,5 @@
     (define/public (visit-const c data) (visit-scalar c data))
     (define/public (visit-var-scalar vs data) (visit-scalar vs data))
   )
+)
 )
