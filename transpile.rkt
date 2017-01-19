@@ -60,6 +60,15 @@
     )
   )
 
+  (define/override (visit-assert a referables)
+    (list 'unless (db-elem->scheme (send a get-assertion) referables)
+      (append
+        (list 'error ''zinal (db-elem->scheme (send a get-format-string) referables))
+        (db-elems->scheme (send a get-format-args) referables)
+      )
+    )
+  )
+
   (define/override (visit-atom a referables)
     (send a get-val)
   )

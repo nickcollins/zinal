@@ -78,6 +78,21 @@
   )
 )
 
+(define (translate-assert assertion format-string format-args db-unassigned)
+  (define db-assert (send db-unassigned assign-assert!!))
+
+  (translate-datum assertion (send db-assert get-assertion))
+  (translate-datum format-string (send db-assert get-format-string))
+
+  (define format-args-vec (list->vector format-args))
+  (build-list
+    (vector-length format-args-vec)
+    (lambda (i)
+      (translate-datum (vector-ref format-args-vec i) (send db-assert insert-format-arg!! i))
+    )
+  )
+)
+
 (define (translate-datum datum db-unassigned)
   (cond
     [(list? datum)
@@ -110,6 +125,14 @@
             [else
               (error 'translate-datum "the second part of a define must be a list or symbol: ~a" datum)
             ]
+          )
+        ]
+        [(equal? 'assert (first-item))
+          (define msg (second datum))
+          (define assertion (third datum))
+          (if (and (pair? msg) (>= (length msg) 2) (equal? 'format (first msg)))
+            (translate-assert assertion (second msg) (drop msg 2) db-unassigned)
+            (translate-assert assertion msg '() db-unassigned)
           )
         ]
         [else

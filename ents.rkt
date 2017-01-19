@@ -506,6 +506,15 @@
   (lambda (unassigned) (send unassigned assign-list!!))
 )
 
+(define (new-assert-creator visible-referables)
+  (lambda (unassigned)
+    (define db-assert-handle (send unassigned assign-assert!!))
+    (send (send db-assert-handle get-assertion) assign-bool!! #t)
+    (send (send db-assert-handle get-format-string) assign-string!! "Something went wrong ...")
+    db-assert-handle
+  )
+)
+
 (define (new-number-creator visible-referables)
   (define result
     (get-text-from-user
@@ -660,6 +669,7 @@
 
 (define FRIENDLY-LITERAL-TYPE->CREATOR (hash
   "list" new-list-creator
+  "assertion" new-assert-creator
   "number" new-number-creator
   "character" new-character-creator
   "string" new-string-creator
@@ -793,6 +803,8 @@
   (define (get-ref-text ref-handle)
     (get-short-desc-or* (send ref-handle get-referable) "<nameless ref>")
   )
+
+  (define ASSERT-STYLE (send (make-object style-delta%) set-delta-foreground "VioletRed"))
 
   ; TODO make strings underlined
   (define ATOM-STYLE (send (make-object style-delta%) set-delta-foreground "Orchid"))
@@ -1005,6 +1017,10 @@
 
           (define/override (visit-reference db-ref-handle meh)
             (list REF-STYLE get-ref-text)
+          )
+
+          (define/override (visit-assert db-assert-handle meh)
+            (list ASSERT-STYLE (const "assert ..."))
           )
 
           (define/override (visit-atom db-atom-handle meh)
@@ -1675,6 +1691,69 @@
     )
 
     (super-make-object cone-root-handle child-spawner! header*)
+  ))
+
+  (define ent:assert% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define this-ent* this)
+
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
+
+    (define header* (make-object (class ui:slotted-list%
+
+      (define/override (get-visible-referables-for-slot slot)
+        (send (send this-ent* get-cone-root) get-visible-referables-underneath)
+      )
+
+      ; TODO current - is it necessary to have either header or bookends? do #f bookends mean no bookends or parenthesis?
+      (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
+
+      (define assertion-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
+      (child-spawner! assertion-slot* (send (send this-ent* get-cone-root) get-assertion) this)
+      (define format-string-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
+      (child-spawner! format-string-slot* (send (send this-ent* get-cone-root) get-format-string) this)
+
+      (send this insert! 0 (make-object ui:const% this ASSERT-STYLE "assert"))
+      (send this insert! 1 assertion-slot*)
+      (send this insert! 2 (make-object ui:const% this ASSERT-STYLE ":"))
+      (send this insert! 3 format-string-slot*)
+    )))
+
+    (define ui-assert* (make-object (class ui:dynamic-slotted-list%
+
+      (define/override (db-insert!! index)
+        (send (db-get-list-handle) insert-format-arg!! index)
+      )
+
+      (define/override (db-can-remove? index)
+        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
+      )
+
+      (define/override (db-remove!! index)
+        (send (db-get-list-handle) remove-format-arg!! index)
+      )
+
+      (define/override (db-get-items)
+        (send (db-get-list-handle) get-format-args)
+      )
+
+      (define/override (db-get-list-handle)
+        (send this-ent* get-cone-root)
+      )
+
+      (super-make-object this-ent* this-ent* child-spawner! header*)
+    )))
+
+    (send ui-assert* set-horizontal! #t)
+
+    (define/override (get-root-ui-item)
+      ui-assert*
+    )
   ))
 
   (define ent:atom% (class ent%
@@ -2534,6 +2613,10 @@
 
       (define/override (visit-reference db-ref-handle meh)
         ent:ref%
+      )
+
+      (define/override (visit-assert db-assert-handle meh)
+        ent:assert%
       )
 
       (define/override (visit-atom db-atom-handle meh)

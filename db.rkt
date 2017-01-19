@@ -178,6 +178,34 @@
   is-referable-visible? ; ()
 ))
 
+; when evaluated, it will evaluate get-assertion , and if true, nothing else happens. If false,
+; an exception is thrown, whose message is composed by evaluating get-format-string and
+; get-format-args and applying standard racket formatting rules to them. Unlike some languages,
+; get-assertion is always evaluated, so it's safe to have it do stateful operations.
+(define zinal:db:assert%% (interface (zinal:db:parent-node%%)
+
+  ; Returns a zinal:db:node%% for the expression that is to be asserted as true.
+  get-assertion ; ()
+
+  ; Returns a zinal:db:node%% that evaluates to the format string that is used for an exception
+  ; if thrown. Follows standard racket ~a formatting rules. Only evaluated if get-assertion
+  ; evaluates false
+  get-format-string ; ()
+
+  ; Returns a list of zinal:db:node%% for the arguments to get-format-string . Only evaluated if
+  ; get-assertion evaluates false
+  get-format-args ; ()
+
+  ; Inserts a new unassigned node into the list of format args at the specified index.
+  ; Returns a zinal:db:unassigned%% handle to the new unassigned node
+  insert-format-arg!! ; (index)
+
+  ; Deletes the nth format arg . Any handles associated with the deleted arg are now invalid and
+  ; cannot be used. No meaningful return value. If the node at the specified index isn't a
+  ; zinal:db:unassigned%% , an exception is thrown.
+  remove-format-arg!! ; (index)
+))
+
 ; Any node which has no children and is self-descriptive; literals, essentially.
 ; (A list literal is really a list of literals)
 (define zinal:db:atom%% (interface (zinal:db:node%%)
@@ -404,6 +432,7 @@
     ; thrown. See the section about reference visibility.
     assign-def-ref!! ; (zinal:db:def%%)
     assign-param-ref!! ; (zinal:db:param%%)
+    assign-assert!! ; ()
     assign-number!! ; (value)
     assign-char!! ; (value)
     assign-string!! ; (value)
@@ -428,6 +457,7 @@
     (define/public (visit-module m data) (visit-list m data))
 
     (define/public (visit-lambda l data) (visit-node l data))
+    (define/public (visit-assert a data) (visit-node a data))
     (define/public (visit-number n data) (visit-atom n data))
     (define/public (visit-char c data) (visit-atom c data))
     (define/public (visit-string s data) (visit-atom s data))

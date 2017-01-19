@@ -28,6 +28,8 @@
   "lambdas" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "params_id INT" "body_id INT")
   "params" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "default_id INT")
   "defines" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "expr_id INT")
+  ; TODO asserts shouldn't have descs, and neither should lists or lambdas.
+  "asserts" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "assertion_id INT" "format_string_id INT" "format_args_id INT")
   "param_refs" '("param_id INT UNIQUE")
   "definitions" '("define_id INT UNIQUE")
   "list_nodes" '("owner_id INT" "car_id INT" "cdr_id INT")
@@ -184,10 +186,12 @@
               loc-id
             )
           )
-          ; We want the parent of a lambda body expr to be the lambda, not the list it's hidden in
+          ; lambdas use a hidden list for their parmas and body, and assertions use a hidden list
+          ; for their format args, so if direct-parent-id is one of these, we want to use the
+          ; grandparent instead
           (define direct-grandparent-id (get-cell* direct-parent-id "parent_id"))
           (define parent-id
-            (if (equal? "lambdas" (get-table direct-grandparent-id))
+            (if (or (equal? "lambdas" (get-table direct-grandparent-id)) (equal? "format_args_id" (get-cell* direct-parent-id "parent_col")))
               direct-grandparent-id
               direct-parent-id
             )
@@ -770,6 +774,58 @@
       )
     )
 
+    (define db-assert% (class* db-node% (zinal:db:assert%%)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-assert this data)
+      )
+
+      (define/override (delete-and-invalidate*!!)
+        (send (get-assertion) delete-and-invalidate*!!)
+        (send (get-format-string) delete-and-invalidate*!!)
+        (send (get-format-args-list*) delete-and-invalidate*!!)
+        (delete-id*!! (send this get-id))
+        (super delete-and-invalidate*!!)
+      )
+
+      (define/public (get-children)
+        (send this assert-valid)
+        (append (list (get-assertion) (get-format-string)) (get-format-args))
+      )
+
+      (define/public (get-assertion)
+        (send this assert-valid)
+        (get-handle! (send this get-id) "assertion_id")
+      )
+
+      (define/public (get-format-string)
+        (send this assert-valid)
+        (get-handle! (send this get-id) "format_string_id")
+      )
+
+      (define/public (get-format-args)
+        (send this assert-valid)
+        (send (get-format-args-list*) get-items)
+      )
+
+      (define/public (insert-format-arg!! index)
+        (send this assert-valid)
+        (send (get-format-args-list*) insert!! index)
+      )
+
+      (define/public (remove-format-arg!! index)
+        (send this assert-valid)
+        (send (get-format-args-list*) remove!! index)
+      )
+
+      (define (get-format-args-list*)
+        (get-handle! (send this get-id) "format_args_id")
+      )
+
+      (super-make-object)
+    ))
+
     (define db-atom%
       (class* db-node% (zinal:db:atom%%) ; abstract
 
@@ -1039,6 +1095,27 @@
           ))
         )
 
+        (define/public (assign-assert!!)
+          (assign*!! (lambda (loc)
+            (define assert-id
+              (create-parent!!
+                "asserts"
+                loc
+                #f
+                #f
+                (list
+                  (list "assertion_id" BOGUS-ID)
+                  (list "format_string_id" BOGUS-ID)
+                  (list "format_args_id" BOGUS-ID)
+                )
+              )
+            )
+            (create-unassigned!! (new loc% [id assert-id] [col "assertion_id"]))
+            (create-unassigned!! (new loc% [id assert-id] [col "format_string_id"]))
+            (create-list-header!! (new loc% [id assert-id] [col "format_args_id"]))
+          ))
+        )
+
         (define/public (assign-def!! [short-desc #f] [long-desc #f])
           (assign*!! (lambda (loc)
             (define define-id (create-parent!! "defines" loc short-desc long-desc (list (list "expr_id" BOGUS-ID))))
@@ -1213,6 +1290,7 @@
           [("params") (new db-param% [loc loc])]
           [("param_refs") (new db-param-ref% [loc loc])]
           [("definitions") (new db-def-ref% [loc loc])]
+          [("asserts") (new db-assert% [loc loc])]
           [("atoms")
             (define type (string->symbol (get-cell* id "type")))
             (case type
