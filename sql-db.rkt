@@ -22,28 +22,86 @@
   (or v sql-null)
 )
 
-(define ID-TABLES->NON-ID-COLS (hash
-  "modules" '("list_id INT" "is_main INT")
-  "list_headers" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "cdr_id INT")
-  "lambdas" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "params_id INT" "body_id INT")
-  "params" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "default_id INT")
-  "defines" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "expr_id INT")
+; TABLE-INFO hashes map table names to cols.
+; "hidden" cols refer to list nodes that are being used by the implementation but are invisible to the interface.
+; get-parent invoked on any child of this hidden list will return the first ancestor that is not in one of these
+; columns instead of the direct parent
+; "can-be-ref" cols are allowed to have a reference as their value. No other col permits references
+
+(define NORMAL-TABLE-INFO (hash
+  "defined_classes"
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["superclass_id" "INT" 'can-be-ref] ["params_id" "INT" 'hidden] ["body_id" "INT" 'hidden])
+  "insta_classes"
+    '(["superclass_id" "INT" 'can-be-ref] ["body_id" "INT" 'hidden])
+  "method_defines"
+    '(["method_id" "INT"] ["lambda_id" "INT"])
+  "legacy_overrides"
+    '(["legacy_name" "TEXT"] ["lambda_id" "INT"])
+  "super_inits"
+    '(["args_id" "INT" 'hidden])
+  "method_invokations"
+    '(["object_id" "INT" 'can-be-ref] ["method_id" "INT"] ["args_id" "INT" 'hidden])
+  "legacy_method_invokations"
+    '(["object_id" "INT" 'can-be-ref] ["legacy_name" "TEXT"] ["args_id" "INT" 'hidden])
+  "super_invokations"
+    '(["method_id" "INT"] ["args_id" "INT" 'hidden])
+  "legacy_super_invokations"
+    '(["legacy_name" "TEXT"] ["args_id" "INT" 'hidden])
+  "object_constructions"
+    '(["class_id" "INT" 'can-be-ref] ["args_id" "INT" 'hidden])
+  "isas"
+    '(["object_id" "INT" 'can-be-ref] ["type_id" "INT" 'can-be-ref])
+
+  "list_headers"
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["cdr_id" "INT" 'hidden])
+  "lambdas"
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["params_id" "INT" 'hidden] ["body_id" "INT" 'hidden])
+  "params"
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["default_id" "INT" 'can-be-ref])
+  "defines"
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["expr_id" "INT" 'can-be-ref])
   ; TODO asserts shouldn't have descs, and neither should lists or lambdas.
-  "asserts" '("parent_id INT" "parent_col TEXT" "short_desc TEXT" "long_desc TEXT" "assertion_id INT" "format_string_id INT" "format_args_id INT")
-  "param_refs" '("param_id INT UNIQUE")
-  "definitions" '("define_id INT UNIQUE")
-  "list_nodes" '("owner_id INT" "car_id INT" "cdr_id INT")
-  "atoms" '("type TEXT" "value TEXT")
-  "legacies" '("ref_count INT" "library TEXT" "name TEXT")
-  "unassigned" '("short_desc TEXT" "long_desc TEXT")
+  "asserts"
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["assertion_id" "INT" 'can-be-ref] ["format_string_id" "INT" 'can-be-ref] ["format_args_id" "INT" 'hidden])
+  "list_nodes"
+    '(["owner_id" "INT"] ["car_id" "INT" 'can-be-ref] ["cdr_id" "INT" 'hidden])
+  "atoms"
+    '(["type" "TEXT"] ["value" "TEXT"])
+  "unassigned"
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"])
 ))
 
-(define ID-TABLES (list->vector (hash-keys ID-TABLES->NON-ID-COLS)))
-
-(define WEIRD-TABLES->COLS (hash
-  "public_defs" '("module_id INT" "public_def_id INT")
-  "requires" '("requirer_id INT" "required_id INT")
+; non-nodes (only nodes have "parents") or node data which can be pointed to from more than one place
+(define NO-UNIQUE-PARENT-TABLE-INFO (hash
+  "interfaces"
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"])
+  "methods"
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["container_id" "INT"])
+  ; the list inside the module is not "hidden" - rather, the module is "hidden", merely acting as a parent for the
+  ; list
+  "modules"
+    '(["list_id" "INT"] ["is_main" "INT"])
+  "param_refs"
+    '(["param_id" "INT UNIQUE"])
+  "define_refs"
+    '(["define_id" "INT UNIQUE"])
+  "class_refs"
+    '(["class_id" "INT UNIQUE"])
+  "legacies"
+    '(["ref_count" "INT"] ["library" "TEXT"] ["name" "TEXT"])
 ))
+
+; sets and relations
+(define NO-ID-TABLE-INFO (hash
+  "public_defs" '(["module_id" "INT"] ["public_def_id" "INT"])
+  "requires" '(["requirer_id" "INT"] ["required_id" "INT"])
+  "extends" '(["subtype_id" "INT"] ["supertype_id" "INT"])
+))
+
+(define ID-TABLES (list->vector (sort (append (hash-keys NORMAL-TABLE-INFO) (hash-keys NO-UNIQUE-PARENT-TABLE-INFO)) string<?)))
+
+(define HIDDEN-NODE-COLS (make-hash))
+(define CAN-BE-REF-COLS (make-hash))
 
 (define (get-table-mod* table)
   (define mod (vector-member table ID-TABLES))
@@ -56,6 +114,10 @@
 (define BOGUS-ID -1)
 
 (define NIL-ID 0)
+
+; get-next-id always returns a number at least as large as the length of ID-TABLES , so this is
+; safe
+(define THIS-ID 1)
 
 (define SQL-FALSE 0)
 
@@ -96,7 +158,15 @@
     )
 
     (define/public (get-all-referables)
-      (map get-handle! (append (get-referables-of-type* "params") (get-referables-of-type* "defines")))
+      (append* (map get-referables-of-type* '("params" "defines" "defined_classes")))
+    )
+
+    (define/public (get-all-interfaces)
+      (map id->handle! (query-list db* "SELECT id FROM interfaces"))
+    )
+
+    (define/public (create-interface!! [short-desc #f] [long-desc #f])
+      (id->handle! (create-describable!! "interfaces" short-desc long-desc '()))
     )
 
     (define/public (get-filename)
@@ -156,6 +226,23 @@
       )
     )
 
+    (define db-non-node-element% (class db-element% ; abstract
+
+      (init id)
+
+      (define/override (invalidate!)
+        (hash-remove! handles* (send this get-id))
+        (super invalidate!)
+      )
+
+      (define/override (delete-and-invalidate*!!)
+        (delete-id*!! (send this get-id))
+        (send this invalidate!)
+      )
+
+      (super-make-object id)
+    ))
+
     (define db-node%
       (class* db-element% (zinal:db:node%%) ; abstract
 
@@ -179,24 +266,7 @@
 
         (define/public (get-parent)
           (send this assert-valid)
-          (define loc-id (send loc* get-id))
-          (define direct-parent-id
-            (if (equal? "list_nodes" (get-table loc-id))
-              (get-cell* loc-id "owner_id")
-              loc-id
-            )
-          )
-          ; lambdas use a hidden list for their parmas and body, and assertions use a hidden list
-          ; for their format args, so if direct-parent-id is one of these, we want to use the
-          ; grandparent instead
-          (define direct-grandparent-id (get-cell* direct-parent-id "parent_id"))
-          (define parent-id
-            (if (or (equal? "lambdas" (get-table direct-grandparent-id)) (equal? "format_args_id" (get-cell* direct-parent-id "parent_col")))
-              direct-grandparent-id
-              direct-parent-id
-            )
-          )
-          (id->handle! parent-id)
+          (convert-to-valid-parent* (send loc* get-id))
         )
 
         (define/public (get-module)
@@ -216,22 +286,41 @@
 
         (define/public (can-unassign?)
           (send this assert-valid)
-          (get-parent)
+          (define col (send loc* get-col))
+          (define table (get-table (send loc* get-id)))
+          (not (or (equal? "superclass_id" col) (and (equal? "type_id" col) (equal? "isas" table))))
         )
 
         (define/public (unassign!!)
+          (send this assert-valid)
           (assert
             (format "Cannot unassign node (~a, ~a):~a" (send loc* get-id) (send loc* get-col) (send this get-id))
             (can-unassign?)
           )
           (delete-and-invalidate*!!)
           (create-unassigned!! loc*)
-          (get-handle! loc*)
+          (get-node-handle! loc*)
         )
 
         (define/public (get-loc)
           (send this assert-valid)
           loc*
+        )
+
+        (define (convert-to-valid-parent* parent-id)
+          (define grandparent-id (get-cell* parent-id "parent_id"))
+          (cond
+            [(equal? "list_nodes" (get-table parent-id))
+              ; optimization
+              (convert-to-valid-parent* (get-cell* parent-id "owner_id"))
+            ]
+            [(hidden? (get-table grandparent-id) (get-cell* parent-id "parent_col"))
+              (convert-to-valid-parent* grandparent-id)
+            ]
+            [else
+              (id->handle! parent-id)
+            ]
+          )
         )
 
         (define loc* loc)
@@ -242,29 +331,746 @@
 
     (define db-describable-node%
       (class* db-node% (zinal:db:describable%%)
+
         (define/public (get-short-desc)
-          (send this assert-valid)
-          (sql:// (get-cell* (send this get-id) "short_desc") #f)
+          (get-short-desc* this)
         )
 
         (define/public (get-long-desc)
-          (send this assert-valid)
-          (sql:// (get-cell* (send this get-id) "long_desc") #f)
+          (get-long-desc* this)
         )
 
         (define/public (set-short-desc!! new-desc)
-          (send this assert-valid)
-          (set-desc*!! 'short (send this get-id) new-desc)
+          (set-short-desc*!! this new-desc)
         )
 
         (define/public (set-long-desc!! new-desc)
-          (send this assert-valid)
-          (set-desc*!! 'long (send this get-id) new-desc)
+          (set-long-desc*!! this new-desc)
         )
 
         (super-new)
       )
     )
+
+    ; OOP
+
+    (define db-interface% (class* db-non-node-element% (zinal:db:interface%%)
+
+      (init id)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-interface this data)
+      )
+
+      (define/override (delete-and-invalidate*!!)
+        (for-each (lambda (m) (remove-direct-method!! m)) (get-direct-methods))
+        (delete-subtype-relations!! this)
+        (super delete-and-invalidate*!!)
+      )
+
+      (define/public (get-short-desc)
+        (get-short-desc* this)
+      )
+
+      (define/public (get-long-desc)
+        (get-long-desc* this)
+      )
+
+      (define/public (set-short-desc!! new-desc)
+        (set-short-desc*!! this new-desc)
+      )
+
+      (define/public (set-long-desc!! new-desc)
+        (set-long-desc*!! this new-desc)
+      )
+
+      (define/public (get-direct-super-interfaces)
+        (get-direct-super-interfaces* this)
+      )
+
+      (define/public (can-add-direct-super-interface? to-super)
+        (can-add-direct-super-interface*? this to-super)
+      )
+
+      (define/public (add-direct-super-interface!! to-super)
+        (add-direct-super-interface*!! this to-super)
+      )
+
+      (define/public (can-remove-direct-super-interface? to-remove)
+        (can-remove-direct-super-interface*? this to-remove)
+      )
+
+      (define/public (remove-direct-super-interface!! to-remove)
+        (remove-direct-super-interface*!! this to-remove)
+      )
+
+      (define/public (get-direct-methods)
+        (get-direct-methods* this)
+      )
+
+      (define/public (add-direct-method!! [short-desc #f] [long-desc #f])
+        (add-direct-method*!! this short-desc long-desc)
+      )
+
+      (define/public (can-remove-direct-method? to-remove)
+        (can-remove-direct-method*? this to-remove)
+      )
+
+      (define/public (remove-direct-method!! to-remove)
+        (remove-direct-method*!! this to-remove)
+      )
+
+      (define/public (can-delete?)
+        (send this assert-valid)
+        (define (clause table col) (format "SELECT 1 FROM ~a WHERE ~a = ?1" table col))
+        (and
+          (andmap (lambda (m) (can-remove-direct-method? m)) (get-direct-methods))
+          (not
+            (query-maybe-value db* (sql-union (list (clause "extends" "supertype_id") (clause "isas" "type_id"))) (send this get-id))
+          )
+        )
+      )
+
+      (define/public (delete!!)
+        (send this assert-valid)
+        (assert (format "interface ~a cannot be deleted" (send this get-id)) (can-delete?))
+        (delete-and-invalidate*!!)
+        (void)
+      )
+
+      (super-make-object id)
+    ))
+
+    (define db-class% (class* db-node% (zinal:db:class%%) ; abstract
+
+      (init loc)
+
+      (abstract get-children)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-class this data)
+      )
+
+      (define/override (delete-and-invalidate*!!)
+        (delete-subtype-relations!! this)
+        (send (get-super-class) delete-and-invalidate*!!)
+        (delete-and-invalidate-body*!! this)
+        (delete-id*!! (send this get-id))
+        (super delete-and-invalidate*!!)
+      )
+
+      (define/public (get-direct-super-interfaces)
+        (get-direct-super-interfaces* this)
+      )
+
+      (define/public (can-add-direct-super-interface? to-super)
+        (can-add-direct-super-interface*? this to-super)
+      )
+
+      (define/public (add-direct-super-interface!! to-super)
+        (add-direct-super-interface*!! this to-super)
+      )
+
+      (define/public (can-remove-direct-super-interface? to-remove)
+        (can-remove-direct-super-interface*? this to-remove)
+      )
+
+      (define/public (remove-direct-super-interface!! to-remove)
+        (remove-direct-super-interface*!! this to-remove)
+      )
+
+      (define/public (get-direct-definition-of-method method)
+        (send this assert-valid)
+        (assert-valid-method* this method)
+        (findf (compose1 (curry equals*? method) get-method*) (get-define-methods this))
+      )
+
+      (define/public (is-method-abstract? method)
+        (send this assert-valid)
+        (assert-valid-method* this method)
+        (not
+          (or (get-direct-definition-of-method method) (does-any-super-define-method? this method))
+        )
+      )
+
+      (define/public (is-method-overridden? method)
+        (send this assert-valid)
+        (assert-valid-method* this method)
+        (and (get-direct-definition-of-method method) (does-any-super-define-method? this method))
+      )
+
+      (define/public (get-super-class)
+        (send this assert-valid)
+        (get-node-handle! (get-super-class-loc*))
+      )
+
+      (define/public (can-set-super-class?)
+        (send this assert-valid)
+        (define super-class (get-non-legacy-super-class* this))
+        (implies super-class (can-remove-direct-super-type*? this super-class))
+      )
+
+      (define/public (set-super-class!! to-be-super)
+        (send this assert-valid)
+        (assert-is* to-be-super zinal:db:define-class%%)
+        (assert-visible* (get-super-class) to-be-super)
+        (set-super-class*!! (curryr create-reference!! to-be-super))
+      )
+
+      (define/public (set-legacy-super-class!! library name)
+        (send this assert-valid)
+        (set-super-class*!! (curryr create-legacy-node!! library name))
+      )
+
+      (define/public (get-body)
+        (get-body* this)
+      )
+
+      (define/public (insert-into-body!! index)
+        (insert-into-body*!! this index)
+      )
+
+      (define/public (remove-from-body!! index)
+        (remove-from-body*!! this index)
+      )
+
+      (define (set-super-class*!! creator)
+        (assert
+          (format "~a cannot change super class, as doing so would orphan something" (send this get-id))
+          (can-set-super-class?)
+        )
+        (send (get-super-class) delete-and-invalidate*!!)
+        (define loc (get-super-class-loc*))
+        (creator loc)
+        (get-node-handle! loc)
+      )
+
+      (define (get-super-class-loc*)
+        (make-object loc% (send this get-id) "superclass_id")
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-define-class% (class* db-class% (zinal:db:define-class%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-define-class this data)
+      )
+
+      (define/override (can-unassign?)
+        (send this assert-valid)
+        (and
+          (super can-unassign?)
+          (andmap (lambda (m) (can-remove-direct-method? m)) (get-direct-methods))
+          (all-references-are-descendants*? this)
+        )
+      )
+
+      (define/override (get-visible-referables-underneath)
+        (send this assert-valid)
+        (append
+          (get-all-params)
+          (super get-visible-referables-underneath)
+        )
+      )
+
+      (define/override (delete-and-invalidate*!!)
+        (for-each (lambda (m) (remove-direct-method!! m)) (get-direct-methods))
+        (delete-and-invalidate-params*!! this)
+        (delete-id*!! (get-reference-id*))
+        (super delete-and-invalidate*!!)
+      )
+
+      (define/override (get-children)
+        (send this assert-valid)
+        (append (list (send this get-super-class)) (get-all-params) (send this get-body))
+      )
+
+      (define/public (get-short-desc)
+        (get-short-desc* this)
+      )
+
+      (define/public (get-long-desc)
+        (get-long-desc* this)
+      )
+
+      (define/public (set-short-desc!! new-desc)
+        (set-short-desc*!! this new-desc)
+      )
+
+      (define/public (set-long-desc!! new-desc)
+        (set-long-desc*!! this new-desc)
+      )
+
+      (define/public (get-all-params)
+        (get-all-params* this)
+      )
+
+      (define/public (get-required-params)
+        (get-required-params* this)
+      )
+
+      (define/public (can-remove-required-param? index)
+        (can-remove-required-param*? this index)
+      )
+
+      (define/public (remove-required-param!! index)
+        (remove-required-param*!! this index)
+      )
+
+      (define/public (insert-required-param!! index [short-desc #f])
+        (insert-required-param*!! this index short-desc)
+      )
+
+      (define/public (make-last-required-param-optional!!)
+        (make-last-required-param-optional*!! this)
+      )
+
+      (define/public (get-optional-params)
+        (get-optional-params* this)
+      )
+
+      (define/public (can-remove-optional-param? index)
+        (can-remove-optional-param*? this index)
+      )
+
+      (define/public (remove-optional-param!! index)
+        (remove-optional-param*!! this index)
+      )
+
+      (define/public (insert-optional-param!! index [short-desc #f])
+        (insert-optional-param*!! this index short-desc)
+      )
+
+      (define/public (make-last-optional-param-required!!)
+        (make-last-optional-param-required*!! this)
+      )
+
+      (define/public (get-direct-methods)
+        (get-direct-methods* this)
+      )
+
+      (define/public (add-direct-method!! [short-desc #f] [long-desc #f])
+        (add-direct-method*!! this short-desc long-desc)
+      )
+
+      (define/public (can-remove-direct-method? to-remove)
+        (can-remove-direct-method*? this to-remove)
+      )
+
+      (define/public (remove-direct-method!! to-remove)
+        (remove-direct-method*!! this to-remove)
+      )
+
+      (define/public (get-references)
+        (send this assert-valid)
+        (get-references* (get-reference-id*))
+      )
+
+      (define/public (get-reference-id*)
+        (send this assert-valid)
+        (query-value db* "SELECT id FROM class_refs WHERE class_id = ?1" (send this get-id))
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-insta-class% (class* db-class% (zinal:db:class-instance%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-class-instance this data)
+      )
+
+      (define/override (get-children)
+        (send this assert-valid)
+        (cons (send this get-super-class) (send this get-body))
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-this% (class* db-node% (zinal:db:this%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-this this data)
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-method% (class* db-non-node-element% (zinal:db:method%%)
+
+      (init id)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-method this data)
+      )
+
+      (define/public (get-short-desc)
+        (get-short-desc* this)
+      )
+
+      (define/public (get-long-desc)
+        (get-long-desc* this)
+      )
+
+      (define/public (set-short-desc!! new-desc)
+        (set-short-desc*!! this new-desc)
+      )
+
+      (define/public (set-long-desc!! new-desc)
+        (set-long-desc*!! this new-desc)
+      )
+
+      (define/public (get-containing-type)
+        (id->handle! (get-cell* (send this get-id) "container_id"))
+      )
+
+      (super-make-object id)
+    ))
+
+    (define db-is-a?% (class* db-node% (zinal:db:is-a?%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-is-a? this data)
+      )
+
+      (define/override (delete-and-invalidate*!!)
+        (send (get-object) delete-and-invalidate*!!)
+        (define type (get-type))
+        (unless (is-a? type zinal:db:interface%%) (send type delete-and-invalidate*!!))
+        (delete-id*!! (send this get-id))
+        (super delete-and-invalidate*!!)
+      )
+
+      (define/public (get-children)
+        (send this assert-valid)
+        (define type (get-type))
+        (cons (get-object) (if (is-a? type zinal:db:interface%%) '() (list type)))
+      )
+
+      (define/public (get-object)
+        (send this assert-valid)
+        (get-node-handle! (send this get-id) "object_id")
+      )
+
+      (define/public (get-type)
+        (send this assert-valid)
+        (define type-loc (get-type-loc*))
+        (define type-id (send type-loc get-cell))
+        (if (equal? (get-table type-id) "interfaces")
+          (id->handle! type-id)
+          (get-node-handle! type-loc)
+        )
+      )
+
+      (define/public (set-legacy-type!! library name)
+        (send this assert-valid)
+        (set-node-type*!! (curryr create-legacy-node!! library name))
+      )
+
+      (define/public (set-class-type!! class)
+        (send this assert-valid)
+        (assert-is* class zinal:db:define-class%%)
+        (assert-visible* this class)
+        (set-node-type*!! (curryr create-reference!! class))
+      )
+
+      (define/public (set-interface-type!! interface)
+        (send this assert-valid)
+        (assert-is* interface zinal:db:interface%%)
+        (send (get-type) delete-and-invalidate*!!)
+        (set-id!! (get-type-loc*) (send interface get-id))
+        interface
+      )
+
+      (define (get-type-loc*)
+        (make-object loc% (send this get-id) "type_id")
+      )
+
+      (define (set-node-type*!! creator)
+        (send (get-type) delete-and-invalidate*!!)
+        (define loc (get-type-loc*))
+        (creator loc)
+        (get-node-handle! loc)
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-general-define-method% (class db-node% ; abstract
+
+      (init loc)
+
+      (define/override (delete-and-invalidate*!!)
+        (send (get-lambda) delete-and-invalidate*!!)
+        (delete-id*!! (send this get-id))
+        (super delete-and-invalidate*!!)
+      )
+
+      (define/public (get-children)
+        (send this assert-valid)
+        (list (get-lambda))
+      )
+
+      (define/public (get-lambda)
+        (send this assert-valid)
+        (get-node-handle! (send this get-id) "lambda_id")
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-define-method% (class* db-general-define-method% (zinal:db:define-method%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-define-method this data)
+      )
+
+      (define/override (can-unassign?)
+        (send this assert-valid)
+        (and (super can-unassign?) (can-undefine-method*? this))
+      )
+
+      (define/public (get-method)
+        (send this assert-valid)
+        (get-method* this)
+      )
+
+      (define/public (is-override?)
+        (send this assert-valid)
+        (does-any-super-define-method? this (get-method))
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-legacy-override% (class* db-general-define-method% (zinal:db:override-legacy-method%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-override-legacy-method this data)
+      )
+
+      (define/public (get-legacy-method-name)
+        (send this assert-valid)
+        (get-cell* (send this get-id) "legacy_name")
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-node-with-args% (class* db-node% (zinal:db:has-args%%) ; abstract
+
+      (init loc)
+
+      (define/override (delete-and-invalidate*!!)
+        (delete-and-invalidate-args*!! this)
+        (delete-id*!! (send this get-id))
+        (super delete-and-invalidate*!!)
+      )
+
+      (define/public (get-children)
+        (send this assert-valid)
+        (get-args)
+      )
+
+      (define/public (get-args)
+        (get-args* this)
+      )
+
+      (define/public (insert-arg!! index)
+        (insert-arg*!! this index)
+      )
+
+      (define/public (remove-arg!! index)
+        (remove-arg!! this index)
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-super-init% (class* db-node-with-args% (zinal:db:super-init%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-super-init this data)
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-general-invoke% (class db-node-with-args% ; abstract
+
+      (init loc)
+
+      (define/override (delete-and-invalidate*!!)
+        (send (get-object) delete-and-invalidate*!!)
+        (super delete-and-invalidate*!!)
+      )
+
+      (define/override (get-children)
+        (send this assert-valid)
+        (cons (get-object) (super get-children))
+      )
+
+      (define/public (get-object)
+        (send this assert-valid)
+        (get-node-handle! (send this get-id) "object_id")
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-method-invokation% (class* db-general-invoke% (zinal:db:invoke-method%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-invoke-method this data)
+      )
+
+      (define/public (get-method)
+        (send this assert-valid)
+        (get-method* this)
+      )
+
+      (define/public (set-method!! method)
+        (send this assert-valid)
+        (assert-is* method zinal:db:method%%)
+        (assert-method-visible* this method)
+        (set-cell-dangerous*!! (send this get-id) "method_id" (send method get-id))
+        (void)
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-legacy-invokation% (class* db-general-invoke% (zinal:db:invoke-legacy-method%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-invoke-legacy-method this data)
+      )
+
+      (define/public (get-legacy-method-name)
+        (send this assert-valid)
+        (get-cell* (send this get-id) "legacy_name")
+      )
+
+      (define/public (set-legacy-method-name!! name)
+        (send this assert-valid)
+        (assert-valid-legacy-method-name* name)
+        (set-cell-dangerous*!! (send this get-id) "legacy_name" name)
+        (void)
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-super-invokation% (class* db-node-with-args% (zinal:db:invoke-super-method%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-invoke-super-method this data)
+      )
+
+      (define/public (get-method)
+        (send this assert-valid)
+        (get-method* this)
+      )
+
+      (define/public (set-method!! method)
+        (send this assert-valid)
+        (assert-is* method zinal:db:method%%)
+        (assert-can-super-invoke-method* this method)
+        (set-cell-dangerous*!! (send this get-id) "method_id" (send method get-id))
+        (void)
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-legacy-super-invokation% (class* db-node-with-args% (zinal:db:invoke-legacy-super-method%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-invoke-legacy-super-method this data)
+      )
+
+      (define/public (get-legacy-method-name)
+        (send this assert-valid)
+        (get-cell* (send this get-id) "legacy_name")
+      )
+
+      (define/public (set-legacy-method-name!! name)
+        (send this assert-valid)
+        (assert-valid-legacy-method-name* name)
+        (set-cell-dangerous*!! (send this get-id) "legacy_name" name)
+        (void)
+      )
+
+      (super-make-object loc)
+    ))
+
+    (define db-object-construction% (class* db-node-with-args% (zinal:db:create-object%%)
+
+      (init loc)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-create-object this data)
+      )
+
+      (define/override (delete-and-invalidate*!!)
+        (send (get-class-node) delete-and-invalidate*!!)
+        (super delete-and-invalidate*!!)
+      )
+
+      (define/override (get-children)
+        (send this assert-valid)
+        (cons (get-class-node) (super get-children))
+      )
+
+      (define/public (get-class-node)
+        (send this assert-valid)
+        (get-node-handle! (send this get-id) "class_id")
+      )
+
+      (super-make-object loc)
+    ))
+
+    ; NON OOP
 
     (define db-lambda%
       (class* db-describable-node% (zinal:db:lambda%%)
@@ -272,6 +1078,12 @@
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-lambda this data)
+        )
+
+        (define/override (can-unassign?)
+          (send this assert-valid)
+          (define parent (send this get-parent))
+          (not (or (is-a? parent zinal:db:define-method%%) (is-a? parent zinal:db:override-legacy-method%%)))
         )
 
         (define/override (get-visible-referables-underneath)
@@ -283,8 +1095,8 @@
         )
 
         (define/override (delete-and-invalidate*!!)
-          (send (get-body-list*) delete-and-invalidate*!!)
-          (send (get-params-list*) delete-and-invalidate*!!)
+          (delete-and-invalidate-body*!! this)
+          (delete-and-invalidate-params*!! this)
           (delete-id*!! (send this get-id))
           (super delete-and-invalidate*!!)
         )
@@ -295,120 +1107,59 @@
         )
 
         (define/public (get-all-params)
-          (send this assert-valid)
-          (send (get-params-list*) get-items)
+          (get-all-params* this)
         )
 
         (define/public (get-required-params)
-          (send this assert-valid)
-          (takef (get-all-params) (lambda (p) (not (send p get-default))))
+          (get-required-params* this)
         )
 
         (define/public (can-remove-required-param? index)
-          (send this assert-valid)
-          (assert-valid-param-index* index #t)
-          (can-remove-param*? index)
+          (can-remove-required-param*? this index)
         )
 
         (define/public (remove-required-param!! index)
-          (send this assert-valid)
-          (assert-valid-param-index* index #t)
-          (remove-param*!! index)
+          (remove-required-param*!! this index)
         )
 
         (define/public (insert-required-param!! index [short-desc #f])
-          (send this assert-valid)
-          (send (get-params-list*) insert-param*!! index #t short-desc)
+          (insert-required-param*!! this index short-desc)
         )
 
         (define/public (make-last-required-param-optional!!)
-          (send this assert-valid)
-          (define reqd-params (get-required-params))
-          (assert "There is no required param to convert into an optional param" (pair? reqd-params))
-          (define last-reqd-param-default-loc (new loc% [id (send (last reqd-params) get-id)] [col "default_id"]))
-          (assert "attempt to convert optional param to optional" (= NIL-ID (send last-reqd-param-default-loc get-cell)))
-          (set-loc-dangerous*!! last-reqd-param-default-loc BOGUS-ID)
-          (create-unassigned!! last-reqd-param-default-loc)
-          (void)
+          (make-last-required-param-optional*!! this)
         )
 
         (define/public (get-optional-params)
-          (send this assert-valid)
-          (dropf (get-all-params) (lambda (p) (not (send p get-default))))
+          (get-optional-params* this)
         )
 
         (define/public (can-remove-optional-param? index)
-          (send this assert-valid)
-          (assert-valid-param-index* index #f)
-          (can-remove-param*? (get-optional-index* index))
+          (can-remove-optional-param*? this index)
         )
 
         (define/public (remove-optional-param!! index)
-          (send this assert-valid)
-          (assert-valid-param-index* index #f)
-          (remove-param*!! (get-optional-index* index))
+          (remove-optional-param*!! this index)
         )
 
         (define/public (insert-optional-param!! index [short-desc #f])
-          (send this assert-valid)
-          (send (get-params-list*) insert-param*!! (get-optional-index* index) #f short-desc)
+          (insert-optional-param*!! this index short-desc)
         )
 
         (define/public (make-last-optional-param-required!!)
-          (send this assert-valid)
-          (define opt-params (get-optional-params))
-          (assert "There is no optional param to convert into a required param" (pair? opt-params))
-          (define first-opt-param (car opt-params))
-          (send (send first-opt-param get-default) delete-and-invalidate*!!)
-          (set-id!! (new loc% [id (send first-opt-param get-id)] [col "default_id"]) NIL-ID)
-          (void)
+          (make-last-optional-param-required*!! this)
         )
 
         (define/public (get-body)
-          (send this assert-valid)
-          (send (get-body-list*) get-items)
+          (get-body* this)
         )
 
         (define/public (insert-into-body!! index)
-          (send this assert-valid)
-          (send (get-body-list*) insert!! index)
+          (insert-into-body*!! this index)
         )
 
         (define/public (remove-from-body!! index)
-          (send this assert-valid)
-          (send (get-body-list*) remove!! index)
-        )
-
-        (define (remove-param*!! index)
-          (assert
-            (format "Cannot delete ~ath required or optional param" index)
-            (can-remove-param*? index)
-          )
-          (send (list-ref (get-all-params) index) delete-and-invalidate*!!)
-          (send (get-params-list*) remove*!! index #f)
-        )
-
-        (define (can-remove-param*? index)
-          (all-references-are-descendants*? (list-ref (get-all-params) index))
-        )
-
-        (define (get-params-list*)
-          (get-handle! (send this get-id) "params_id")
-        )
-
-        (define (get-body-list*)
-          (get-handle! (send this get-id) "body_id")
-        )
-
-        (define (get-optional-index* index)
-          (+ index (length (get-required-params)))
-        )
-
-        (define (assert-valid-param-index* index required?)
-          (assert
-            (format "index ~a not a valid index for ~a param" index (if required? "required" "optional"))
-            (and (>= index 0) (< index (length (if required? (get-required-params) (get-optional-params)))))
-          )
+          (remove-from-body*!! this index)
         )
 
         (super-new)
@@ -435,14 +1186,14 @@
           (define id (send this get-id))
           (query-exec db* "DELETE FROM public_defs WHERE public_def_id = ?1" id)
           (send (get-expr) delete-and-invalidate*!!)
-          (delete-id*!! (get-definition-id id))
+          (delete-id*!! (get-reference-id*))
           (delete-id*!! id)
           (super delete-and-invalidate*!!)
         )
 
         (define/public (get-references)
           (send this assert-valid)
-          (get-references* (get-definition-id (send this get-id)))
+          (get-references* (get-reference-id*))
         )
 
         (define/public (get-children)
@@ -452,7 +1203,12 @@
 
         (define/public (get-expr)
           (send this assert-valid)
-          (get-handle! (send this get-id) "expr_id")
+          (get-node-handle! (send this get-id) "expr_id")
+        )
+
+        (define/public (get-reference-id*)
+          (send this assert-valid)
+          (query-value db* "SELECT id FROM define_refs WHERE define_id = ?1" (send this get-id))
         )
 
         (super-new)
@@ -481,7 +1237,7 @@
         (define/public (get-items)
           (send this assert-valid)
           (map
-            (curryr get-handle! "car_id")
+            (curryr get-node-handle! "car_id")
             (get-cdrs* (get-cell* (send this get-id) "cdr_id"))
           )
         )
@@ -489,7 +1245,7 @@
         (define/public (insert!! index)
           (define car-loc (insert*!! index))
           (create-unassigned!! car-loc)
-          (get-handle! car-loc)
+          (get-node-handle! car-loc)
         )
 
         (define/public (remove!! index)
@@ -499,7 +1255,7 @@
         (define/public (insert-param*!! index required? short-desc)
           (define car-loc (insert*!! index))
           (create-param!! car-loc required? short-desc)
-          (get-handle! car-loc)
+          (get-node-handle! car-loc)
         )
 
         (define/public (insert*!! index)
@@ -508,11 +1264,11 @@
           (define insertion-point-id (nth-list-insertion-point* list-header-id index index))
           (define insertion-point-loc (new loc% [id insertion-point-id] [col "cdr_id"]))
           (define old-cdr (send insertion-point-loc get-cell))
+          ; We captured the original cdr_id, so we can safely delete this node's cdr
+          (set-loc-dangerous*!! insertion-point-loc BOGUS-ID)
           (define new-node-id
-            (create-something!! "list_nodes" (list (list "owner_id" list-header-id) (list "car_id" BOGUS-ID) (list "cdr_id" old-cdr)))
+            (create-normal!! "list_nodes" insertion-point-loc (list (list "owner_id" list-header-id) (list "car_id" BOGUS-ID) (list "cdr_id" old-cdr)))
           )
-          ; We captured the original cdr_id, and moved it to the newly created node, so we can safely replace this node's cdr
-          (set-loc-dangerous*!! insertion-point-loc new-node-id)
           ; returns the car_id loc so that the caller can set the node
           (new loc% [id new-node-id] [col "car_id"])
         )
@@ -526,7 +1282,7 @@
           (define id-to-contract (get-cell* id-to-delete "cdr_id"))
           (define loc-to-delete (new loc% [id id-to-delete] [col "car_id"]))
           (when expect-unassigned?
-            (define unassigned-handle (get-handle! loc-to-delete))
+            (define unassigned-handle (get-node-handle! loc-to-delete))
             (assert
               (format "You can only remove!! an unassigned: (~a, ~a):~a" (send loc-to-delete get-id) (send loc-to-delete get-col) (send loc-to-delete get-cell))
               (is-a? unassigned-handle zinal:db:unassigned%%)
@@ -616,8 +1372,11 @@
         (define def-handle (if (number? index/def-handle) (list-ref children index/def-handle) index/def-handle))
         (define module-id (get-module-id*))
         (define def-handle-id (send def-handle get-id))
-        (assert (format "You can only set the publicity of a define: ~a, ~a" module-id def-handle-id) (is-a? def-handle zinal:db:def%%))
-        (assert (format "You can only set the publicity of a module's direct child: ~a, ~a" module-id def-handle-id) (findf (curry equals*? def-handle) children))
+        (assert
+          (format "You can only set the publicity of a zinal:db:def%% or zinal:db:define-class%% : ~a, ~a" module-id def-handle-id)
+          (or (is-a? def-handle zinal:db:def%%) (is-a? def-handle zinal:db:define-class%%))
+        )
+        (assert (format "You can only set the publicity of a module's direct child: ~a, ~a" module-id def-handle-id) (find* def-handle children))
         (if new-value
           (unless (query-maybe-value db* "SELECT 1 FROM public_defs WHERE module_id = ?1 AND public_def_id = ?2" module-id def-handle-id)
             ; probably the correct way to do this is to use UNIQUE or IF NOT EXISTS or something, but whatever
@@ -662,11 +1421,10 @@
 
       (define/public (can-require? to-be-required)
         (send this assert-valid)
-        (assert-is-module* to-be-required)
+        (assert-is* to-be-required zinal:db:module%%)
         (and
-          (not (equals*? to-be-required this))
           (not (send to-be-required is-main-module?))
-          (not (requires*? to-be-required this))
+          (not (path? to-be-required this (lambda (m) (send m get-required-modules))))
         )
       )
 
@@ -674,7 +1432,7 @@
         (send this assert-valid)
         (define module-id (get-module-id*))
         (define to-be-required-id (get-module-id (send to-be-required get-id)))
-        (assert-is-module* to-be-required)
+        (assert-is* to-be-required zinal:db:module%%)
         (assert (format "Module ~a cannot require module ~a" module-id to-be-required-id) (can-require? to-be-required))
         (unless (query-maybe-value db* "SELECT 1 FROM requires WHERE requirer_id = ?1 AND required_id = ?2" module-id to-be-required-id)
           ; probably the correct way to do this is to use UNIQUE or IF NOT EXISTS or something, but whatever
@@ -685,7 +1443,7 @@
 
       (define/public (unrequire!! to-unrequire)
         (send this assert-valid)
-        (assert-is-module* to-unrequire)
+        (assert-is* to-unrequire zinal:db:module%%)
         (query-exec db* "DELETE FROM requires WHERE requirer_id = ?1 AND required_id = ?2" (get-module-id*) (get-module-id (send to-unrequire get-id)))
         (void)
       )
@@ -703,10 +1461,6 @@
         (assert (format "Cannot delete module: ~a" (get-module-id*)) (can-delete?))
         (delete-and-invalidate*!!)
         (void)
-      )
-
-      (define (assert-is-module* module-handle)
-        (assert (format "not a module: ~a" (get-module-id (send module-handle get-id))) (is-a? module-handle zinal:db:module%%))
       )
 
       (define (get-module-id*)
@@ -735,9 +1489,8 @@
         (define/override (delete-and-invalidate*!!)
           (define default (get-default))
           (when default (send default delete-and-invalidate*!!))
-          (define id (send this get-id))
-          (delete-id*!! (get-param-ref-id id))
-          (delete-id*!! id)
+          (delete-id*!! (get-reference-id*))
+          (delete-id*!! (send this get-id))
           (super delete-and-invalidate*!!)
         )
 
@@ -752,7 +1505,7 @@
           (if
             (= NIL-ID (get-cell* id "default_id"))
             #f
-            (get-handle! id "default_id")
+            (get-node-handle! id "default_id")
           )
         )
 
@@ -767,7 +1520,12 @@
 
         (define/public (get-references)
           (send this assert-valid)
-          (get-references* (get-param-ref-id (send this get-id)))
+          (get-references* (get-reference-id*))
+        )
+
+        (define/public (get-reference-id*)
+          (send this assert-valid)
+          (query-value db* "SELECT id FROM param_refs WHERE param_id = ?1" (send this get-id))
         )
 
         (super-new)
@@ -796,12 +1554,12 @@
 
       (define/public (get-assertion)
         (send this assert-valid)
-        (get-handle! (send this get-id) "assertion_id")
+        (get-node-handle! (send this get-id) "assertion_id")
       )
 
       (define/public (get-format-string)
         (send this assert-valid)
-        (get-handle! (send this get-id) "format_string_id")
+        (get-node-handle! (send this get-id) "format_string_id")
       )
 
       (define/public (get-format-args)
@@ -820,7 +1578,7 @@
       )
 
       (define (get-format-args-list*)
-        (get-handle! (send this get-id) "format_args_id")
+        (get-node-handle! (send this get-id) "format_args_id")
       )
 
       (super-make-object)
@@ -1059,6 +1817,24 @@
       )
     )
 
+    (define db-class-ref% (class* db-reference% (zinal:db:class-ref%%)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-define-class-ref this data)
+      )
+
+      (define/override (get-referable-id-col)
+        "class_id"
+      )
+
+      (define/public (get-define-class)
+        (send this get-referable)
+      )
+
+      (super-make-object)
+    ))
+
     (define db-unassigned%
       (class* db-describable-node% (zinal:db:unassigned%%)
 
@@ -1077,28 +1853,13 @@
         )
 
         (define/public (assign-lambda!! [short-desc #f] [long-desc #f])
-          (assign*!! (lambda (loc)
-            (define lambda-id
-              (create-parent!!
-                "lambdas"
-                loc
-                short-desc
-                long-desc
-                (list
-                  (list "params_id" BOGUS-ID)
-                  (list "body_id" BOGUS-ID)
-                )
-              )
-            )
-            (create-list-header!! (new loc% [id lambda-id] [col "params_id"]))
-            (create-list-header!! (new loc% [id lambda-id] [col "body_id"]))
-          ))
+          (assign*!! (curryr create-lambda!! short-desc long-desc))
         )
 
         (define/public (assign-assert!!)
           (assign*!! (lambda (loc)
             (define assert-id
-              (create-parent!!
+              (create-describable-normal!!
                 "asserts"
                 loc
                 #f
@@ -1118,9 +1879,9 @@
 
         (define/public (assign-def!! [short-desc #f] [long-desc #f])
           (assign*!! (lambda (loc)
-            (define define-id (create-parent!! "defines" loc short-desc long-desc (list (list "expr_id" BOGUS-ID))))
+            (define define-id (create-describable-normal!! "defines" loc short-desc long-desc (list (list "expr_id" BOGUS-ID))))
             (create-unassigned!! (new loc% [id define-id] [col "expr_id"]))
-            (create-something!! "definitions" (list (list "define_id" define-id)))
+            (create-something!! "define_refs" (list (list "define_id" define-id)))
           ))
         )
 
@@ -1129,11 +1890,18 @@
         )
 
         (define/public (assign-def-ref!! def-handle)
-          (assign-ref*!! def-handle (get-definition-id (send def-handle get-id)))
+          (assert-visible* this def-handle)
+          (assign-ref*!! def-handle)
         )
 
         (define/public (assign-param-ref!! param-handle)
-          (assign-ref*!! param-handle (get-param-ref-id (send param-handle get-id)))
+          (assert-visible* this param-handle)
+          (assign-ref*!! param-handle)
+        )
+
+        (define/public (assign-class-ref!! define-class-handle)
+          (assert-visible* this define-class-handle)
+          (assign-ref*!! define-class-handle)
         )
 
         (define/public (assign-number!! value)
@@ -1166,38 +1934,200 @@
         )
 
         (define/public (assign-legacy-link!! library name)
-          (assert
-            (format "Invalid library or identifier: ~a :: ~a" library name)
-            (and (implies library (non-empty-string? library)) (non-empty-string? name))
-          )
-          ; TODO properly vet the library and name
-          (define storage-lib (or library DEFAULT-LIBRARY))
+          (assert-valid-legacy* library name)
           (assign*!! (lambda (loc)
-            (define link-id
-              (or
-                (query-maybe-value db* "SELECT id FROM legacies WHERE library = ?1 AND name = ?2" storage-lib name)
-                (create-something!! "legacies" (list (list "ref_count" 0) (list "library" storage-lib) (list "name" name)))
+            (create-legacy-node!! loc library name)
+          ))
+        )
+
+        (define/public (assign-define-class!! [short-desc #f] [long-desc #f])
+          (assign*!! (lambda (loc)
+            (define class-id
+              (create-describable-normal!! "defined_classes" loc short-desc long-desc
+                (list
+                  (list "superclass_id" BOGUS-ID)
+                  (list "params_id" BOGUS-ID)
+                  (list "body_id" BOGUS-ID)
+                )
               )
             )
-            (inc-ref-count!! link-id)
-            (set-id!! loc link-id)
+            (create-something!! "class_refs" (list (list "class_id" class-id)))
+            (create-legacy-node!! (make-object loc% class-id "superclass_id") #f "object%")
+            (create-list-header!! (make-object loc% class-id "params_id"))
+            (create-list-header!! (make-object loc% class-id "body_id"))
+          ))
+        )
+
+        (define/public (assign-class-instance!!)
+          (assign*!! (lambda (loc)
+            (define class-id
+              (create-normal!! "insta_classes" loc
+                (list
+                  (list "superclass_id" BOGUS-ID)
+                  (list "body_id" BOGUS-ID)
+                )
+              )
+            )
+            (create-legacy-node!! (make-object loc% class-id "superclass_id") #f "object%")
+            (create-list-header!! (make-object loc% class-id "body_id"))
+          ))
+        )
+
+        (define/public (assign-invoke-method!! method)
+          (assert-is* method zinal:db:method%%)
+          (assert-method-visible* this method)
+          (assign*!! (lambda (loc)
+            (define method-invoke-id
+              (create-normal!! "method_invokations" loc
+                (list
+                  (list "object_id" BOGUS-ID)
+                  (list "method_id" (send method get-id))
+                  (list "args_id" BOGUS-ID)
+                )
+              )
+            )
+            (create-unassigned!! (make-object loc% method-invoke-id "object_id"))
+            (create-list-header!! (make-object loc% method-invoke-id "args_id"))
+          ))
+        )
+
+        (define/public (assign-invoke-legacy-method!! method-name)
+          (assert-valid-legacy-method-name* method-name)
+          (assign*!! (lambda (loc)
+            (define method-invoke-id
+              (create-normal!! "legacy_method_invokations" loc
+                (list
+                  (list "object_id" BOGUS-ID)
+                  (list "legacy_name" method-name)
+                  (list "args_id" BOGUS-ID)
+                )
+              )
+            )
+            (create-unassigned!! (make-object loc% method-invoke-id "object_id"))
+            (create-list-header!! (make-object loc% method-invoke-id "args_id"))
+          ))
+        )
+
+        (define/public (assign-create-object!!)
+          (assign*!! (lambda (loc)
+            (define create-id
+              (create-normal!! "object_constructions" loc
+                (list
+                  (list "class_id" BOGUS-ID)
+                  (list "args_id" BOGUS-ID)
+                )
+              )
+            )
+            (create-unassigned!! (make-object loc% create-id "class_id"))
+            (create-list-header!! (make-object loc% create-id "args_id"))
+          ))
+        )
+
+        (define/public (assign-is-a?!!)
+          (assign*!! (lambda (loc)
+            (define create-id
+              (create-normal!! "isas" loc
+                (list
+                  (list "object_id" BOGUS-ID)
+                  (list "type_id" BOGUS-ID)
+                )
+              )
+            )
+            (create-unassigned!! (make-object loc% create-id "object_id"))
+            (create-legacy-node!! (make-object loc% create-id "type_id") #f "object%")
+          ))
+        )
+
+        (define/public (assign-define-method!! method)
+          (assert-is-within-class*)
+          (define containing-class (get-containing-class*))
+          (assert-valid-method* containing-class method)
+          (define method-id (send method get-id))
+          (assert
+            (format "cannot define method ~a twice in class ~a" method-id (send containing-class get-id))
+            (send containing-class get-direct-definition-of-method)
+          )
+          (assign*!! (lambda (loc)
+            (define define-method-id
+              (create-normal!! "method_defines" loc (list
+                (list "method_id" method-id)
+                (list "lambda_id" BOGUS-ID)
+              ))
+            )
+            (create-lambda!! (make-object loc% define-method-id "lambda_id"))
+          ))
+        )
+
+        (define/public (assign-override-legacy-method!! method-name)
+          (assert-valid-legacy-method-name* method-name)
+          (assert-is-within-class*)
+          (assign*!! (lambda (loc)
+            (define override-id
+              (create-normal!! "legacy_overrides" loc (list
+                (list "legacy_name" method-name)
+                (list "lambda_id" BOGUS-ID)
+              ))
+            )
+            (create-lambda!! (make-object loc% override-id "lambda_id"))
+          ))
+        )
+
+        (define/public (assign-this!!)
+          (assert-is-within-class*)
+          (assign*!! (curryr set-id!! THIS-ID))
+        )
+
+        (define/public (assign-invoke-super-method!! method)
+          (assert-is* method zinal:db:method%%)
+          (assert-is-within-class*)
+          (assert-can-super-invoke-method* (get-containing-class*) method)
+          (assign*!! (lambda (loc)
+            (define invoke-id
+              (create-normal!! "super_invokations" loc (list
+                (list "method_id" (send method get-id))
+                (list "args_id" BOGUS-ID)
+              ))
+            )
+            (create-list-header!! (make-object loc% invoke-id "args_id"))
+          ))
+        )
+
+        (define/public (assign-invoke-legacy-super-method!! method-name)
+          (assert-valid-legacy-method-name* method-name)
+          (assert-is-within-class*)
+          (assign*!! (lambda (loc)
+            (define invoke-id
+              (create-normal!! "legacy_super_invokations" loc (list
+                (list "legacy_name" method-name)
+                (list "args_id" BOGUS-ID)
+              ))
+            )
+            (create-list-header!! (make-object loc% invoke-id "args_id"))
+          ))
+        )
+
+        (define/public (assign-super-init!!)
+          (define id (send this get-id))
+          (define containing-class (send this get-parent))
+          (assert (format "~a is not the direct child of a class" id) (is-a? containing-class zinal:db:class%%))
+          (assert
+            (format "There can be only one ... super init for class ~a" id)
+            (not (findf (curryr is-a? zinal:db:super-init%%) (send containing-class get-body)))
+          )
+          (assign*!! (lambda (loc)
+            (define init-id (create-normal!! "super_inits" loc (list (list "args_id" BOGUS-ID))))
+            (create-list-header!! (make-object loc% init-id "args_id"))
           ))
         )
 
         (define/private (assign-atom*!! type storage-value)
           (assign*!! (lambda (loc)
-            (create-child!! "atoms" loc (list (list "type" (symbol->string type)) (list "value" storage-value)))
+            (create-normal!! "atoms" loc (list (list "type" (symbol->string type)) (list "value" storage-value)))
           ))
         )
 
-        (define/private (assign-ref*!! ref-handle ref-id)
-          (assert
-            (format "You cannot create a reference (at ~a) to point to a referable (~a) that's not visible to it" (send this get-id) ref-id)
-            (is-referable-visible*? this ref-handle)
-          )
-          (assign*!! (lambda (loc)
-            (set-id!! loc ref-id)
-          ))
+        (define/private (assign-ref*!! referable)
+          (assign*!! (curryr create-reference!! referable))
         )
 
         (define/private (assign*!! assigner!!)
@@ -1205,7 +2135,15 @@
           (define loc (send this get-loc))
           (delete-and-invalidate*!!)
           (assigner!! loc)
-          (get-handle! loc)
+          (get-node-handle! loc)
+        )
+
+        (define (assert-is-within-class*)
+          (assert (format "~a is not within a class" (send this get-id)) (get-containing-class*))
+        )
+
+        (define (get-containing-class* [node this])
+          (and node (if (is-a? node zinal:db:class%%) node (get-containing-class* (send node get-parent))))
         )
 
         (super-new)
@@ -1228,16 +2166,428 @@
       )
     )
 
+    ; OOP HELPER FUNCTIONS
+
+    (define (get-direct-super-interfaces* caller)
+      (send caller assert-valid)
+      (map id->handle! (query-list db* "SELECT supertype_id FROM extends WHERE subtype_id = ?1" (send caller get-id)))
+    )
+
+    (define (can-add-direct-super-interface*? caller to-super)
+      (send caller assert-valid)
+      (assert-is* to-super zinal:db:interface%%)
+      (or
+        (is-a? caller zinal:db:class%%)
+        (not (path? to-super caller get-direct-super-interfaces*))
+      )
+    )
+
+    (define (add-direct-super-interface*!! caller to-super)
+      (send caller assert-valid)
+      (define caller-id (send caller get-id))
+      (define to-super-id (send to-super get-id))
+      (assert
+        (format "~a cannot extend ~a, cuz cycles!" caller-id to-super-id)
+        (can-add-direct-super-interface*? caller to-super)
+      )
+      (unless (query-maybe-value db* "SELECT 1 FROM extends WHERE subtype_id = ?1 AND supertype_id = ?2" caller-id to-super-id)
+        (query-exec db* "INSERT INTO extends(subtype_id, supertype_id) values(?1, ?2)" caller-id to-super-id)
+      )
+      (void)
+    )
+
+    (define (can-remove-direct-super-interface*? caller to-remove)
+      (send caller assert-valid)
+      (assert-is* to-remove zinal:db:interface%%)
+      (assert
+        (format "interface ~a is not a super interface of ~a" (send to-remove get-id) (send caller get-id))
+        (find* to-remove (get-direct-super-interfaces* caller))
+      )
+      (can-remove-direct-super-type*? caller to-remove)
+    )
+
+    (define (remove-direct-super-interface*!! caller to-remove)
+      (send caller assert-valid)
+      (define caller-id (send caller get-id))
+      (define to-remove-id (send to-remove get-id))
+      (assert
+        (format "~a cannot remove ~a, as doing so would orphan a method definition" caller-id to-remove-id)
+        (can-remove-direct-super-type*? caller to-remove)
+      )
+      (query-exec db* "DELETE FROM extends WHERE subtype_id = ?1 AND supertype_id = ?2" caller-id to-remove-id)
+      (void)
+    )
+
+    (define (get-direct-methods* caller)
+      (send caller assert-valid)
+      (map id->handle! (query-list db* "SELECT id FROM methods WHERE container_id = ?1" (send caller get-id)))
+    )
+
+    (define (add-direct-method*!! caller short-desc long-desc)
+      (send caller assert-valid)
+      (id->handle! (create-describable!! "methods" short-desc long-desc (list (list "container_id" (send caller get-id)))))
+    )
+
+    (define (can-remove-direct-method*? caller to-remove)
+      (send caller assert-valid)
+      (assert-is* to-remove zinal:db:method%%)
+      (define caller-id (send caller get-id))
+      (define to-remove-id (send to-remove-id get-id))
+      (assert
+        (format "Method ~a doesn't belong to type ~a" to-remove-id caller-id)
+        (equals*? caller (send to-remove get-containing-type))
+      )
+      (define (clause table) (format "SELECT 1 FROM ~a WHERE method_id = ?1" table))
+      (not
+        (query-maybe-value db* (sql-union (map clause '("method_defines" "method_invokations" "super_invokations"))) to-remove-id)
+      )
+    )
+
+    (define (remove-direct-method*!! caller to-remove)
+      (send caller assert-valid)
+      (assert
+        (format "Method ~a is still being used somewhere and can't be deleted" (send to-remove get-id))
+        (can-remove-direct-method*? caller to-remove)
+      )
+      (send to-remove delete-and-invalidate*!!)
+      (void)
+    )
+
+    ; only returns zinal types - does not include the super class if the super class is a legacy
+    (define (get-direct-super-types subtype)
+      (define (superclass) (get-non-legacy-super-class* subtype))
+      (define super-interfaces (get-direct-super-interfaces* subtype))
+      (if (and (is-a? subtype zinal:db:class%%) (superclass))
+        (cons (superclass) super-interfaces)
+        super-interfaces
+      )
+    )
+
+    (define (get-direct-sub-types-of-interface* interface)
+      (map id->handle! (query-list db* "SELECT subtype_id FROM extends WHERE supertype_id = ?1" (send interface get-id)))
+    )
+
+    (define (get-direct-sub-classes-of-class* class)
+      (define (clause table) (format "SELECT id FROM ~a WHERE superclass_id = ?1" table))
+      (map id->handle! (query-list db* (sql-union (map clause '("defined_classes" "insta_classes"))) (send class get-id)))
+    )
+
+    (define (get-direct-sub-types* type)
+      (if (is-a? type zinal:db:interface%%)
+        (get-direct-sub-types-of-interface* type)
+        (get-direct-sub-classes-of-class* type)
+      )
+    )
+
+    (define (get-all-subclasses type)
+      (remove-duplicates (get-all-subclasses* type) equals*?)
+    )
+
+    ; horrendously slow
+    (define (get-all-subclasses* type)
+      (define subtypes (get-direct-sub-types* type))
+      (append*
+        (filter (curryr is-a? zinal:db:class%%) subtypes)
+        (map get-all-subclasses subtypes)
+      )
+    )
+
+    (define (does-this-or-any-super-declare-method? subtype method [severed-edge #f])
+      (path? subtype (send method get-containing-type) get-direct-super-types severed-edge)
+    )
+
+    (define (does-any-super-define-method? subclass method [severed-edge #f])
+      (define superclass (get-non-legacy-super-class* subclass))
+      (and superclass (not (severed? severed-edge subclass superclass))
+        (or
+          (find* method (map get-method* (get-define-methods superclass)))
+          (does-any-super-define-method? superclass method severed-edge)
+        )
+      )
+    )
+
+    (define (get-define-methods class)
+      (filter (curryr is-a? zinal:db:define-method%%) (send class get-body))
+    )
+
+    (define (get-method* handle)
+      (assert-is-one* handle (list zinal:db:define-method%% zinal:db:invoke-method%% zinal:db:invoke-super-method%%))
+      (id->handle! (get-cell* (send handle get-id) "method_id"))
+    )
+
+    (define (get-super-invokations class/child)
+      (define children (send class/child get-children))
+      (append*
+        (filter (curryr is-a? zinal:db:invoke-super-method%%) children)
+        (map get-super-invokations (filter (negate (curryr is-a? zinal:db:class%%)) children))
+      )
+    )
+
+    ; abysmally slow
+    (define (can-remove-direct-super-type*? subtype supertype)
+      (define edge-to-sever (list subtype supertype))
+      (andmap
+        (lambda (class-to-check)
+          (define (check-relevant-nodes checker get-nodes)
+            (andmap
+              (lambda (m) (checker class-to-check m edge-to-sever))
+              (map get-method* (get-nodes class-to-check))
+            )
+          )
+          (and
+            (check-relevant-nodes does-this-or-any-super-declare-method? get-define-methods)
+            (implies (is-a? supertype zinal:db:class%%)
+              (check-relevant-nodes does-any-super-define-method? get-super-invokations)
+            )
+          )
+        )
+        (cons subtype (get-all-subclasses subtype))
+      )
+    )
+
+    (define (can-undefine-method*? define-method)
+      (define containing-class (send define-method get-parent))
+      (define method (get-method* define-method))
+      (define (ok*? subclass)
+        (and
+          (not (findf (compose1 (curry equals*? method) get-method*) (get-super-invokations subclass)))
+          (or
+            (send subclass get-direct-definition-of-method method)
+            (andmap ok*? (get-direct-sub-classes-of-class* subclass))
+          )
+        )
+      )
+      (or
+        (does-any-super-define-method? containing-class method)
+        (andmap ok*? (get-direct-sub-classes-of-class* containing-class))
+      )
+    )
+
+    (define (delete-subtype-relations!! subtype)
+      (query-exec db* "DELETE FROM extends WHERE subtype_id = ?1" (send subtype get-id))
+    )
+
+    (define (get-non-legacy-super-class* class)
+      (define super-class-ref (send class get-super-class))
+      (and (is-a? super-class-ref zinal:db:class-ref%%) (send super-class-ref get-define-class))
+    )
+
+    (define (assert-valid-method* caller method)
+      (assert-is* method zinal:db:method%%)
+      (assert
+        (format "Method ~a not declared by ~a or any of its superclasses" (send method get-id) (send caller get-id))
+        (does-this-or-any-super-declare-method? caller method)
+      )
+    )
+
+    (define (assert-can-super-invoke-method* caller method)
+      (assert
+        (format "You can't super invoke method ~a because no super class of ~a defines it" (send method get-id) (send caller get-id))
+        (does-any-super-define-method? caller method)
+      )
+    )
+
+    ; DESCRIBABLE HELPERS
+
+    (define (get-short-desc* caller)
+      (send caller assert-valid)
+      (sql:// (get-cell* (send caller get-id) "short_desc") #f)
+    )
+
+    (define (get-long-desc* caller)
+      (send caller assert-valid)
+      (sql:// (get-cell* (send caller get-id) "long_desc") #f)
+    )
+
+    (define (set-short-desc*!! caller new-desc)
+      (send caller assert-valid)
+      (set-desc*!! 'short (send caller get-id) new-desc)
+    )
+
+    (define (set-long-desc*!! caller new-desc)
+      (send caller assert-valid)
+      (set-desc*!! 'long (send caller get-id) new-desc)
+    )
+
+    ; HAS-PARAMS HELPERS
+
+    (define (get-all-params* caller)
+      (send caller assert-valid)
+      (send (get-params-list* caller) get-items)
+    )
+
+    (define (get-required-params* caller)
+      (send caller assert-valid)
+      (takef (get-all-params* caller) (lambda (p) (not (send p get-default))))
+    )
+
+    (define (can-remove-required-param*? caller index)
+      (send caller assert-valid)
+      (assert-valid-param-index* caller index #t)
+      (can-remove-param*? caller index)
+    )
+
+    (define (remove-required-param*!! caller index)
+      (send caller assert-valid)
+      (assert-valid-param-index* caller index #t)
+      (remove-param*!! caller index)
+    )
+
+    (define (insert-required-param*!! caller index [short-desc #f])
+      (send caller assert-valid)
+      (send (get-params-list* caller) insert-param*!! index #t short-desc)
+    )
+
+    (define (make-last-required-param-optional*!! caller)
+      (send caller assert-valid)
+      (define reqd-params (get-required-params* caller))
+      (assert "There is no required param to convert into an optional param" (pair? reqd-params))
+      (define last-reqd-param-default-loc (new loc% [id (send (last reqd-params) get-id)] [col "default_id"]))
+      (assert "attempt to convert optional param to optional" (= NIL-ID (send last-reqd-param-default-loc get-cell)))
+      (set-loc-dangerous*!! last-reqd-param-default-loc BOGUS-ID)
+      (create-unassigned!! last-reqd-param-default-loc)
+      (void)
+    )
+
+    (define (get-optional-params* caller)
+      (send caller assert-valid)
+      (dropf (get-all-params* caller) (lambda (p) (not (send p get-default))))
+    )
+
+    (define (can-remove-optional-param*? caller index)
+      (send caller assert-valid)
+      (assert-valid-param-index* caller index #f)
+      (can-remove-param*? caller (get-optional-index* caller index))
+    )
+
+    (define (remove-optional-param*!! caller index)
+      (send caller assert-valid)
+      (assert-valid-param-index* caller index #f)
+      (remove-param*!! caller (get-optional-index* caller index))
+    )
+
+    (define (insert-optional-param*!! caller index [short-desc #f])
+      (send caller assert-valid)
+      (send (get-params-list* caller) insert-param*!! (get-optional-index* caller index) #f short-desc)
+    )
+
+    (define (make-last-optional-param-required*!! caller)
+      (send caller assert-valid)
+      (define opt-params (get-optional-params* caller))
+      (assert "There is no optional param to convert into a required param" (pair? opt-params))
+      (define first-opt-param (car opt-params))
+      (send (send first-opt-param get-default) delete-and-invalidate*!!)
+      (set-id!! (new loc% [id (send first-opt-param get-id)] [col "default_id"]) NIL-ID)
+      (void)
+    )
+
+    (define (get-params-list* caller)
+      (get-node-handle! (send caller get-id) "params_id")
+    )
+
+    (define (remove-param*!! caller index)
+      (assert
+        (format "Cannot delete ~ath required or optional param" index)
+        (can-remove-param*? caller index)
+      )
+      (send (list-ref (get-all-params* caller) index) delete-and-invalidate*!!)
+      (send (get-params-list* caller) remove*!! index #f)
+    )
+
+    (define (can-remove-param*? caller index)
+      (all-references-are-descendants*? (list-ref (get-all-params* caller) index))
+    )
+
+    (define (get-optional-index* caller index)
+      (+ index (length (get-required-params* caller)))
+    )
+
+    (define (assert-valid-param-index* caller index required?)
+      (assert
+        (format "index ~a not a valid index for ~a param" index (if required? "required" "optional"))
+        (and (>= index 0) (< index (length (if required? (get-required-params* caller) (get-optional-params* caller)))))
+      )
+    )
+
+    (define (delete-and-invalidate-params*!! caller)
+      (send (get-params-list* caller) delete-and-invalidate*!!)
+    )
+
+    ; HAS-BODY HELPERS
+
+    (define (get-body* caller)
+      (send caller assert-valid)
+      (send (get-body-list* caller) get-items)
+    )
+
+    (define (insert-into-body*!! caller index)
+      (send caller assert-valid)
+      (send (get-body-list* caller) insert!! index)
+    )
+
+    (define (remove-from-body*!! caller index)
+      (send caller assert-valid)
+      (send (get-body-list* caller) remove!! index)
+    )
+
+    (define (get-body-list* caller)
+      (get-node-handle! (send caller get-id) "body_id")
+    )
+
+    (define (delete-and-invalidate-body*!! caller)
+      (send (get-body-list* caller) delete-and-invalidate*!!)
+    )
+
+    ; HAS-ARGS HELPERS
+
+    (define (get-args* caller)
+      (send caller assert-valid)
+      (send (get-args-list* caller) get-items)
+    )
+
+    (define (insert-arg*!! caller index)
+      (send caller assert-valid)
+      (send (get-args-list* caller) insert!! index)
+    )
+
+    (define (remove-arg*!! caller index)
+      (send caller assert-valid)
+      (send (get-args-list* caller) remove!! index)
+    )
+
+    (define (get-args-list* caller)
+      (get-node-handle! (send caller get-id) "args_id")
+    )
+
+    (define (delete-and-invalidate-args*!! caller)
+      (send (get-args-list* caller) delete-and-invalidate*!!)
+    )
+
     ; HELPER FUNCTIONS
 
+    ; NOTE - this can only be used on normal types, methods, and interfaces
     (define (id->handle! id)
-      (get-handle! (get-cell* id "parent_id") (get-cell* id "parent_col"))
+      (define table (get-table id))
+      (if (hash-has-key? NORMAL-TABLE-INFO table)
+        (get-node-handle! (get-cell* id "parent_id") (get-cell* id "parent_col"))
+        (case table
+          [("interfaces" "methods")
+            (get-non-node-handle! id)
+          ]
+          [else
+            (error 'id->handle! "cannot call id->handle! on just any type of id: id ~a in table ~a" id table)
+          ]
+        )
+      )
     )
 
     ; id&col is a horrible abomination but it seems the least painful way to use locs as hash keys
-    ; TODO we may be able to fix this if we wind up supporting init-field after all
     (define (id&col->loc id&col)
       (new loc% [id (first id&col)] [col (second id&col)])
+    )
+
+    (define (make-id&col id col)
+      (list id col)
     )
 
     (define (get-table id)
@@ -1252,70 +2602,119 @@
     )
 
     ; not purely functional, because of interning
-    (define (get-handle! loc/id [col #f])
+    (define (get-node-handle! loc/id [col #f])
       (assert
-        (format "the first arg of get-handle! must be a loc iff the second arg is #f: ~a ~a" loc/id col)
+        (format "the first arg of get-node-handle! must be a loc iff the second arg is #f: ~a ~a" loc/id col)
         (not (xor col (number? loc/id)))
       )
-      (get-handle*!
+      (get-node-handle*!
         (if col
-          (list loc/id col)
+          (make-id&col loc/id col)
           (send loc/id get-id&col)
         )
       )
     )
 
-    (define (get-handle*! id&col)
+    (define (get-node-handle*! id&col)
       (or
         (hash-ref handles* id&col #f)
-        (create-handle*! id&col)
+        (create-node-handle*! id&col)
       )
     )
 
-    (define (create-handle*! id&col)
+    (define (create-node-handle*! id&col)
       (define loc (id&col->loc id&col))
       (define id (send loc get-cell))
+      (define (table) (get-table id))
+      (define handle-class
+        (if (= id THIS-ID)
+          db-this%
+          (case (table)
+            [("defined_classes") db-define-class%]
+            [("insta_classes") db-insta-class%]
+            [("method_defines") db-define-method%]
+            [("legacy_overrides") db-legacy-override%]
+            [("super_inits") db-super-init%]
+            [("method_invokations") db-method-invokation%]
+            [("legacy_method_invokations") db-legacy-invokation%]
+            [("super_invokations") db-super-invokation%]
+            [("legacy_super_invokations") db-legacy-super-invokation%]
+            [("object_constructions") db-object-construction%]
+            [("isas") db-is-a?%]
+            [("lambdas") db-lambda%]
+            [("defines") db-def%]
+            [("list_headers")
+              (if (get-module-id id)
+                db-module%
+                db-list%
+              )
+            ]
+            [("params") db-param%]
+            [("param_refs") db-param-ref%]
+            [("define_refs") db-def-ref%]
+            [("asserts") db-assert%]
+            [("atoms")
+              (define type (string->symbol (get-cell* id "type")))
+              (case type
+                [(number) db-number%]
+                [(character) db-char%]
+                [(string) db-string%]
+                [(boolean) db-bool%]
+                [(symbol) db-symbol%]
+                [(keyword) db-keyword%]
+                [else (error 'create-handle*! "Invalid atom type ~a for id ~a" type id)]
+              )
+            ]
+            [("legacies") db-legacy%]
+            [("unassigned") db-unassigned%]
+            [else (error 'create-node-handle*! "cannot create a handle for loc ~a of invalid type ~a" loc (table))]
+          )
+        )
+      )
+      (define handle (make-object handle-class loc))
+      (hash-set! handles* id&col handle)
+      handle
+    )
+
+    (define (get-non-node-handle! id)
+      (or
+        (hash-ref handles* id #f)
+        (create-non-node-handle*! id)
+      )
+    )
+
+    (define (create-non-node-handle*! id)
       (define table (get-table id))
       (define handle
         (case table
-          [("lambdas") (new db-lambda% [loc loc])]
-          [("defines") (new db-def% [loc loc])]
-          [("list_headers")
-            (define module-id (get-module-id id))
-            (if module-id
-              (new db-module% [loc loc])
-              (new db-list% [loc loc])
-            )
-          ]
-          [("params") (new db-param% [loc loc])]
-          [("param_refs") (new db-param-ref% [loc loc])]
-          [("definitions") (new db-def-ref% [loc loc])]
-          [("asserts") (new db-assert% [loc loc])]
-          [("atoms")
-            (define type (string->symbol (get-cell* id "type")))
-            (case type
-              [(number) (new db-number% [loc loc])]
-              [(character) (new db-char% [loc loc])]
-              [(string) (new db-string% [loc loc])]
-              [(boolean) (new db-bool% [loc loc])]
-              [(symbol) (new db-symbol% [loc loc])]
-              [(keyword) (new db-keyword% [loc loc])]
-              [else (error 'create-handle*! "Invalid atom type ~a for id ~a" type id)]
-            )
-          ]
-          [("legacies") (new db-legacy% [loc loc])]
-          [("unassigned") (new db-unassigned% [loc loc])]
-          [else (error 'create-handle*! "cannot create a handle for loc ~a of invalid type ~a" loc table)]
+          [("interfaces") (make-object db-interface% id)]
+          [("methods") (make-object db-method% id)]
+          [else (error 'create-non-node-handle*! "cannot create a handle for id ~a of invalid type ~a" id table)]
         )
       )
-      (hash-set! handles* id&col handle)
+      (hash-set! handles* id handle)
       handle
+    )
+
+    (define (get-next-id table)
+      (+ (vector-length ID-TABLES) (sql:// (query-value db* (format "SELECT MAX(id) FROM ~a" table)) (get-table-mod* table)))
     )
 
     (define (create-something-sql-string* table col-val-assocs)
       (define placeholders (build-list (length col-val-assocs) (compose1 (curry format "?~a") add1)))
       (define cols (map first col-val-assocs))
       (format "INSERT INTO ~a(~a) values(~a)" table (string-join cols ", ") (string-join placeholders ", "))
+    )
+
+    (define (col-value-assocs+descs* col-val-assocs short-desc long-desc)
+      (assert
+        (format "invalid short or long desc: ~a, ~a" short-desc long-desc)
+        (and (valid-desc? short-desc) (valid-desc? long-desc))
+      )
+      (append
+        (list (list "short_desc" (or-sql-null short-desc)) (list "long_desc" (or-sql-null long-desc)))
+        col-val-assocs
+      )
     )
 
     (define (create-something!! table col-val-assocs)
@@ -1325,57 +2724,81 @@
       id
     )
 
-    (define (get-next-id table)
-      (+ (vector-length ID-TABLES) (sql:// (query-value db* (format "SELECT MAX(id) FROM ~a" table)) (get-table-mod* table)))
+    ; If either desc is #f, it'll be stored as sql-null
+    (define (create-describable!! table short-desc long-desc col-value-assocs)
+      (create-something!! table (col-value-assocs+descs* col-value-assocs short-desc long-desc))
     )
 
     ; loc must be empty (i.e. BOGUS-ID) before calling this
-    (define (create-child!! table loc col-value-assocs)
+    (define (create-normal!! table loc col-value-assocs)
       (assert-bogus-id loc)
-      (define id (create-something!! table col-value-assocs))
-      (set-id!! loc id)
-      id
-    )
-
-    ; loc must be empty (i.e. BOGUS-ID) before calling this
-    ; If either desc is #f, it'll be stored as sql-null
-    (define (create-describable-child!! table loc short-desc long-desc col-value-assocs)
-      (define expanded-assocs
-        (append
-          (list (list "short_desc" (or-sql-null short-desc)) (list "long_desc" (or-sql-null long-desc)))
-          col-value-assocs
-        )
-      )
-      (create-child!! table loc expanded-assocs)
-    )
-
-    ; loc must be empty (i.e. BOGUS-ID) before calling this
-    ; If either desc is #f, it'll be stored as sql-null
-    (define (create-parent!! table loc short-desc long-desc col-value-assocs)
       (define expanded-assocs
         (append
           (list (list "parent_id" (send loc get-id)) (list "parent_col" (send loc get-col)))
           col-value-assocs
         )
       )
-      (create-describable-child!! table loc short-desc long-desc expanded-assocs)
+      (define id (create-something!! table expanded-assocs))
+      (set-id!! loc id)
+      id
+    )
+
+    ; loc must be empty (i.e. BOGUS-ID) before calling this
+    ; If either desc is #f, it'll be stored as sql-null
+    (define (create-describable-normal!! table loc short-desc long-desc col-value-assocs)
+      (create-normal!! table loc (col-value-assocs+descs* col-value-assocs short-desc long-desc))
     )
 
     (define (create-unassigned!! loc)
-      (create-describable-child!! "unassigned" loc #f #f '())
+      (create-describable-normal!! "unassigned" loc #f #f '())
     )
 
     (define (create-list-header!! loc [short-desc #f] [long-desc #f])
-      (create-parent!! "list_headers" loc short-desc long-desc (list (list "cdr_id" NIL-ID)))
+      (create-describable-normal!! "list_headers" loc short-desc long-desc (list (list "cdr_id" NIL-ID)))
+    )
+
+    (define (create-lambda!! loc [short-desc #f] [long-desc #f])
+      (define lambda-id
+        (create-describable-normal!!
+          "lambdas"
+          loc
+          short-desc
+          long-desc
+          (list
+            (list "params_id" BOGUS-ID)
+            (list "body_id" BOGUS-ID)
+          )
+        )
+      )
+      (create-list-header!! (new loc% [id lambda-id] [col "params_id"]))
+      (create-list-header!! (new loc% [id lambda-id] [col "body_id"]))
+      lambda-id
     )
 
     (define (create-param!! loc required? [short-desc #f] [long-desc #f])
       (define param-id
-        (create-parent!! "params" loc short-desc long-desc (list (list "default_id" (if required? NIL-ID BOGUS-ID))))
+        (create-describable-normal!! "params" loc short-desc long-desc (list (list "default_id" (if required? NIL-ID BOGUS-ID))))
       )
       (unless required? (create-unassigned!! (new loc% [id param-id] [col "default_id"])))
       (create-something!! "param_refs" (list (list "param_id" param-id)))
       param-id
+    )
+
+    (define (create-legacy-node!! loc library name)
+      (define storage-lib (or library DEFAULT-LIBRARY))
+      (define link-id
+        (or
+          (query-maybe-value db* "SELECT id FROM legacies WHERE library = ?1 AND name = ?2" storage-lib name)
+          (create-something!! "legacies" (list (list "ref_count" 0) (list "library" storage-lib) (list "name" name)))
+        )
+      )
+      (inc-ref-count!! link-id)
+      (set-id!! loc link-id)
+      link-id
+    )
+
+    (define (create-reference!! loc referable)
+      (set-id!! loc (send referable get-reference-id*))
     )
 
     (define (assert-bogus-id loc)
@@ -1423,41 +2846,30 @@
       new-ref-count
     )
 
-    (define (get-param-ref-id param-id)
-      (query-value db* "SELECT id FROM param_refs WHERE param_id = ?1" param-id)
-    )
-
-    (define (get-definition-id define-id)
-      (query-value db* "SELECT id FROM definitions WHERE define_id = ?1" define-id)
-    )
-
     (define (get-module-id list-id)
       (query-maybe-value db* "SELECT id FROM modules WHERE list_id = ?1" list-id)
     )
 
     (define (module-id->handle! module-id)
-      (get-handle! module-id "list_id")
+      (get-node-handle! module-id "list_id")
     )
 
     (define (get-references* id)
-      (append
-        (get-references-of-type* "list_nodes" "car_id" id)
-        (get-references-of-type* "defines" "expr_id" id)
-        (get-references-of-type* "params" "default_id" id)
+      ; TODO current - use UNION to optimize this
+      (append* (hash-map CAN-BE-REF-COLS (curryr get-references-of-type* id)))
+    )
+
+    (define (get-references-of-type* table col id)
+      (map
+        (curryr get-node-handle! col)
+        (query-list db* (format "SELECT id FROM ~a WHERE ~a = ?1" table col) id)
       )
     )
 
     (define (get-referables-of-type* table)
       (map
-        (lambda (v) (new loc% [id (vector-ref v 0)] [col (vector-ref v 1)]))
+        (lambda (v) (get-node-handle! (vector-ref v 0) (vector-ref v 1)))
         (query-rows db* (format "SELECT parent_id, parent_col FROM ~a" table))
-      )
-    )
-
-    (define (get-references-of-type* table col id)
-      (map
-        (curryr get-handle! col)
-        (query-list db* (format "SELECT id FROM ~a WHERE ~a = ?1" table col) id)
       )
     )
 
@@ -1468,10 +2880,14 @@
       )
       (assert
         (format "~a is not a string or #f" new-desc)
-        (implies new-desc (string? new-desc))
+        (valid-desc? new-desc)
       )
       (define col (format "~a_desc" (symbol->string short/long)))
       (set-cell-dangerous*!! id col (or-sql-null new-desc))
+    )
+
+    (define (valid-desc? s)
+      (implies s (string? s))
     )
 
     (define (delete-id*!! id)
@@ -1479,13 +2895,13 @@
     )
 
     (define (is-referable-visible*? location-node referable)
-      (findf (curry equals*? referable) (send location-node get-visible-referables-after))
+      (find* referable (send location-node get-visible-referables-after))
     )
 
     (define (get-visible-referables* location-node)
-      (append
-        (flatten (map (lambda (m) (send m get-public-defs)) (send (send location-node get-module) get-required-modules)))
+      (append*
         (get-visible-referables-recursive* location-node #f)
+        (map (lambda (m) (send m get-public-defs)) (send (send location-node get-module) get-required-modules))
       )
     )
 
@@ -1509,9 +2925,9 @@
           (cons location-node older)
         )
         (cond
-          [(and check-younger-siblings? (function-definition? location-node))
+          [(and check-younger-siblings? (visible-to-elders? location-node))
             (define younger (cdr (dropf siblings not-location-node?)))
-            (takef younger function-definition?)
+            (takef younger visible-to-elders?)
           ]
           [else
             '()
@@ -1520,27 +2936,12 @@
       )
     )
 
+    (define (visible-to-elders? handle)
+      (or (function-definition? handle) (ormap (curry is-a? handle) (list zinal:db:define-method%% zinal:db:override-legacy-method%% zinal:db:define-class%%)))
+    )
+
     (define (function-definition? handle)
       (and (is-a? handle zinal:db:def%%) (is-a? (send handle get-expr) zinal:db:lambda%%))
-    )
-
-    (define (requires*? requirer-module required-module)
-      (ormap
-        (lambda (direct-required-module)
-          (or
-            (equals*? direct-required-module required-module)
-            (requires*? direct-required-module required-module)
-          )
-        )
-        (send requirer-module get-required-modules)
-      )
-    )
-
-    (define (all-references-are-descendants*? referable [ancestor referable])
-      (andmap
-        (curryr descendant? ancestor)
-        (send referable get-references)
-      )
     )
 
     (define (descendant? child subroot)
@@ -1554,24 +2955,120 @@
       )
     )
 
+    (define (all-references-are-descendants*? referable [ancestor referable])
+      (andmap
+        (curryr descendant? ancestor)
+        (send referable get-references)
+      )
+    )
+
+    (define (assert-is* handle type)
+      (assert (format "~a is not a ~a:" (send handle get-id) type) (is-a? handle type))
+    )
+
+    (define (assert-is-one* handle types)
+      (assert (format "~a is not one of ~a:" (send handle get-id) types) (ormap (curry is-a? handle) types))
+    )
+
+    (define (assert-valid-legacy* library name)
+      ; TODO properly vet the library and name
+      (assert
+        (format "Invalid library or identifier: ~a :: ~a" library name)
+        (and (implies library (non-empty-string? library)) (non-empty-string? name))
+      )
+    )
+
+    (define (assert-valid-legacy-method-name* name)
+      (assert (format "Legacy method name '~a' is not a non-empty string" name) (non-empty-string? name))
+    )
+
+    (define (assert-visible* location-node ref-handle)
+      (assert
+        (format
+          "You cannot create a reference (at ~a) to point to a referable (~a) that's not visible to it"
+          (send location-node get-id)
+          (send ref-handle get-id)
+        )
+        (is-referable-visible*? location-node ref-handle)
+      )
+    )
+
+    (define (assert-method-visible* location-node method)
+      (define container (send method get-containing-type))
+      (unless (is-a? container zinal:db:interface%%) (assert-visible* location-node container))
+    )
+
+    (define (path? a b get-children* [severed-edge #f])
+      (or
+        (equals*? a b)
+        (ormap
+          (curryr path? b get-children* severed-edge)
+          (filter (negate (curry severed? severed-edge a)) (get-children* a))
+        )
+      )
+    )
+
+    (define (severed? severed-edge from to)
+      (and severed-edge (equals*? from (first severed-edge)) (equals*? to (second severed-edge)))
+    )
+
+    (define (sql-union clauses)
+      (string-join clauses " UNION ")
+    )
+
+    (define (find* v lst)
+      (findf (curry equals*? v) lst)
+    )
+
     (define (equals*? elem1 elem2)
       (send elem1 equals? elem2)
     )
 
+    (define (hidden? table col)
+      (member col (hash-ref HIDDEN-NODE-COLS table))
+    )
+
+    (define (can-be-ref? table col)
+      (member col (hash-ref CAN-BE-REF-COLS table))
+    )
+
     ; INIT
 
-    (unless (positive? (file-size filename*))
-      (define (create-tables tables->cols [extra-cols '()])
-        (hash-map
-          tables->cols
-          (lambda (table cols)
-            (query-exec db* (format "CREATE TABLE ~a(~a)" table (string-join (append extra-cols cols) ", ")))
+    (define (hidden*? col-info)
+      (and (> (length col-info) 2) (equal? ''hidden (third col-info)))
+    )
+
+    (define (can-be-ref*? col-info)
+      (and (> (length col-info) 2) (equal? ''can-be-ref (third col-info)))
+    )
+
+    (define (col-info->col* col-info)
+      (first col-info)
+    )
+
+    (define create-db*? (zero? (file-size filename*)))
+
+    (define (create-tables tables->cols [extra-cols '()])
+      (hash-map
+        tables->cols
+        (lambda (table col-infos)
+          (when create-db*?
+            (define col-strings (map (lambda (x) (format "~a ~a" (first x) (second x))) (append extra-cols col-infos)))
+            (query-exec db* (format "CREATE TABLE ~a(~a)" table (string-join col-strings ", ")))
           )
+
+          (define hidden-node-cols (filter-map (lambda (c) (and (hidden*? c) (col-info->col* c))) col-infos))
+          (hash-update! HIDDEN-NODE-COLS table (curry append hidden-node-cols) '())
+
+          (define can-be-ref-cols (filter-map (lambda (c) (and (can-be-ref*? c) (col-info->col* c))) col-infos))
+          (hash-update! CAN-BE-REF-COLS table (curry append can-be-ref-cols) '())
         )
       )
-      (create-tables ID-TABLES->NON-ID-COLS '("id INTEGER PRIMARY KEY"))
-      (create-tables WEIRD-TABLES->COLS)
     )
+
+    (create-tables NORMAL-TABLE-INFO '(["id" "INTEGER PRIMARY KEY"] ["parent_id" "INT"] ["parent_col" "TEXT"]))
+    (create-tables NO-UNIQUE-PARENT-TABLE-INFO '(["id" "INTEGER PRIMARY KEY"]))
+    (create-tables NO-ID-TABLE-INFO)
   )
 )
 )
