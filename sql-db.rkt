@@ -427,6 +427,10 @@
         (remove-direct-super-interface*!! this to-remove)
       )
 
+      (define/public (get-all-methods)
+        (get-all-methods* this)
+      )
+
       (define/public (get-direct-methods)
         (get-direct-methods* this)
       )
@@ -501,6 +505,10 @@
 
       (define/public (remove-direct-super-interface!! to-remove)
         (remove-direct-super-interface*!! this to-remove)
+      )
+
+      (define/public (get-all-methods)
+        (get-all-methods* this)
       )
 
       (define/public (get-direct-definition-of-method method)
@@ -2240,6 +2248,12 @@
       (void)
     )
 
+    (define/public (get-all-methods* caller)
+      (send caller assert-valid)
+      (define direct-methods (if (is-a? caller zinal:db:type%%) (get-direct-methods* caller) '()))
+      (append direct-methods (map get-direct-methods* (get-all-super-types caller)))
+    )
+
     (define (get-direct-methods* caller)
       (send caller assert-valid)
       (map id->handle! (query-list db* "SELECT id FROM methods WHERE container_id = ?1" (send caller get-id)))
@@ -2301,11 +2315,20 @@
       )
     )
 
+    (define (get-all-super-types subtype)
+      (remove-duplicates (get-all-super-types* subtype) equals*?)
+    )
+
+    (define (get-all-super-types* subtype)
+      (define super-types (get-direct-super-types subtype))
+      (append* super-types (map get-all-super-types* super-types))
+    )
+
+    ; horrendously slow
     (define (get-all-subclasses type)
       (remove-duplicates (get-all-subclasses* type) equals*?)
     )
 
-    ; horrendously slow
     (define (get-all-subclasses* type)
       (define subtypes (get-direct-sub-types* type))
       (append*

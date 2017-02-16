@@ -305,6 +305,10 @@
   ; Throws an exception if can-remove-direct-super-interface? would return #f or throw
   ; No meaningful return value
   remove-direct-super-interface!! ; (zinal:db:interface%%)
+
+  ; Returns a list of all zinal:db:method%% that are defined directly by this or by any super
+  ; type, in no particular order
+  get-all-methods ; ()
 ))
 
 ; A defined type, which can be referenced and have subtypes. Has methods for getting, adding,
