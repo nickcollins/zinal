@@ -22,6 +22,28 @@
   (or v sql-null)
 )
 
+(define INVALID_LEGACIES '(
+  "new"
+  "super-new"
+  "make-object"
+  "super-make-object"
+  "super"
+  "send"
+  "this"
+  "is-a?"
+  "class"
+  "class*"
+  "interface"
+  "init"
+  "abstract"
+  "define/public"
+  "define/override"
+  "augment"
+  "define"
+  "lambda"
+  "assert"
+))
+
 ; TABLE-INFO hashes map table names to cols.
 ; "hidden" cols refer to list nodes that are being used by the implementation but are invisible to the interface.
 ; get-parent invoked on any child of this hidden list will return the first ancestor that is not in one of these
@@ -2975,6 +2997,10 @@
       (assert
         (format "Invalid library or identifier: ~a :: ~a" library name)
         (and (implies library (non-empty-string? library)) (non-empty-string? name))
+      )
+      (assert
+        (format "You can't use a legacy for which there's a corresponding primitive: ~a" name)
+        (or library (not (member name INVALID_LEGACIES)))
       )
     )
 
