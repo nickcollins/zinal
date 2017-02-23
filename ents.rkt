@@ -1710,7 +1710,6 @@
         (send (send this-ent* get-cone-root) get-visible-referables-underneath)
       )
 
-      ; TODO current - is it necessary to have either header or bookends? do #f bookends mean no bookends or parenthesis?
       (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
 
       (define assertion-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
