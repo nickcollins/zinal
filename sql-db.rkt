@@ -2075,7 +2075,7 @@
           (define method-id (send method get-id))
           (assert
             (format "cannot define method ~a twice in class ~a" method-id (send containing-class get-id))
-            (send containing-class get-direct-definition-of-method)
+            (not (send containing-class get-direct-definition-of-method method))
           )
           (assign*!! (lambda (loc)
             (define define-method-id
@@ -2901,7 +2901,7 @@
 
     (define (get-references* id)
       ; TODO current - use UNION to optimize this
-      (append* (hash-map CAN-BE-REF-COLS (curryr get-references-of-type* id)))
+      (append* (hash-map CAN-BE-REF-COLS (lambda (table cols) (append-map (lambda (col) (get-references-of-type* table col id)) cols))))
     )
 
     (define (get-references-of-type* table col id)
