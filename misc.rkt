@@ -22,4 +22,10 @@
 )
 
 (define non-negative? (negate negative?))
+
+; proc index lst[index] => any
+(define (map-by-index proc lst)
+  (define vec (list->vector lst))
+  (build-list (vector-length vec) (lambda (i) (proc i (vector-ref vec i))))
+)
 )

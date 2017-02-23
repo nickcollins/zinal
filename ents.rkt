@@ -1197,12 +1197,9 @@
 
       (define/public (reset-list*!)
         (send this clear!)
-        (define handles (list->vector (sort (send (send this-ent* get-cone-root) get-required-modules) module<?)))
-        (build-list
-          (vector-length handles)
-          (lambda (i)
-            (send this insert! i (get-module-required-ui* (vector-ref handles i)))
-          )
+        (map-by-index
+          (lambda (i v) (send this insert! i (get-module-required-ui* v)))
+          (sort (send (send this-ent* get-cone-root) get-required-modules) module<?)
         )
       )
 
@@ -1234,14 +1231,9 @@
       (super-make-object this-ent* this-ent* header*)
     )))
 
-    (begin
-      (define handles (list->vector (send (send this get-cone-root) get-items)))
-      (build-list
-        (vector-length handles)
-        (lambda (i)
-          (send ui-list* insert! i (get-module-ui-child* (vector-ref handles i)))
-        )
-      )
+    (map-by-index
+      (lambda (i v) (send ui-list* insert! i (get-module-ui-child* v)))
+      (send (send this get-cone-root) get-items)
     )
   ))
 
@@ -2399,14 +2391,9 @@
 
     (super-make-object parent-ent fallback-event-handler header separator bookends)
 
-    (begin
-      (define handles (list->vector (db-get-items)))
-      (build-list
-        (vector-length handles)
-        (lambda (i)
-          (insert-new-slot!! i (vector-ref handles i) child-spawner!)
-        )
-      )
+    (map-by-index
+      (lambda (i v) (insert-new-slot!! i v child-spawner!))
+      (db-get-items)
     )
   ))
 
