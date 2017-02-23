@@ -2848,7 +2848,7 @@
     )
 
     (define (get-references* id)
-      ; TODO current - use UNION to optimize this
+      ; TODO use UNION to optimize this
       (append* (hash-map CAN-BE-REF-COLS (lambda (table cols) (append-map (lambda (col) (get-references-of-type* table col id)) cols))))
     )
 
