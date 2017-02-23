@@ -84,7 +84,7 @@
   ; for the newly minted module
   create-module!! ; ([short-desc])
 
-  ; Returns a list of all zinal:db:referable%% in this db
+  ; Returns a list of all zinal:db:referable%% in this db, in no particular order
   get-all-referables ; ()
 
   ; Returns a list of all zinal:db:interface%% in this db, in no particular order. Currently,
@@ -315,7 +315,7 @@
 ; and removing method declarations. The supertype of zinal:db:interface%% and zinal:db:define-class%% .
 ; By "direct", we mean a method directly defined by the type, as opposed to methods of grandparent
 ; types
-(define zinal:db:type%% (interface (zinal:db:subtype%% zinal:db:describable%%)
+(define zinal:db:type%% (interface (zinal:db:subtype%% zinal:db:referable%%)
 
   ; Returns a list of zinal:db:method%% representing the methods directly defined by this type, in
   ; no particular order.
@@ -340,7 +340,7 @@
 ; being attached to any particular module.
 (define zinal:db:interface%% (interface (zinal:db:type%%)
 
-  ; Returns #t if this interface has no subtypes, is not the type of a zinal:db:is-a?%% , and all
+  ; Returns #t if this interface has no subtypes, if there are no references to it, and all
   ; of its methods can be deleted.
   ; Otherwise #f
   can-delete? ; ()
@@ -349,6 +349,12 @@
   ; Throws an exception if can-delete? would return #f
   ; No meaningful return value
   delete!! ; ()
+))
+
+(define zinal:db:interface-ref%% (interface (zinal:db:reference%%)
+
+  ; Returns a zinal:db:interface%% handle for the interface that this reference refers to
+  get-interface ; ()
 ))
 
 ; Super type of zinal:db:define-class%% and zinal:db:class-instance%% . The former defines a class as a
@@ -409,7 +415,7 @@
 ; the tree. If the class is instantiated (i.e. it's not abstract) then all direct methods and all
 ; methods of direct or indirect super types must be defined by this class or by super classes.
 (define zinal:db:define-class%%
-  (interface (zinal:db:class%% zinal:db:has-params%% zinal:db:referable%%))
+  (interface (zinal:db:class%% zinal:db:has-params%% zinal:db:type%%))
 )
 
 (define zinal:db:class-ref%% (interface (zinal:db:reference%%)
@@ -435,29 +441,6 @@
 
   ; Returns a zinal:db:type%% for the type that directly defines this method
   get-containing-type ; ()
-))
-
-; Equivalent to racket 'is-a? . When evaluated, tells you whether get-object is a subtype of
-; get-type . Like the racket version, if get-object does not return an object, it simply evaluates
-; to #f.
-(define zinal:db:is-a?%% (interface (zinal:db:parent-node%%)
-
-  ; Returns a zinal:db:node that evaluates to the object to be tested.
-  get-object ; ()
-
-  ; Returns a zinal:db:legacy-link%% , zinal:db:class-ref%% , or zinal:db:interface%% representing
-  ; the type to check. The initial value is a zinal:db:legacy-link%% corresponding to object% .
-  ; This is kind of absurd, since sometimes this returns a node and sometimes it
-  ; doesn't. When it is a node, get-children will include it, otherwise get-children only includes
-  ; the node returned by get-object . This is silly but I don't like the alternatives either.
-  get-type ; ()
-
-  ; changes the item returned by get-type . If the previous value of get-type was a node (i.e.
-  ; zinal:db:legacy-link%% or zinal:db:class-ref%% ) then any handles to it become invalid.
-  ; Returns a handle to the zinal:db:legacy-link%% , zinal:db:class-ref%% , or zinal:db:interface%%
-  set-legacy-type!! ; (library name)
-  set-class-type!! ; (zinal:db:define-class%%)
-  set-interface-type!! ; (zinal:db:interface%%)
 ))
 
 ; A node which defines a method. This node is only permitted in the body of a zinal:db:class%% .
@@ -769,6 +752,7 @@
     assign-def-ref!! ; (zinal:db:def%%)
     assign-param-ref!! ; (zinal:db:param%%)
     assign-class-ref!! ; (zinal:db:define-class%%)
+    assign-interface-ref!! ; (zinal:db:interface%%)
 
     assign-number!! ; (value)
     assign-char!! ; (value)
@@ -782,7 +766,6 @@
     assign-invoke-method!! ; (zinal:db:method%%)
     assign-invoke-legacy-method!! ; (string)
     assign-create-object!! ; ()
-    assign-is-a?!! ; ()
     ; attempting to call any of the following methods on a node that is not inside a
     ; zinal:db:class%% body will throw an exception
     assign-define-method!! ; (zinal:db:method%%)
@@ -807,10 +790,11 @@
     (define/public (visit-atom a data) (visit-node a data))
 
     (define/public (visit-interface i data) (visit-element i data))
+    (define/public (visit-interface-ref ir data) (visit-reference ir data))
     (define/public (visit-method m data) (visit-element m data))
 
     (define/public (visit-list l data) (visit-node l data))
-    ; TODO consider changing modules for zinal:db:list%% to zinal:db:has-body%%
+    ; TODO consider changing modules from zinal:db:list%% to zinal:db:has-body%%
     (define/public (visit-module m data) (visit-list m data))
 
     (define/public (visit-lambda l data) (visit-node l data))
@@ -836,7 +820,6 @@
     (define/public (visit-define-method dm data) (visit-node dm data))
     (define/public (visit-override-legacy-method olm data) (visit-node olm data))
     (define/public (visit-this t data) (visit-node t data))
-    (define/public (visit-is-a? i data) (visit-node i data))
 
     (define/public (visit-class c data) (visit-node c data))
     (define/public (visit-define-class c data) (visit-class c data))

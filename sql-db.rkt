@@ -30,7 +30,6 @@
   "super"
   "send"
   "this"
-  "is-a?"
   "class"
   "class*"
   "interface"
@@ -71,8 +70,6 @@
     '(["legacy_name" "TEXT"] ["args_id" "INT" 'hidden])
   "object_constructions"
     '(["class_id" "INT" 'can-be-ref] ["args_id" "INT" 'hidden])
-  "isas"
-    '(["object_id" "INT" 'can-be-ref] ["type_id" "INT" 'can-be-ref])
 
   "list_headers"
     '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["cdr_id" "INT" 'hidden])
@@ -109,6 +106,8 @@
     '(["define_id" "INT UNIQUE"])
   "class_refs"
     '(["class_id" "INT UNIQUE"])
+  "interface_refs"
+    '(["interface_id" "INT UNIQUE"])
   "legacies"
     '(["ref_count" "INT"] ["library" "TEXT"] ["name" "TEXT"])
 ))
@@ -180,7 +179,7 @@
     )
 
     (define/public (get-all-referables)
-      (append* (map get-referables-of-type* '("params" "defines" "defined_classes")))
+      (append* (get-all-interfaces) (map get-node-referables-of-type* '("params" "defines" "defined_classes")))
     )
 
     (define/public (get-all-interfaces)
@@ -188,7 +187,9 @@
     )
 
     (define/public (create-interface!! [short-desc #f] [long-desc #f])
-      (id->handle! (create-describable!! "interfaces" short-desc long-desc '()))
+      (define interface-id (create-describable!! "interfaces" short-desc long-desc '()))
+      (create-something!! "interface_refs" (list (list "interface_id" interface-id)))
+      (id->handle! interface-id)
     )
 
     (define/public (get-filename)
@@ -311,7 +312,7 @@
           (send this assert-valid)
           (define col (send loc* get-col))
           (define table (get-table (send loc* get-id)))
-          (not (or (equal? "superclass_id" col) (and (equal? "type_id" col) (equal? "isas" table))))
+          (not (equal? "superclass_id" col))
         )
 
         (define/public (unassign!!)
@@ -389,6 +390,7 @@
       (define/override (delete-and-invalidate*!!)
         (for-each (lambda (m) (remove-direct-method!! m)) (get-direct-methods))
         (delete-subtype-relations!! this)
+        (delete-id*!! (get-reference-id*))
         (super delete-and-invalidate*!!)
       )
 
@@ -450,12 +452,10 @@
 
       (define/public (can-delete?)
         (send this assert-valid)
-        (define (clause table col) (format "SELECT 1 FROM ~a WHERE ~a = ?1" table col))
         (and
+          (null? (get-references))
           (andmap (lambda (m) (can-remove-direct-method? m)) (get-direct-methods))
-          (not
-            (query-maybe-value db* (sql-union (list (clause "extends" "supertype_id") (clause "isas" "type_id"))) (send this get-id))
-          )
+          (not (query-maybe-value db* "SELECT 1 FROM extends WHERE supertype_id = ?1" (send this get-id)))
         )
       )
 
@@ -464,6 +464,16 @@
         (assert (format "interface ~a cannot be deleted" (send this get-id)) (can-delete?))
         (delete-and-invalidate*!!)
         (void)
+      )
+
+      (define/public (get-references)
+        (send this assert-valid)
+        (get-references* (get-reference-id*))
+      )
+
+      (define/public (get-reference-id*)
+        (send this assert-valid)
+        (query-value db* "SELECT id FROM interface_refs WHERE interface_id = ?1" (send this get-id))
       )
 
       (super-make-object id)
@@ -771,78 +781,6 @@
       )
 
       (super-make-object id)
-    ))
-
-    (define db-is-a?% (class* db-node% (zinal:db:is-a?%%)
-
-      (init loc)
-
-      (define/override (accept visitor [data #f])
-        (send this assert-valid)
-        (send visitor visit-is-a? this data)
-      )
-
-      (define/override (delete-and-invalidate*!!)
-        (send (get-object) delete-and-invalidate*!!)
-        (define type (get-type))
-        (unless (is-a? type zinal:db:interface%%) (send type delete-and-invalidate*!!))
-        (delete-id*!! (send this get-id))
-        (super delete-and-invalidate*!!)
-      )
-
-      (define/public (get-children)
-        (send this assert-valid)
-        (define type (get-type))
-        (cons (get-object) (if (is-a? type zinal:db:interface%%) '() (list type)))
-      )
-
-      (define/public (get-object)
-        (send this assert-valid)
-        (get-node-handle! (send this get-id) "object_id")
-      )
-
-      (define/public (get-type)
-        (send this assert-valid)
-        (define type-loc (get-type-loc*))
-        (define type-id (send type-loc get-cell))
-        (if (equal? (get-table type-id) "interfaces")
-          (id->handle! type-id)
-          (get-node-handle! type-loc)
-        )
-      )
-
-      (define/public (set-legacy-type!! library name)
-        (send this assert-valid)
-        (set-node-type*!! (curryr create-legacy-node!! library name))
-      )
-
-      (define/public (set-class-type!! class)
-        (send this assert-valid)
-        (assert-is* class zinal:db:define-class%%)
-        (assert-visible* this class)
-        (set-node-type*!! (curryr create-reference!! class))
-      )
-
-      (define/public (set-interface-type!! interface)
-        (send this assert-valid)
-        (assert-is* interface zinal:db:interface%%)
-        (send (get-type) delete-and-invalidate*!!)
-        (set-id!! (get-type-loc*) (send interface get-id))
-        interface
-      )
-
-      (define (get-type-loc*)
-        (make-object loc% (send this get-id) "type_id")
-      )
-
-      (define (set-node-type*!! creator)
-        (send (get-type) delete-and-invalidate*!!)
-        (define loc (get-type-loc*))
-        (creator loc)
-        (get-node-handle! loc)
-      )
-
-      (super-make-object loc)
     ))
 
     (define db-general-define-method% (class db-node% ; abstract
@@ -1866,6 +1804,24 @@
       (super-make-object)
     ))
 
+    (define db-interface-ref% (class* db-reference% (zinal:db:interface-ref%%)
+
+      (define/override (accept visitor [data #f])
+        (send this assert-valid)
+        (send visitor visit-define-class-ref this data)
+      )
+
+      (define/override (get-referable-id-col)
+        "interface_id"
+      )
+
+      (define/public (get-interface)
+        (send this get-referable)
+      )
+
+      (super-make-object)
+    ))
+
     (define db-unassigned%
       (class* db-describable-node% (zinal:db:unassigned%%)
 
@@ -1933,6 +1889,10 @@
         (define/public (assign-class-ref!! define-class-handle)
           (assert-visible* this define-class-handle)
           (assign-ref*!! define-class-handle)
+        )
+
+        (define/public (assign-interface-ref!! interface-handle)
+          (assign-ref*!! interface-handle)
         )
 
         (define/public (assign-number!! value)
@@ -2051,21 +2011,6 @@
             )
             (create-unassigned!! (make-object loc% create-id "class_id"))
             (create-list-header!! (make-object loc% create-id "args_id"))
-          ))
-        )
-
-        (define/public (assign-is-a?!!)
-          (assign*!! (lambda (loc)
-            (define create-id
-              (create-normal!! "isas" loc
-                (list
-                  (list "object_id" BOGUS-ID)
-                  (list "type_id" BOGUS-ID)
-                )
-              )
-            )
-            (create-unassigned!! (make-object loc% create-id "object_id"))
-            (create-legacy-node!! (make-object loc% create-id "type_id") #f "object%")
           ))
         )
 
@@ -2686,7 +2631,6 @@
             [("super_invokations") db-super-invokation%]
             [("legacy_super_invokations") db-legacy-super-invokation%]
             [("object_constructions") db-object-construction%]
-            [("isas") db-is-a?%]
             [("lambdas") db-lambda%]
             [("defines") db-def%]
             [("list_headers")
@@ -2698,6 +2642,8 @@
             [("params") db-param%]
             [("param_refs") db-param-ref%]
             [("define_refs") db-def-ref%]
+            [("class_refs") db-class-ref%]
+            [("interface_refs") db-interface-ref%]
             [("asserts") db-assert%]
             [("atoms")
               (define type (string->symbol (get-cell* id "type")))
@@ -2912,7 +2858,7 @@
       )
     )
 
-    (define (get-referables-of-type* table)
+    (define (get-node-referables-of-type* table)
       (map
         (lambda (v) (get-node-handle! (vector-ref v 0) (vector-ref v 1)))
         (query-rows db* (format "SELECT parent_id, parent_col FROM ~a" table))
@@ -2941,12 +2887,16 @@
     )
 
     (define (is-referable-visible*? location-node referable)
-      (find* referable (send location-node get-visible-referables-after))
+      (or
+        (is-a? referable zinal:db:interface%%)
+        (find* referable (send location-node get-visible-referables-after))
+      )
     )
 
     (define (get-visible-referables* location-node)
       (append*
         (get-visible-referables-recursive* location-node #f)
+        (get-all-interfaces)
         (map (lambda (m) (send m get-public-defs)) (send (send location-node get-module) get-required-modules))
       )
     )

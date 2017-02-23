@@ -214,10 +214,6 @@
     'this
   )
 
-  (define/override (visit-is-a? i identifiables)
-    (list 'is-a? (db-elem->scheme (send i get-object) identifiables) (db-elem->scheme (send i get-type) identifiables))
-  )
-
   (define/override (visit-define-class c identifiables)
     (define superclass (send c get-super-class))
     (define super-methods (if (is-a? superclass zinal:db:class-ref%%) (send (send superclass get-define-class) get-all-methods) '()))
