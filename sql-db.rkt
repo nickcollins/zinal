@@ -1435,7 +1435,7 @@
         (send this assert-valid)
         (define module-id (get-module-id*))
         (assert (format "Module ~a cannot be main module" module-id) (implies new-value (can-be-main-module?)))
-        (q!! query-exec "UPDATE ~a SET is_main = ?2" module-id (if new-value SQL-TRUE SQL-FALSE))
+        (q!! query-exec "UPDATE ~a SET is_main = ?2" module-id (list (if new-value SQL-TRUE SQL-FALSE)))
         (void)
       )
 
@@ -2641,7 +2641,7 @@
     )
 
     ; query is executed "WHERE id = 'id'". Use ~a for the table, and ?2 ... for other q-parms
-    (define (q!! q-proc query id . q-parms)
+    (define (q!! q-proc query id [q-parms '()])
       (define table (get-table id))
       (apply q-proc db* (format (string-append query " WHERE id = ?1") table) id q-parms)
     )
@@ -2868,7 +2868,7 @@
 
     ; WARNING: This function can orphan extant nodes.
     (define (set-cell-dangerous*!! id col value)
-      (q!! query-exec (format "UPDATE ~~a SET ~a = ?2" col) id value)
+      (q!! query-exec (format "UPDATE ~~a SET ~a = ?2" col) id (list value))
     )
 
     (define (set-id!! loc id)
@@ -2887,7 +2887,7 @@
     )
 
     (define (change-ref-count*!! id new-ref-count)
-      (q!! query-exec "UPDATE ~a SET ref_count = ?2" id new-ref-count)
+      (q!! query-exec "UPDATE ~a SET ref_count = ?2" id (list new-ref-count))
       new-ref-count
     )
 
