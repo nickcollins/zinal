@@ -53,13 +53,12 @@
 ;   3) If the referable is in a different module, and that module is not "require"d by this
 ;      module
 ;
-; TODO current - we need to update this when it's possible for more than zinal:db:def to be public
 ; When a reference is first created, the referable it points to must be visible to it, or an
 ; exception is thrown. After that, it is possible that during the course of editing, a referable
 ; becomes invisible to some of its references. This is legal, but there is an invariant that is
 ; maintained:
 ; 1) if a reference points to a referable in a different module, then that referable is a
-;    zinal:db:def%% and the direct child of its module.
+;    zinal:db:def%% or zinal:db:define-class%% and the direct child of its module.
 ; 2) if a reference points to a referable in the same module, then the reference and its referable
 ;    are not "cousins". Two nodes are cousins if neither descends from the other, and neither is
 ;    the direct child of their youngest common ancestor.

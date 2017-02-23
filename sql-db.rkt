@@ -622,6 +622,7 @@
       )
 
       (define/override (delete-and-invalidate*!!)
+        (query-exec db* "DELETE FROM public_defs WHERE public_def_id = ?1" (send this get-id))
         (for-each (lambda (m) (remove-direct-method!! m)) (get-direct-methods))
         (delete-and-invalidate-params*!! this)
         (delete-id*!! (get-reference-id*))
