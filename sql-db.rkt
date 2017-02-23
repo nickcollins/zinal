@@ -201,6 +201,9 @@
       (class* object% (zinal:db:element%%)
 
         (init id)
+
+        (abstract delete-and-invalidate*!!)
+
         (assert-real-id id)
 
         (define/public (get-db)
@@ -235,8 +238,6 @@
         (define/public (invalidate!)
           (set! valid*? #f)
         )
-
-        (abstract delete-and-invalidate*!!)
 
         (define id* id)
         ; This object will be invalidated if the data it's referring to gets deleted or unassigned. Any attempts to do something with
@@ -1617,6 +1618,8 @@
     (define db-atom%
       (class* db-node% (zinal:db:atom%%) ; abstract
 
+        (abstract get-val)
+
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-atom this data)
@@ -1636,8 +1639,6 @@
           )
           (get-cell* (send this get-id) "value")
         )
-
-        (abstract get-val)
 
         (super-new)
       )
@@ -1785,6 +1786,8 @@
     (define db-reference%
       (class* db-node% (zinal:db:reference%%) ; abstract
 
+        (abstract get-referable-id-col)
+
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-reference this data)
@@ -1800,8 +1803,6 @@
           (send this assert-valid)
           (is-referable-visible*? this (get-referable))
         )
-
-        (abstract get-referable-id-col)
 
         (super-new)
       )
