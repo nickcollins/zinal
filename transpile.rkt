@@ -82,8 +82,8 @@
   (send elem1 equals? elem2)
 )
 
-(define transpiler (new (class zinal:db:element-visitor%
-  (super-new)
+(define transpiler (make-object (class zinal:db:element-visitor%
+  (super-make-object)
 
   (define/override (visit-element e identifiables)
     (error 'visit-element "Missing visitor method for some element")
