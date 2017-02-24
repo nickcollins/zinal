@@ -945,7 +945,7 @@
           (create-simple-event-handler "d"
             (lambda (handle-event-info event)
               (when (is-a? child-handle* zinal:db:unassigned%%)
-                (send (send this-ent* get-cone-root) remove!! (send ui-list* get-child-index this))
+                (send (send this-ent* get-cone-root) remove-from-body!! (send ui-list* get-child-index this))
                 (send ui-list* remove! this)
               )
               #t
@@ -996,7 +996,7 @@
     ))
 
     (define (insert-new-todo*!! index)
-      (define new-handle (send (send this get-cone-root) insert!! index))
+      (define new-handle (send (send this get-cone-root) insert-into-body!! index))
       (send ui-list* insert! index (get-module-ui-child* new-handle))
     )
 
@@ -1063,8 +1063,8 @@
     (define (handle-module-child-left*! child-root-slot handle-event-info event)
       (define child-handle (slot->db-handle child-root-slot))
       (define module (send child-handle get-parent))
-      (define module-children (send module get-items))
       (assert "handle-module-child-left*! can only be used for the child of a module" (is-a? module zinal:db:module%%))
+      (define module-children (send module get-body))
       (spawn-module*! module)
       ; spawn module selects the module's root slot - we can rely on this to get the ui object via selected*
       (define root-ui (slot/ui-item->ui-item selected*))
@@ -1084,8 +1084,8 @@
     (define (get-visible-referables-for-module-child-slot* child-slot)
       (define child-handle (slot->db-handle child-slot))
       (define module (send child-handle get-parent))
-      (define module-children (send module get-items))
       (assert "get-visible-referables-for-module-child-slot* can only be used for the child of a module" (is-a? module zinal:db:module%%))
+      (define module-children (send module get-body))
       (get-visible-referables-for-hypothetical-index* module module-children (list-index (curry handles-equal? child-handle) module-children))
     )
 
@@ -1233,7 +1233,7 @@
 
     (map-by-index
       (lambda (i v) (send ui-list* insert! i (get-module-ui-child* v)))
-      (send (send this get-cone-root) get-items)
+      (send (send this get-cone-root) get-body)
     )
   ))
 

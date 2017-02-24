@@ -623,7 +623,7 @@
 ; cannot be run as an executable. Generally, referables are only visible within their
 ; own module, but each get-public-defs exposes a set of direct children that can
 ; be referred to by any module that requires this one.
-(define zinal:db:module%% (interface (zinal:db:list%%)
+(define zinal:db:module%% (interface (zinal:db:describable%% zinal:db:has-body%%)
 
   ; Returns a list of all direct child zinal:db:def%% and zinal:db:define-class%% that
   ; can be referenced in other modules, in no particular order. Each public child must
@@ -792,10 +792,8 @@
     (define/public (visit-interface-ref ir data) (visit-reference ir data))
     (define/public (visit-method m data) (visit-element m data))
 
+    (define/public (visit-module m data) (visit-node m data))
     (define/public (visit-list l data) (visit-node l data))
-    ; TODO consider changing modules from zinal:db:list%% to zinal:db:has-body%%
-    (define/public (visit-module m data) (visit-list m data))
-
     (define/public (visit-lambda l data) (visit-node l data))
     (define/public (visit-assert a data) (visit-node a data))
     (define/public (visit-number n data) (visit-atom n data))

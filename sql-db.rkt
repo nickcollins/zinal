@@ -75,10 +75,9 @@
     '(["short_desc" "TEXT"] ["long_desc" "TEXT"])
   "methods"
     '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["container_id" "INT"])
-  ; the list inside the module is not "hidden" - rather, the module is "hidden", merely acting as a parent for the
-  ; list
+  ; the body list inside the module is not "hidden" - rather, the module is "hidden", merely acting as a parent for the body
   "modules"
-    '(["list_id" "INT"] ["is_main" "INT"])
+    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["body_id" "INT"] ["is_main" "INT"])
   "param_refs"
     '(["param_id" "INT UNIQUE"])
   "define_refs"
@@ -173,12 +172,12 @@
 
     (define/public (create-module!! [short-desc #f])
       (define new-module-id
-        (create-something!! "modules" (list
-          (list "list_id" BOGUS-ID)
+        (create-describable!! "modules" short-desc #f (list
+          (list "body_id" BOGUS-ID)
           (list "is_main" SQL-FALSE)
         ))
       )
-      (create-list-header!! (new loc% [id new-module-id] [col "list_id"]) short-desc)
+      (create-list-header!! (make-object loc% new-module-id "body_id"))
       (module-id->handle! new-module-id)
     )
 
@@ -1299,11 +1298,60 @@
       )
     )
 
-    (define db-module% (class* db-list% (zinal:db:module%%)
+    (define db-module% (class* db-node% (zinal:db:module%%)
+
+      (init loc)
+
+      (define as-list-handle* (make-object db-list% loc))
 
       (define/override (accept visitor [data #f])
         (send this assert-valid)
         (send visitor visit-module this data)
+      )
+
+      (define/override (invalidate!)
+        (send as-list-handle* invalidate!)
+        (super invalidate!)
+      )
+
+      (define/public (get-children)
+        (send this assert-valid)
+        (get-body)
+      )
+
+      (define/public (get-body)
+        (send this assert-valid)
+        (send as-list-handle* get-items)
+      )
+
+      (define/public (insert-into-body!! index)
+        (send this assert-valid)
+        (send as-list-handle* insert!! index)
+      )
+
+      (define/public (remove-from-body!! index)
+        (send this assert-valid)
+        (send as-list-handle* remove!! index)
+      )
+
+      (define/public (get-short-desc)
+        (send this assert-valid)
+        (get-short-desc-from-id* (get-module-id*))
+      )
+
+      (define/public (get-long-desc)
+        (send this assert-valid)
+        (get-long-desc-from-id* (get-module-id*))
+      )
+
+      (define/public (set-short-desc!! new-desc)
+        (send this assert-valid)
+        (set-short-desc-from-id*!! (get-module-id*) new-desc)
+      )
+
+      (define/public (set-long-desc!! new-desc)
+        (send this assert-valid)
+        (set-long-desc-from-id*!! (get-module-id*) new-desc)
       )
 
       (define/override (can-unassign?)
@@ -1329,6 +1377,7 @@
         (define module-id (get-module-id*))
         (query-exec db* "DELETE FROM public_defs WHERE module_id = ?1" module-id)
         (query-exec db* "DELETE FROM requires WHERE requirer_id = ?1" module-id)
+        (send as-list-handle* delete-and-invalidate*!!)
         ; Normally, this should be the last action, but in this case we need the module
         ; row to still exist when deleting the loc
         (super delete-and-invalidate*!!)
@@ -1342,7 +1391,7 @@
 
       (define/public (set-public!! index/def-handle new-value)
         (send this assert-valid)
-        (define children (send this get-items))
+        (define children (send this get-children))
         (define def-handle (if (number? index/def-handle) (list-ref children index/def-handle) index/def-handle))
         (define module-id (get-module-id*))
         (define def-handle-id (send def-handle get-id))
@@ -1428,7 +1477,7 @@
           (null? (get-requiring-modules))
           (andmap
             (curryr all-references-are-descendants*? this)
-            (filter (disjoin (curryr is-a? zinal:db:define-class%%) (curryr is-a? zinal:db:def%%)) (send this get-items))
+            (filter (disjoin (curryr is-a? zinal:db:define-class%%) (curryr is-a? zinal:db:def%%)) (send this get-children))
           )
         )
       )
@@ -1448,7 +1497,7 @@
         (send (send this get-db) get-main-module)
       )
 
-      (super-new)
+      (super-make-object loc)
     ))
 
     (define db-param%
@@ -2390,22 +2439,38 @@
 
     (define (get-short-desc* caller)
       (send caller assert-valid)
-      (sql:// (get-cell* (send caller get-id) "short_desc") #f)
+      (get-short-desc-from-id* (send caller get-id))
+    )
+
+    (define (get-short-desc-from-id* caller-id)
+      (sql:// (get-cell* caller-id "short_desc") #f)
     )
 
     (define (get-long-desc* caller)
       (send caller assert-valid)
-      (sql:// (get-cell* (send caller get-id) "long_desc") #f)
+      (get-long-desc-from-id* (send caller get-id))
+    )
+
+    (define (get-long-desc-from-id* caller-id)
+      (sql:// (get-cell* caller-id "long_desc") #f)
     )
 
     (define (set-short-desc*!! caller new-desc)
       (send caller assert-valid)
-      (set-desc*!! 'short (send caller get-id) new-desc)
+      (set-short-desc-from-id*!! (send caller get-id) new-desc)
+    )
+
+    (define (set-short-desc-from-id*!! caller-id new-desc)
+      (set-desc*!! 'short caller-id new-desc)
     )
 
     (define (set-long-desc*!! caller new-desc)
       (send caller assert-valid)
-      (set-desc*!! 'long (send caller get-id) new-desc)
+      (set-long-desc-from-id*!! (send caller get-id) new-desc)
+    )
+
+    (define (set-long-desc-from-id*!! caller-id new-desc)
+      (set-desc*!! 'long caller-id new-desc)
     )
 
     ; HAS-PARAMS HELPERS
@@ -2846,12 +2911,12 @@
       new-ref-count
     )
 
-    (define (get-module-id list-id)
-      (query-maybe-value db* "SELECT id FROM modules WHERE list_id = ?1" list-id)
+    (define (get-module-id body-id)
+      (query-maybe-value db* "SELECT id FROM modules WHERE body_id = ?1" body-id)
     )
 
     (define (module-id->handle! module-id)
-      (get-node-handle! module-id "list_id")
+      (get-node-handle! module-id "body_id")
     )
 
     (define (get-references* id)
