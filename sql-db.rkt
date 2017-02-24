@@ -1426,7 +1426,10 @@
         (send this assert-valid)
         (and
           (null? (get-requiring-modules))
-          (andmap (curryr all-references-are-descendants*? this) (filter (curryr is-a? zinal:db:def%%) (send this get-items)))
+          (andmap
+            (curryr all-references-are-descendants*? this)
+            (filter (disjoin (curryr is-a? zinal:db:define-class%%) (curryr is-a? zinal:db:def%%)) (send this get-items))
+          )
         )
       )
 
