@@ -633,7 +633,7 @@
   ; The first argument specifies which direct child to change the publicity of. If the
   ; index is out of bounds, or the node is not a direct child of this module, an
   ; exception is thrown. new-value is #t if the child should be public, #f otherwise.
-  ; Note that it is legal to make a public def non-public, even if doing so makes its
+  ; Note that it is legal to make a public def non-public, even if doing so makes it
   ; invisible to some of its references. See the comment about visibility rules.
   ; No meaningful return value.
   set-public!! ; (index OR zinal:db:def%% OR zinal:db:define-class%% , new-value)
