@@ -1113,7 +1113,7 @@
 
     (define event-handler*
       (combine-keyname-event-handlers (list
-        (create-name-change-handler (send this get-cone-root))
+        (create-name-change-handler (thunk (send this get-cone-root)))
         add-require-event-handler*
         (create-simple-event-handler "m"
           (lambda (handle-event-info event)
