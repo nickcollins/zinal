@@ -22,27 +22,6 @@
   (or v sql-null)
 )
 
-(define INVALID_LEGACIES '(
-  "new"
-  "super-new"
-  "make-object"
-  "super-make-object"
-  "super"
-  "send"
-  "this"
-  "class"
-  "class*"
-  "interface"
-  "init"
-  "abstract"
-  "define/public"
-  "define/override"
-  "augment"
-  "define"
-  "lambda"
-  "assert"
-))
-
 ; TABLE-INFO hashes map table names to cols.
 ; "hidden" cols refer to list nodes that are being used by the implementation but are invisible to the interface.
 ; get-parent invoked on any child of this hidden list will return the first ancestor that is not in one of these
@@ -129,6 +108,31 @@
   (assert (format "Invalid table ~a" table) mod)
   mod
 )
+
+(define INVALID_LEGACIES '(
+  "new"
+  "super-new"
+  "make-object"
+  "super-make-object"
+  "super"
+  "send"
+  "this"
+  "class"
+  "class*"
+  "interface"
+  "init"
+  "abstract"
+  "define/public"
+  "define/override"
+  "augment"
+  "define"
+  "lambda"
+  "assert"
+  "module"
+  "require"
+  "provide"
+  "define-syntax-rule"
+))
 
 (define DEFAULT-LIBRARY "")
 
