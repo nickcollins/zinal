@@ -586,9 +586,7 @@
   get-val ; ()
 ))
 
-(define zinal:db:lambda%%
-  (interface (zinal:db:has-params%% zinal:db:has-body%% zinal:db:describable%%))
-)
+(define zinal:db:lambda%% (interface (zinal:db:has-params%% zinal:db:has-body%%)))
 
 (define zinal:db:number%% (interface (zinal:db:atom%%)))
 (define zinal:db:char%% (interface (zinal:db:atom%%)))
@@ -597,7 +595,7 @@
 (define zinal:db:symbol%% (interface (zinal:db:atom%%)))
 (define zinal:db:keyword%% (interface (zinal:db:atom%%)))
 
-(define zinal:db:list%% (interface (zinal:db:parent-node%% zinal:db:describable%%)
+(define zinal:db:list%% (interface (zinal:db:parent-node%%)
 
   ; Returns a list of zinal:db:node%% , constituting the items of this list
   get-items ; ()
@@ -739,9 +737,9 @@
 (define zinal:db:unassigned%%
   (interface (zinal:db:node%% zinal:db:describable%%)
 
-    assign-lambda!! ; ([short-desc] [long-desc])
+    assign-lambda!! ; ()
     assign-def!! ; ([short-desc] [long-desc])
-    assign-list!! ; ([short-desc] [long-desc])
+    assign-list!! ; ()
     assign-assert!! ; ()
     ; Use #f for library to specify the standard library
     assign-legacy-link!! ; (library name)

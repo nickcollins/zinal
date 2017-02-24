@@ -51,16 +51,15 @@
     '(["class_id" "INT" 'can-be-ref] ["args_id" "INT" 'hidden])
 
   "list_headers"
-    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["cdr_id" "INT" 'hidden])
+    '(["cdr_id" "INT" 'hidden])
   "lambdas"
-    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["params_id" "INT" 'hidden] ["body_id" "INT" 'hidden])
+    '(["params_id" "INT" 'hidden] ["body_id" "INT" 'hidden])
   "params"
     '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["default_id" "INT" 'can-be-ref])
   "defines"
     '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["expr_id" "INT" 'can-be-ref])
-  ; TODO asserts shouldn't have descs, and neither should lists or lambdas.
   "asserts"
-    '(["short_desc" "TEXT"] ["long_desc" "TEXT"] ["assertion_id" "INT" 'can-be-ref] ["format_string_id" "INT" 'can-be-ref] ["format_args_id" "INT" 'hidden])
+    '(["assertion_id" "INT" 'can-be-ref] ["format_string_id" "INT" 'can-be-ref] ["format_args_id" "INT" 'hidden])
   "list_nodes"
     '(["owner_id" "INT"] ["car_id" "INT" 'can-be-ref] ["cdr_id" "INT" 'hidden])
   "atoms"
@@ -1046,7 +1045,7 @@
     ; NON OOP
 
     (define db-lambda%
-      (class* db-describable-node% (zinal:db:lambda%%)
+      (class* db-node% (zinal:db:lambda%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1189,7 +1188,7 @@
     )
 
     (define db-list%
-      (class* db-describable-node% (zinal:db:list%%)
+      (class* db-node% (zinal:db:list%%)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1896,18 +1895,16 @@
           (super delete-and-invalidate*!!)
         )
 
-        (define/public (assign-lambda!! [short-desc #f] [long-desc #f])
-          (assign*!! (curryr create-lambda!! short-desc long-desc))
+        (define/public (assign-lambda!!)
+          (assign*!! create-lambda!!)
         )
 
         (define/public (assign-assert!!)
           (assign*!! (lambda (loc)
             (define assert-id
-              (create-describable-normal!!
+              (create-normal!!
                 "asserts"
                 loc
-                #f
-                #f
                 (list
                   (list "assertion_id" BOGUS-ID)
                   (list "format_string_id" BOGUS-ID)
@@ -1929,8 +1926,8 @@
           ))
         )
 
-        (define/public (assign-list!! [short-desc #f] [long-desc #f])
-          (assign*!! (curryr create-list-header!! short-desc long-desc))
+        (define/public (assign-list!!)
+          (assign*!! create-list-header!!)
         )
 
         (define/public (assign-def-ref!! def-handle)
@@ -2818,17 +2815,15 @@
       (create-describable-normal!! "unassigned" loc #f #f '())
     )
 
-    (define (create-list-header!! loc [short-desc #f] [long-desc #f])
-      (create-describable-normal!! "list_headers" loc short-desc long-desc (list (list "cdr_id" NIL-ID)))
+    (define (create-list-header!! loc)
+      (create-normal!! "list_headers" loc (list (list "cdr_id" NIL-ID)))
     )
 
-    (define (create-lambda!! loc [short-desc #f] [long-desc #f])
+    (define (create-lambda!! loc)
       (define lambda-id
-        (create-describable-normal!!
+        (create-normal!!
           "lambdas"
           loc
-          short-desc
-          long-desc
           (list
             (list "params_id" BOGUS-ID)
             (list "body_id" BOGUS-ID)
