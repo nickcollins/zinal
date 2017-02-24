@@ -81,7 +81,7 @@
 
   ; short-desc may be #f to indicate no short descriptor. Returns a zinal:db:module%% handle
   ; for the newly minted module
-  create-module!! ; ([short-desc])
+  create-module!! ; ([short-desc] [long-desc])
 
   ; Returns a list of all zinal:db:referable%% in this db, in no particular order
   get-all-referables ; ()

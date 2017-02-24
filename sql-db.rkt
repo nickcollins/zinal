@@ -170,7 +170,7 @@
       (and main-module-id (module-id->handle! main-module-id))
     )
 
-    (define/public (create-module!! [short-desc #f])
+    (define/public (create-module!! [short-desc #f] [long-desc #f])
       (define new-module-id
         (create-describable!! "modules" short-desc #f (list
           (list "body_id" BOGUS-ID)
