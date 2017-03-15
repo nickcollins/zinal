@@ -25,7 +25,7 @@
   (define module-children (drop file-data 3))
   (define module-name (second file-data))
   (define module (send db create-module!! (symbol->string module-name)))
-  (translate-list module-children module)
+  (translate-body module-children module)
   (void)
 )
 
@@ -186,8 +186,8 @@
             (and (>= (length defined) 2) (list? (supers)) (andmap symbol? (supers)) (andmap symbol? (methods)))
           )
           (define db-iface (send db create-interface!! defined-name))
-          (add-direct-super-interfaces!! db supers db-iface)
-          (for-each (lambda (m) (send db-iface add-direct-method!! m)) (methods))
+          (add-direct-super-interfaces!! db (supers) db-iface)
+          (for-each (lambda (m) (send db-iface add-direct-method!! m)) (map ~a (methods)))
         ]
         [(ormap defined-is? '(class class*))
           (translate-class defined db-unassigned defined-name)
@@ -232,19 +232,15 @@
         ]
         [(equal? 'make-object (first-item))
           (define class* (second datum))
+          (define (class-symbol) (first class*))
           (cond
-            [(list? class*)
-              (define class-symbol (first class*))
-              (assert (format "invalid make-object: ~a" datum) (member class-symbol '(class class*)))
+            [(and (list? class*) (member (class-symbol) '(class class*)))
               (translate-class class* db-unassigned)
             ]
-            [(symbol? class*)
-              (define db-create-object (send db-unassigned assign-create-object!!))
-              (send (send db-create-object get-class-node) set-short-desc!! (~a class*))
-              (translate-args (drop datum 2) db-create-object)
-            ]
             [else
-              (error 'translate-datum "invalid make-object: ~a" datum)
+              (define db-create-object (send db-unassigned assign-create-object!!))
+              (translate-datum class* (send db-create-object get-class-node))
+              (translate-args (drop datum 2) db-create-object)
             ]
           )
         ]
@@ -325,5 +321,8 @@
 ; Example use:
 ; (require "sql-db.rkt")
 ; (define main-db (make-object zinal:sql-db% "junk.db"))
+; (translate "db.rkt" main-db)
+; (translate "ui.rkt" main-db)
 ; (translate "sql-db.rkt" main-db)
+; (translate "ents.rkt" main-db)
 )
