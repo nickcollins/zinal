@@ -193,9 +193,15 @@
   )
 
   (define/override (visit-define-method dm identifiables)
+    (define method (send dm get-method))
+    (define super-class-ref (send (send dm get-parent) get-super-class))
+    (define super-class (and (is-a? super-class-ref zinal:db:class-ref%%) (send super-class-ref get-define-class)))
     (visit-lambda-like
-      (if (send dm is-override?) 'define/override 'define/public)
-      (db-elem->scheme (send dm get-method) identifiables)
+      (if (and super-class (findf (curry equals*? method) (send super-class get-all-methods)))
+        'define/override
+        'define/public
+      )
+      (db-elem->scheme method identifiables)
       (send dm get-lambda)
       identifiables
     )

@@ -378,6 +378,8 @@
 
   ; Returns #t if the argument is directly defined and is also defined by some super class.
   ; Otherwise #f
+  ; Note that this does not correspond to the racket define/override , which is used for a method
+  ; declared by any superclass, even if it's not defined by any superclass.
   ; Can be called on any method of this or a super-type. Will throw exception if invoked on any
   ; other method
   is-method-overridden? ; (zinal:db:method%%)
@@ -458,6 +460,8 @@
   get-lambda ; ()
 
   ; Returns #t if any super class contains a zinal:db:define-method%% for this method. Otherwise #f
+  ; Note that this does not correspond to the racket define/override , which is used for a method
+  ; declared by any superclass, even if it's not defined by any superclass.
   is-override? ; ()
 ))
 
