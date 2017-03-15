@@ -74,9 +74,11 @@
 
     (define (add-snip text style-delta selected?)
       (define style (get-style style-delta selected?))
+      (define pos (send this get-start-position))
       (send this change-style style)
       (send this insert text)
       (send this change-style base-style)
+      (and selected? pos)
     )
 
     (define (display-ui-list ui-list preceeding-whitespace selected?)
@@ -84,18 +86,20 @@
       (define header (send ui-list get-header))
       (define separator (send ui-list get-horizontal-separator))
       (define bookends (send ui-list get-bookends))
+      (define pos #f)
+      (define (update-pos! new-pos) (unless pos (set! pos new-pos)))
       (cond
         [(send ui-list horizontal?)
           (when bookends (display-ui-item (first bookends) preceeding-whitespace selected?))
           (when header
-            (display-ui-item header preceeding-whitespace selected?)
+            (update-pos! (display-ui-item header preceeding-whitespace selected?))
             (add-snip " " no-delta selected?)
           )
           (if (pair? children)
             (foldl
               (lambda (child prepend-separator?)
                 (when prepend-separator? (display-ui-item separator preceeding-whitespace selected?))
-                (display-ui-item child preceeding-whitespace selected?)
+                (update-pos! (display-ui-item child preceeding-whitespace selected?))
                 #t
               )
               #f
@@ -111,7 +115,7 @@
           (define child-whitespace (string-append preceeding-whitespace "    "))
           (cond
             [header
-              (display-ui-item header preceeding-whitespace selected?)
+              (update-pos! (display-ui-item header preceeding-whitespace selected?))
             ]
             [bookends
               (display-ui-item (first bookends) preceeding-whitespace selected?)
@@ -125,7 +129,7 @@
               (lambda (child)
                 (send this insert #\newline)
                 (send this insert child-whitespace)
-                (display-ui-item child child-whitespace selected?)
+                (update-pos! (display-ui-item child child-whitespace selected?))
               )
               children
             )
@@ -138,6 +142,7 @@
           )
         ]
       )
+      pos
     )
 
     (define (display-ui-item ui-item preceeding-whitespace selected-context?)
@@ -148,7 +153,11 @@
       )
     )
 
-    (display-ui-item root-ui-item "" #f)
+    (define scroll-pos* (display-ui-item root-ui-item "" #f))
+
+    (define/public (scroll!)
+      (when scroll-pos* (send this scroll-to-position scroll-pos*))
+    )
 
     (set! can-insert*? #f)
   )
@@ -166,6 +175,8 @@
 (define (display-ui! ui-item)
   (define new-editor (make-object static-text% handle-event!! ui-item))
   (send main-canvas set-editor new-editor)
+  (send new-editor scroll!)
+  (void)
 )
 
 (define (handle-event!! event)
