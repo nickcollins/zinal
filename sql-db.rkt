@@ -850,6 +850,13 @@
         (get-cell* (send this get-id) "legacy_name")
       )
 
+      (define/public (set-legacy-method-name!! name)
+        (send this assert-valid)
+        (assert-valid-legacy-method-name* name)
+        (set-cell-dangerous*!! (send this get-id) "legacy_name" name)
+        (void)
+      )
+
       (super-make-object loc)
     ))
 

@@ -471,6 +471,10 @@
   ; Returns a string for the name of the racket method that is to be overridden
   get-legacy-method-name ; ()
 
+  ; Sets a string corresponding to the name of the racket method to invoke.
+  ; No meaningful return value.
+  set-legacy-method-name!! ; (string)
+
   ; Returns the lambda that defines the overridden method. Comparable to zinal:db:define-method%% ,
   ; the returned lambda is permanent and cannot be unassign!! , created nor destroyed
   get-lambda ; ()
