@@ -28,4 +28,8 @@
   (define vec (list->vector lst))
   (build-list (vector-length vec) (lambda (i) (proc i (vector-ref vec i))))
 )
+
+(define (is-one-of? object types)
+  (ormap (curry is-a? object) types)
+)
 )
