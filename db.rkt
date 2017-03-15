@@ -773,14 +773,14 @@
     assign-create-object!! ; ()
     ; attempting to call any of the following methods on a node that is not inside a
     ; zinal:db:class%% body will throw an exception
-    assign-define-method!! ; (zinal:db:method%%)
-    assign-override-legacy-method!! ; (string)
     assign-this!! ; ()
     assign-invoke-super-method!! ; (zinal:db:method%%)
     assign-invoke-legacy-super-method!! ; (string)
-    ; attempting to call this method at any location besides the direct child of a
+    ; attempting to call these methods at any location besides the direct child of a
     ; class will throw an exception
     assign-super-init!! ; ()
+    assign-define-method!! ; (zinal:db:method%%)
+    assign-override-legacy-method!! ; (string)
   )
 )
 

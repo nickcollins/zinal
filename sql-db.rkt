@@ -302,12 +302,12 @@
 
         (define/public (get-visible-referables-underneath)
           (send this assert-valid)
-          (get-visible-referables* this)
+          (get-visible-referables* this #t)
         )
 
         (define/public (get-visible-referables-after)
           (send this assert-valid)
-          (get-visible-referables* this)
+          (get-visible-referables* this #f)
         )
 
         (define/public (can-unassign?)
@@ -625,7 +625,7 @@
 
       (define/override (delete-and-invalidate*!!)
         (query-exec db* "DELETE FROM public_defs WHERE public_def_id = ?1" (send this get-id))
-        (for-each (lambda (m) (remove-direct-method!! m)) (get-direct-methods))
+        (for-each (lambda (m) (send m delete-and-invalidate*!!)) (get-direct-methods))
         (delete-and-invalidate-params*!! this)
         (delete-id*!! (get-reference-id*))
         (super delete-and-invalidate*!!)
@@ -884,7 +884,7 @@
       )
 
       (define/public (remove-arg!! index)
-        (remove-arg!! this index)
+        (remove-arg*!! this index)
       )
 
       (super-make-object loc)
@@ -990,7 +990,7 @@
       (define/public (set-method!! method)
         (send this assert-valid)
         (assert-is* method zinal:db:method%%)
-        (assert-can-super-invoke-method* this method)
+        (assert-can-super-invoke-method* (get-containing-class* this) method)
         (set-cell-dangerous*!! (send this get-id) "method_id" (send method get-id))
         (void)
       )
@@ -1062,7 +1062,7 @@
         (define/override (can-unassign?)
           (send this assert-valid)
           (define parent (send this get-parent))
-          (not (or (is-a? parent zinal:db:define-method%%) (is-a? parent zinal:db:override-legacy-method%%)))
+          (not (is-one-of? parent (list zinal:db:define-method%% zinal:db:override-legacy-method%%)))
         )
 
         (define/override (get-visible-referables-underneath)
@@ -1403,7 +1403,7 @@
         (define def-handle-id (send def-handle get-id))
         (assert
           (format "You can only set the publicity of a zinal:db:def%% or zinal:db:define-class%% : ~a, ~a" module-id def-handle-id)
-          (or (is-a? def-handle zinal:db:def%%) (is-a? def-handle zinal:db:define-class%%))
+          (is-one-of? def-handle (list zinal:db:def%% zinal:db:define-class%%))
         )
         (assert (format "You can only set the publicity of a module's direct child: ~a, ~a" module-id def-handle-id) (find* def-handle children))
         (if new-value
@@ -1483,7 +1483,7 @@
           (null? (get-requiring-modules))
           (andmap
             (curryr all-references-are-descendants*? this)
-            (filter (disjoin (curryr is-a? zinal:db:define-class%%) (curryr is-a? zinal:db:def%%)) (send this get-children))
+            (filter (curryr is-one-of? (list zinal:db:define-class%% zinal:db:def%%)) (send this get-children))
           )
         )
       )
@@ -2076,8 +2076,8 @@
         )
 
         (define/public (assign-define-method!! method)
-          (assert-is-within-class*)
-          (define containing-class (get-containing-class*))
+          (define containing-class (send this get-parent))
+          (assert (format "~a is not the direct child of a class" (send this get-id)) (is-a? containing-class zinal:db:class%%))
           (assert-valid-method* containing-class method)
           (define method-id (send method get-id))
           (assert
@@ -2097,7 +2097,7 @@
 
         (define/public (assign-override-legacy-method!! method-name)
           (assert-valid-legacy-method-name* method-name)
-          (assert-is-within-class*)
+          (assert (format "~a is not the direct child of a class" (send this get-id)) (is-a? (send this get-parent) zinal:db:class%%))
           (assign*!! (lambda (loc)
             (define override-id
               (create-normal!! "legacy_overrides" loc (list
@@ -2117,7 +2117,7 @@
         (define/public (assign-invoke-super-method!! method)
           (assert-is* method zinal:db:method%%)
           (assert-is-within-class*)
-          (assert-can-super-invoke-method* (get-containing-class*) method)
+          (assert-can-super-invoke-method* (get-containing-class* this) method)
           (assign*!! (lambda (loc)
             (define invoke-id
               (create-normal!! "super_invokations" loc (list
@@ -2176,11 +2176,7 @@
         )
 
         (define (assert-is-within-class*)
-          (assert (format "~a is not within a class" (send this get-id)) (get-containing-class*))
-        )
-
-        (define (get-containing-class* [node this])
-          (and node (if (is-a? node zinal:db:class%%) node (get-containing-class* (send node get-parent))))
+          (assert (format "~a is not within a class" (send this get-id)) (get-containing-class* this))
         )
 
         (super-new)
@@ -2204,6 +2200,10 @@
     )
 
     ; OOP HELPER FUNCTIONS
+
+    (define (get-containing-class* node)
+      (and node (if (is-a? node zinal:db:class%%) node (get-containing-class* (send node get-parent))))
+    )
 
     (define (get-direct-super-interfaces* caller)
       (send caller assert-valid)
@@ -2249,7 +2249,7 @@
       (define to-remove-id (send to-remove get-id))
       (assert
         (format "~a cannot remove ~a, as doing so would orphan a method definition" caller-id to-remove-id)
-        (can-remove-direct-super-type*? caller to-remove)
+        (can-remove-direct-super-interface*? caller to-remove)
       )
       (query-exec db* "DELETE FROM extends WHERE subtype_id = ?1 AND supertype_id = ?2" caller-id to-remove-id)
       (void)
@@ -2258,7 +2258,7 @@
     (define/public (get-all-methods* caller)
       (send caller assert-valid)
       (define direct-methods (if (is-a? caller zinal:db:type%%) (get-direct-methods* caller) '()))
-      (append direct-methods (map get-direct-methods* (get-all-super-types caller)))
+      (append direct-methods (append-map get-direct-methods* (get-all-super-types caller)))
     )
 
     (define (get-direct-methods* caller)
@@ -2275,7 +2275,7 @@
       (send caller assert-valid)
       (assert-is* to-remove zinal:db:method%%)
       (define caller-id (send caller get-id))
-      (define to-remove-id (send to-remove-id get-id))
+      (define to-remove-id (send to-remove get-id))
       (assert
         (format "Method ~a doesn't belong to type ~a" to-remove-id caller-id)
         (equals*? caller (send to-remove get-containing-type))
@@ -2371,13 +2371,14 @@
       (define children (send class/child get-children))
       (append*
         (filter (curryr is-a? zinal:db:invoke-super-method%%) children)
-        (map get-super-invokations (filter (negate (curryr is-a? zinal:db:class%%)) children))
+        (map get-super-invokations (filter (conjoin (curryr is-a? zinal:db:parent-node%%) (negate (curryr is-a? zinal:db:class%%))) children))
       )
     )
 
     ; abysmally slow
     (define (can-remove-direct-super-type*? subtype supertype)
       (define edge-to-sever (list subtype supertype))
+      (define all-subclasses (get-all-subclasses subtype))
       (andmap
         (lambda (class-to-check)
           (define (check-relevant-nodes checker get-nodes)
@@ -2393,7 +2394,10 @@
             )
           )
         )
-        (cons subtype (get-all-subclasses subtype))
+        (if (is-a? subtype zinal:db:class%%)
+          (cons subtype all-subclasses)
+          all-subclasses
+        )
       )
     )
 
@@ -2724,6 +2728,7 @@
             [("asserts") db-assert%]
             [("atoms")
               (define type (string->symbol (get-cell* id "type")))
+              ; TODO - it appears we'll have to do the case over strings, not symbols
               (case type
                 [(number) db-number%]
                 [(character) db-char%]
@@ -2968,9 +2973,9 @@
       )
     )
 
-    (define (get-visible-referables* location-node)
+    (define (get-visible-referables* location-node check-younger-siblings?)
       (append*
-        (get-visible-referables-recursive* location-node #f)
+        (get-visible-referables-recursive* location-node check-younger-siblings?)
         (get-all-interfaces)
         (map (lambda (m) (send m get-public-defs)) (send (send location-node get-module) get-required-modules))
       )
@@ -2990,25 +2995,25 @@
     (define (get-visible-sibling-referables* location-node siblings check-younger-siblings?)
       (define not-location-node? (negate (curry equals*? location-node)))
       (define older (takef siblings not-location-node?))
-      (append
-        (filter
-          (curryr is-a? zinal:db:referable%%)
+      (filter
+        (curryr is-a? zinal:db:referable%%)
+        (append
           (cons location-node older)
-        )
-        (cond
-          [(and check-younger-siblings? (visible-to-elders? location-node))
-            (define younger (cdr (dropf siblings not-location-node?)))
-            (takef younger visible-to-elders?)
-          ]
-          [else
-            '()
-          ]
+          (cond
+            [(and check-younger-siblings? (visible-to-elders? location-node))
+              (define younger (cdr (dropf siblings not-location-node?)))
+              (takef younger visible-to-elders?)
+            ]
+            [else
+              '()
+            ]
+          )
         )
       )
     )
 
     (define (visible-to-elders? handle)
-      (or (function-definition? handle) (ormap (curry is-a? handle) (list zinal:db:define-method%% zinal:db:override-legacy-method%% zinal:db:define-class%%)))
+      (or (function-definition? handle) (is-one-of? handle (list zinal:db:define-method%% zinal:db:override-legacy-method%% zinal:db:define-class%%)))
     )
 
     (define (function-definition? handle)
@@ -3038,7 +3043,7 @@
     )
 
     (define (assert-is-one* handle types)
-      (assert (format "~a is not one of ~a:" (send handle get-id) types) (ormap (curry is-a? handle) types))
+      (assert (format "~a is not one of ~a:" (send handle get-id) types) (is-one-of? handle types))
     )
 
     (define (assert-valid-legacy* library name)
