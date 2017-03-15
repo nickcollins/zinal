@@ -52,6 +52,37 @@
   (or (send db-describable-handle get-short-desc) alt)
 )
 
+(define (can-be-public*? define-handle)
+  (and
+    (is-one-of? define-handle (list zinal:db:def%% zinal:db:define-class%%))
+    (is-a? (send define-handle get-parent) zinal:db:module%%)
+  )
+)
+
+(define (public*? define-handle)
+  (assert "cannot assess \"publicity\" of non-def or non-module-child" (can-be-public*? define-handle))
+  (findf (curry handles-equal? define-handle) (send (send define-handle get-parent) get-public-defs))
+)
+
+(define (get-containing-class* node)
+  (and node (if (is-a? node zinal:db:class%%) node (get-containing-class* (send node get-parent))))
+)
+
+(define (issue-warning title message)
+  (message-box title message #f '(ok caution))
+)
+
+(define (choose-zinal-or-legacy title message)
+  (define racket/zinal '("zinal (non-legacy)" "racket (legacy)"))
+  (define choice-index (get-choice-from-user title message racket/zinal))
+  (and choice-index (if (zero? choice-index) 'zinal 'legacy))
+)
+
+(define (get-zinal-super-class* subclass)
+  (define super-class-ref (send subclass get-super-class))
+  (and (is-a? super-class-ref zinal:db:class-ref%%) (send super-class-ref get-define-class))
+)
+
 (define NO-STYLE (make-object style-delta%))
 
 ; EVENT HANDLER
@@ -218,11 +249,6 @@
       (case (send key-event get-key-code)
         [(#\return)
           (set! has-been-chosen* #t)
-          (close*!)
-          #t
-        ]
-        [('escape)
-          (set! has-been-chosen* #f)
           (close*!)
           #t
         ]
@@ -497,16 +523,18 @@
 )
 
 ; new-blah-creator is a function of form
-; (list-of zinal:db:referable%%) => (zinal:db:unassigned%% => zinal:db:element%%) OR #f
+; (zinal:db:node%% , list-of zinal:db:referable%%) => (zinal:db:unassigned%% => zinal:db:element%%) OR #f
+; parent-handle is the parent of the existing or yet-to-be-created node that will be assigned.
+; parent-handle need not be the exact parent, as long as there is no zinal:db:class%% in between parent-handle and the creation location
 ; visible-referables are handles for all referables that are visible to any newly minted nodes.
 ; If it returns #f, it means no operation should be performed
 ; The returned creator is destructive and must succeed
 
-(define (new-list-creator visible-referables)
+(define (new-list-creator parent-handle visible-referables)
   (lambda (unassigned) (send unassigned assign-list!!))
 )
 
-(define (new-assert-creator visible-referables)
+(define (new-assert-creator parent-handle visible-referables)
   (lambda (unassigned)
     (define db-assert-handle (send unassigned assign-assert!!))
     (send (send db-assert-handle get-assertion) assign-bool!! #t)
@@ -515,184 +543,435 @@
   )
 )
 
-(define (new-number-creator visible-referables)
+(define (use-text-from-user title message resultificator [validator (const #t)])
   (define result
     (get-text-from-user
-      "Enter a number"
-      "Seriously, do it"
+      title
+      message
       #f
       ""
       '(disallow-invalid)
-      #:validate string->number
+      #:validate validator
     )
   )
-  (if (and result (string->number result))
-    (lambda (unassigned) (send unassigned assign-number!! (string->number result)))
-    #f
+  (and result (validator result) (resultificator result))
+)
+
+(define (new-number-creator parent-handle visible-referables)
+  (use-text-from-user
+    "Enter a number"
+    "Seriously, do it"
+    (lambda (result)
+      (lambda (unassigned) (send unassigned assign-number!! (string->number result)))
+    )
+    string->number
   )
 )
 
-(define (new-character-creator visible-referables)
-  (define validate-char (compose1 (curry = 1) string-length))
-  (define result
-    (get-text-from-user
-      "Enter a character"
-      "Seriously, do it"
-      #f
-      ""
-      '(disallow-invalid)
-      #:validate validate-char
+(define (new-character-creator parent-handle visible-referables)
+  (use-text-from-user
+    "Enter a character"
+    "Seriously, do it"
+    (lambda (result)
+      (lambda (unassigned) (send unassigned assign-char!! (string-ref result 0)))
     )
-  )
-  (if (and result (validate-char result))
-    (lambda (unassigned) (send unassigned assign-char!! (string-ref result 0)))
-    #f
+    (compose1 (curry = 1) string-length)
   )
 )
 
-(define (new-string-creator visible-referables)
-  (define result
-    (get-text-from-user
-      "Enter a string"
-      "Seriously, do it"
-      #:validate (const #t)
+(define (new-string-creator parent-handle visible-referables)
+  (use-text-from-user
+    "Enter a string"
+    "Seriously, do it"
+    (lambda (result)
+      (lambda (unassigned) (send unassigned assign-string!! result))
     )
-  )
-  (if result
-    (lambda (unassigned) (send unassigned assign-string!! result))
-    #f
   )
 )
 
-; TODO let's factor the boilerplate out of these things
-(define (new-symbol-creator visible-referables)
-  (define result
-    (get-text-from-user
-      "Enter a symbol as a string"
-      "Don't include the leading '"
-      #:validate (const #t)
+(define (new-symbol-creator parent-handle visible-referables)
+  (use-text-from-user
+    "Enter a symbol as a string"
+    "Don't include the leading '"
+    (lambda (result)
+      (lambda (unassigned) (send unassigned assign-symbol!! (string->symbol result)))
     )
-  )
-  (if result
-    (lambda (unassigned) (send unassigned assign-symbol!! (string->symbol result)))
-    #f
   )
 )
 
-(define (new-keyword-creator visible-referables)
-  (define result
-    (get-text-from-user
-      "Enter a keyword as a string"
-      "Don't include the leading #:"
-      #:validate (const #t)
+(define (new-keyword-creator parent-handle visible-referables)
+  (use-text-from-user
+    "Enter a keyword as a string"
+    "Don't include the leading #:"
+    (lambda (result)
+      (lambda (unassigned) (send unassigned assign-keyword!! (string->keyword result)))
     )
-  )
-  (if result
-    (lambda (unassigned) (send unassigned assign-keyword!! (string->keyword result)))
-    #f
   )
 )
 
-(define (new-boolean-creator visible-referables)
+(define (new-boolean-creator parent-handle visible-referables)
   (define choices '("true" "false"))
   (define result (get-choice-from-user "To be or not to be?" "That's the fuckin question" choices))
-  (if result
+  (and result
     (lambda (unassigned) (send unassigned assign-bool!! (= result 0)))
-    #f
   )
 )
 
-(define (new-define-creator visible-referables)
-  (define result
-    (get-text-from-user
-      "Enter the new definition's short descriptor"
-      "A short descriptor, one or a few words, to identify this variable"
-      #:validate non-empty-string?
+(define (new-define-creator parent-handle visible-referables)
+  (use-text-from-user
+    "Enter the new definition's short descriptor"
+    "A short descriptor, one or a few words, to identify this variable"
+    (lambda (result)
+      (lambda (unassigned) (send unassigned assign-def!! result))
+    )
+    non-empty-string?
+  )
+)
+
+(define (new-lambda-creator parent-handle visible-referables)
+  (lambda (unassigned) (send unassigned assign-lambda!!))
+)
+
+(define (get-referable-from-user allowed-referables)
+  (and (pair? allowed-referables)
+    (auto-complete*
+      "Select a referable"
+      "Start typing bits and pieces of the desired referable's short descriptor"
+      (map (lambda (handle) (list handle (get-short-desc-or* handle "<no desc>"))) allowed-referables)
+      handles-equal?
     )
   )
-  (if (and result (non-empty-string? result))
-    (lambda (unassigned) (send unassigned assign-def!! result))
-    #f
-  )
-)
-
-(define (new-lambda-creator visible-referables)
-  (lambda (unassigned) (send unassigned assign-lambda!!))
 )
 
 ; TODO fucking terrible inconsistent focus issues. AFAICT they started happening after "upgrading"
 ; to 16.04.1
-(define (new-value-read-creator visible-referables)
-  (cond
-    [(pair? visible-referables)
-      (define handles&choices
-        (map
-          (lambda (handle) (list handle (get-short-desc-or* handle "<no desc>")))
-          visible-referables
-        )
+(define (new-value-read-creator parent-handle visible-referables)
+  (define chosen-handle (get-referable-from-user visible-referables))
+  (and chosen-handle
+    (lambda (unassigned)
+      (cond
+        [(is-a? chosen-handle zinal:db:param%%) (send unassigned assign-param-ref!! chosen-handle)]
+        [(is-a? chosen-handle zinal:db:def%%) (send unassigned assign-def-ref!! chosen-handle)]
+        [(is-a? chosen-handle zinal:db:define-class%%) (send unassigned assign-class-ref!! chosen-handle)]
+        [(is-a? chosen-handle zinal:db:interface%%) (send unassigned assign-interface-ref!! chosen-handle)]
+        [else (error 'new-value-read-creator "Invalid referable")]
       )
-      (define chosen-handle
-        (auto-complete* "What definition or parameter do you want to read?" "Start typing bits and pieces of the desired referable's short descriptor" handles&choices handles-equal?)
-      )
-      (if chosen-handle
-        (lambda (unassigned)
-          (if (is-a? chosen-handle zinal:db:param%%)
-            (send unassigned assign-param-ref!! chosen-handle)
-            (send unassigned assign-def-ref!! chosen-handle)
-          )
-        )
-        #f
-      )
-    ]
-    [else #f]
+    )
   )
 )
 
-(define (new-legacy-creator visible-referables)
-  (define result
-    (get-text-from-user
-      "Enter the standard library identifier"
-      "Enter the standard library identifier"
-      ; TODO we need to add a reflective validator
-      #:validate non-empty-string?
-    )
+(define (get-legacy-from-user)
+  (use-text-from-user
+    "Enter the standard library identifier"
+    "Enter the standard library identifier"
+    identity
+    ; TODO we need to add a reflective validator
+    non-empty-string?
   )
-  (if (and result (non-empty-string? result))
+)
+
+(define (new-legacy-creator parent-handle visible-referables)
+  (define result (get-legacy-from-user))
+  (and result
     (lambda (unassigned) (send unassigned assign-legacy-link!! #f result))
-    #f
   )
 )
 
 (define new-unassigned-creator (const identity))
 
+(define (get-method-from-user choosable-referables)
+  (define visible-types (filter (curryr is-a? zinal:db:type%%) choosable-referables))
+  (define type-with-desired-method
+    (or
+      (and (= 1 (length visible-types)) (car visible-types))
+      (auto-complete*
+        "Select the type which possesses the method"
+        "Sorry, zinal isn't smart enough to figure out the appropriate type from context, so please enlighten"
+        (map (lambda (type-handle) (list type-handle (get-short-desc-or* type-handle "<unnamed type>"))) visible-types)
+        handles-equal?
+      )
+    )
+  )
+  (and type-with-desired-method
+    (auto-complete*
+      "Select a method"
+      "Start typing bits and pieces of the desired method's short descriptor"
+      (map (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>"))) (send type-with-desired-method get-all-methods))
+      handles-equal?
+    )
+  )
+)
+
+(define (get-super-method-from-user node-handle)
+  (define super-class-handle (get-zinal-super-class* (get-containing-class* node-handle)))
+  (cond
+    [super-class-handle
+      (auto-complete*
+        "Select a super method"
+        "Start typing bits and pieces of the desired method's short descriptor"
+        (map
+          (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>")))
+          (filter (lambda (m) (not (send super-class-handle is-method-abstract? m))) (send super-class-handle get-all-methods))
+        )
+        handles-equal?
+      )
+    ]
+    [else
+      (issue-warning "Can't invoke zinal super method" "This class's super class is a legacy, so it can't super invoke any zinal methods")
+      #f
+    ]
+  )
+)
+
+(define (get-method-to-define/override-from-user node-handle)
+  (define class-handle (get-containing-class* node-handle))
+  (cond
+    [class-handle
+      (auto-complete*
+        "Select a method to define or override"
+        "Start typing bits and pieces of the desired method's short descriptor"
+        (map
+          (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>")))
+          (filter (lambda (m) (not (send class-handle get-direct-definition-of-method m))) (send class-handle get-all-methods))
+        )
+        handles-equal?
+      )
+    ]
+    [else
+      (issue-warning "Can't define/override method" "A method definition or override must be the immediate child of a class, nowhere else")
+      #f
+    ]
+  )
+)
+
+(define (check-in-class? node-handle)
+  (cond
+    [(get-containing-class* node-handle)
+      #t
+    ]
+    [else
+      (issue-warning "Cannot create OOP node here" "The type of node you're trying to create can only exist inside a class body")
+      #f
+    ]
+  )
+)
+
+(define (check-directly-in-class? parent-handle)
+  (cond
+    [(is-a? parent-handle zinal:db:class%%)
+      #t
+    ]
+    [else
+      (issue-warning "Cannot create OOP node here" "The type of node you're trying to create can only exist as the direct child of a class")
+      #f
+    ]
+  )
+)
+
+(define (check-directly-in-define-class? parent-handle)
+  (cond
+    [(is-a? parent-handle zinal:db:define-class%%)
+      #t
+    ]
+    [else
+      (issue-warning
+        "Cannot define new method here"
+        "A new method can only be defined in a class definition. If you want to override a super class method, choose the 'define/override existing method' option"
+      )
+      #f
+    ]
+  )
+)
+
+(define (switch-r/z r/z-title r-title r-result-handler z-handler)
+  (define r/z-choice (choose-zinal-or-legacy r/z-title "The choice is yours, and yours alone"))
+  (cond
+    [(equal? r/z-choice 'legacy)
+      (use-text-from-user
+        r-title
+        "It's not hard ..."
+        r-result-handler
+        non-empty-string?
+      )
+    ]
+    [(equal? r/z-choice 'zinal)
+      (z-handler)
+    ]
+    [else
+      #f
+    ]
+  )
+)
+
+(define (new-invoke-method-creator parent-handle visible-referables)
+  (switch-r/z
+    "Invoke a legacy method or a zinal method?"
+    "Enter the name of the racket method to invoke"
+    (lambda (result)
+      (lambda (unassigned) (send unassigned assign-invoke-legacy-method!! result))
+    )
+    (thunk
+      (define method (get-method-from-user visible-referables))
+      (and method
+        (lambda (unassigned) (send unassigned assign-invoke-method!! method))
+      )
+    )
+  )
+)
+
+(define (new-invoke-this-method-creator parent-handle visible-referables)
+  (and (check-in-class? parent-handle)
+    (switch-r/z
+      "Invoke a legacy method or a zinal method?"
+      "Enter the name of the racket method to invoke"
+      (lambda (result)
+        (lambda (unassigned)
+          (define result-handle (send unassigned assign-invoke-legacy-method!! result))
+          (send (send result-handle get-object) assign-this!!)
+          result-handle
+        )
+      )
+      (thunk
+        (define method
+          (auto-complete*
+            "Select a method"
+            "Start typing bits and pieces of the desired method's short descriptor"
+            (map (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>"))) (send (get-containing-class* parent-handle) get-all-methods))
+            handles-equal?
+          )
+        )
+        (and method
+          (lambda (unassigned)
+            (define result-handle (send unassigned assign-invoke-method!! method))
+            (send (send result-handle get-object) assign-this!!)
+            result-handle
+          )
+        )
+      )
+    )
+  )
+)
+
+(define (new-invoke-super-method-creator parent-handle visible-referables)
+  (and (check-in-class? parent-handle)
+    (switch-r/z
+      "Invoke a legacy super method or a zinal super method?"
+      "Enter the name of the racket method to invoke"
+      (lambda (result)
+        (lambda (unassigned) (send unassigned assign-invoke-legacy-super-method!! result))
+      )
+      (thunk
+        (define method (get-super-method-from-user parent-handle))
+        (and method
+          (lambda (unassigned) (send unassigned assign-invoke-super-method!! method))
+        )
+      )
+    )
+  )
+)
+
+(define (new-define-new-method-creator parent-handle visible-referables)
+  (and (check-directly-in-define-class? parent-handle)
+    (use-text-from-user
+      "Enter a short description of the new method"
+      "A short descriptor, one or a few words, to identify the new method"
+      (lambda (result)
+        (lambda (unassigned)
+          (define new-method-handle (send parent-handle add-direct-method!! result))
+          (send unassigned assign-define-method!! new-method-handle)
+        )
+      )
+      non-empty-string?
+    )
+  )
+)
+
+(define (new-define-existing-method-creator parent-handle visible-referables)
+  (and (check-directly-in-class? parent-handle)
+    (switch-r/z
+      "Override a legacy super method, or define/override a zinal method?"
+      "Enter the name of the racket method to override"
+      (lambda (result)
+        (lambda (unassigned) (send unassigned assign-override-legacy-method!! result))
+      )
+      (thunk
+        (define method (get-method-to-define/override-from-user parent-handle))
+        (and method
+          (lambda (unassigned) (send unassigned assign-define-method!! method))
+        )
+      )
+    )
+  )
+)
+
+(define (new-super-init-creator parent-handle visible-referables)
+  (and (check-directly-in-class? parent-handle) (not (findf (curryr is-a? zinal:db:super-init%%) (send parent-handle get-body)))
+    (lambda (unassigned) (send unassigned assign-super-init!!))
+  )
+)
+
+(define (new-create-object-creator parent-handle visible-referables)
+  (lambda (unassigned) (send unassigned assign-create-object!!))
+)
+
+(define (new-this-creator parent-handle visible-referables)
+  (and (check-in-class? parent-handle)
+    (lambda (unassigned) (send unassigned assign-this!!))
+  )
+)
+
+(define (new-define-class-creator parent-handle visible-referables)
+  (use-text-from-user
+    "Enter a name for the new class definition"
+    "A short descriptor, one or a few words, to identify this class"
+    (lambda (result)
+      (lambda (unassigned) (send unassigned assign-define-class!! result))
+    )
+    non-empty-string?
+  )
+)
+
+(define (new-class-instance-creator parent-handle visible-referables)
+  (lambda (unassigned) (send unassigned assign-class-instance!!))
+)
+
 ; GUI CONSTANTS
 
-(define FRIENDLY-LITERAL-TYPE->CREATOR (hash
-  "list" new-list-creator
-  "assertion" new-assert-creator
+(define FRIENDLY-TYPE->CREATOR (hash
   "number" new-number-creator
   "character" new-character-creator
   "string" new-string-creator
   "boolean" new-boolean-creator
   "symbol" new-symbol-creator
   "keyword" new-keyword-creator
-))
 
-(define FRIENDLY-TYPE->CREATOR (hash-union FRIENDLY-LITERAL-TYPE->CREATOR (hash
+  "list" new-list-creator
+  "assertion" new-assert-creator
   "define" new-define-creator
   "lambda" new-lambda-creator
   "reference" new-value-read-creator
   "legacy" new-legacy-creator
   "TODO" new-unassigned-creator
-)))
+
+  "invoke method" new-invoke-method-creator
+  "invoke this (⊙) method" new-invoke-this-method-creator
+  "invoke super (🡡) method" new-invoke-super-method-creator
+  "create new object (☼)" new-create-object-creator
+  "initialize super class (🡡☼)" new-super-init-creator
+  "define new method" new-define-new-method-creator
+  "define/override existing method" new-define-existing-method-creator
+  "this (⊙)" new-this-creator
+  "class (definition)" new-define-class-creator
+  "class (anonymous instantiation)" new-class-instance-creator
+))
 
 ; Returns #f to signify no action is to be taken (i.e. the user cancels the dialog)
 ; Returns a function that takes an unassigned db handle and will assign it to something else, returning the new handle
 ; The returned creator is not allowed to fail. A failure of this function should return #f instead of a creator
-(define (request-new-item-creator visible-referables [allowed-types (hash-keys FRIENDLY-TYPE->CREATOR)])
+(define (request-new-item-creator parent-handle visible-referables [allowed-types (sort (hash-keys FRIENDLY-TYPE->CREATOR) string<?)])
   (define choice (get-choice-from-user "Choose the new node's type:" "Choose the node's type:" allowed-types))
   (if choice
-    ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref allowed-types choice)) visible-referables)
+    ((hash-ref FRIENDLY-TYPE->CREATOR (list-ref allowed-types choice)) parent-handle visible-referables)
     #f
   )
 )
@@ -755,10 +1034,14 @@
     (define ui-parent (send (send current-ent get-root-ui-item) get-parent))
     (define cone-leaves (send current-ent get-cone-leaves))
     (define was-this-slot-respawned? #f)
-    (unless (is-a? current-ent (parse-entity*! db-handle))
+    (unless (implies ui-parent (is-a? current-ent (parse-entity*! db-handle)))
       (spawn-entity*! slot db-handle ui-parent (curryr spawn-or-reassign-entity*! cone-leaves))
       ; Imperative style, but the functional alternatives are just so damn ugly
       (set! was-this-slot-respawned? #t)
+    )
+    ; TODO This is hacky, but that's ok, cuz it gives us an idea of how we might have a more general purpose reactive/notification/spooky-action-at-a-distance system in the future
+    (when (and (not was-this-slot-respawned?) (is-a? current-ent ent:define-class%))
+      (send current-ent reset-abstracts)
     )
     (define is-current-slot-part-of-selection-path? (and (pair? selection-path) (eq? (car selection-path) slot)))
     (define next-selection-path (and is-current-slot-part-of-selection-path? (cdr selection-path)))
@@ -773,13 +1056,25 @@
 
   (define (change-module*! handle-event-info event)
     (define module-to-go-to (get-module-from-user))
-    (when module-to-go-to (spawn-module*! module-to-go-to))
+    (when module-to-go-to (spawn-root-entity*! module-to-go-to))
     (send handle-event-info set-doesnt-require-reparse!)
   )
 
   (define (create-new-module*!! handle-event-info event)
     (define module-to-go-to (create-module*!!))
-    (when module-to-go-to (spawn-module*! module-to-go-to))
+    (when module-to-go-to (spawn-root-entity*! module-to-go-to))
+    (send handle-event-info set-doesnt-require-reparse!)
+  )
+
+  (define (change-interface*! handle-event-info event)
+    (define interface-to-go-to (get-interface-from-user (send db* get-all-interfaces)))
+    (when interface-to-go-to (spawn-root-entity*! interface-to-go-to))
+    (send handle-event-info set-doesnt-require-reparse!)
+  )
+
+  (define (create-new-interface*!! handle-event-info event)
+    (define interface-to-go-to (create-interface*!!))
+    (when interface-to-go-to (spawn-root-entity*! interface-to-go-to))
     (send handle-event-info set-doesnt-require-reparse!)
   )
 
@@ -787,6 +1082,8 @@
     (make-object keyname-event-handler% (list
       (list change-module*! '("e"))
       (list create-new-module*!! '("E"))
+      (list change-interface*! '("c:e"))
+      (list create-new-interface*!! '("c:E"))
     ))
   )
 
@@ -798,15 +1095,17 @@
 
   ; Some style and text-getter consts that are used by some ents
 
+  (define CONST-VALUE-STYLE (send (make-object style-delta%) set-delta-foreground "Pink"))
+
   (define REF-STYLE (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Cyan"))
 
   (define (get-ref-text ref-handle)
     (get-short-desc-or* (send ref-handle get-referable) "<nameless ref>")
   )
 
-  (define ASSERT-STYLE (send (make-object style-delta%) set-delta-foreground "VioletRed"))
+  (define ASSERT-STYLE (send (make-object style-delta%) set-delta-foreground "Lime"))
 
-  ; TODO make strings underlined
+  ; TODO make strings underlined, and make the empty string be ε but in a different color
   (define ATOM-STYLE (send (make-object style-delta%) set-delta-foreground "Orchid"))
 
   (define (get-atom-text atom-handle)
@@ -883,11 +1182,60 @@
     (super-make-object)
   ))
 
+  (define ent:short-definition% (class ent% ; abstract
+
+    (init cone-root-handle child-spawner!)
+
+    (define/public (get-prefix-text)
+      #f
+    )
+
+    (define/public (get-synopsis-text)
+      "..."
+    )
+
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
+
+    (define this-ent* this)
+
+    (define ui-item* (make-object (class ui:possibly-public-def-list%
+
+      (define/override (get-prefix-text)
+        (send this-ent* get-prefix-text)
+      )
+
+      (define/override (get-default-name-text)
+        "<nameless definition>"
+      )
+
+      (define/override (get-bridge-text)
+        (format "= ~a" (get-synopsis-text))
+      )
+
+      (define/override (get-event-handler)
+        (combine-keyname-event-handlers (list
+          (super get-event-handler)
+          (create-navigate-to-root-handler* (send this-ent* get-cone-root))
+        ))
+      )
+
+      (super-make-object this-ent* this-ent*)
+    )))
+
+    (define/override (get-root-ui-item)
+      ui-item*
+    )
+  ))
+
   (define ent:singleton% (class ent% ; abstract
 
-    (init cone-root-handle child-spawner! header [bookends #f])
+    (init cone-root-handle child-spawner! [bookends #f])
 
     (abstract db-get-single-item)
+    (abstract get-header)
 
     ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
     ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
@@ -902,7 +1250,7 @@
         (send (send this-ent* get-cone-root) get-visible-referables-underneath)
       )
 
-      (super-make-object this-ent* this-ent* header bookends)
+      (super-make-object this-ent* this-ent* (get-header) bookends)
 
       (define item-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
       (child-spawner! item-slot* (db-get-single-item) this)
@@ -911,329 +1259,6 @@
 
     (define/override (get-root-ui-item)
       ui-item*
-    )
-  ))
-
-  (define ent:module% (class ent%
-
-    (init cone-root-handle child-spawner!)
-
-    (define this-ent* this)
-
-    ; Ugh. fucking circular deps.
-    (define ui-list* #f)
-
-    (define ui:module-child-var-scalar*% (class ui:var-scalar%
-
-      (init style-delta text-getter child-handle)
-
-      (define child-handle* child-handle)
-
-      (define/override (get-event-handler)
-        (combine-keyname-event-handlers (list
-          (send this create-left-handler)
-          (send this create-up-handler)
-          (send this create-down-handler)
-          (make-object keyname-event-handler% (list (list (curry handle-module-child-right*! child-handle*) '("right" "l"))))
-          (create-simple-event-handler "o"
-            (lambda (handle-event-info event)
-              (define index (send ui-list* get-child-index this))
-              (insert-new-todo*!! (add1 index))
-              #t
-            )
-          )
-          (create-simple-event-handler "d"
-            (lambda (handle-event-info event)
-              (when (is-a? child-handle* zinal:db:unassigned%%)
-                (send (send this-ent* get-cone-root) remove-from-body!! (send ui-list* get-child-index this))
-                (send ui-list* remove! this)
-              )
-              #t
-            )
-          )
-        ))
-      )
-
-      (super-make-object this-ent* style-delta text-getter (const NOOP) this-ent*)
-    ))
-
-    (define ui:module-def-child*% (class ui:module-child-var-scalar*%
-
-      (init child-handle)
-
-      (define child-handle* child-handle)
-
-      (define (get-def-text*)
-        (define def-expr (send child-handle* get-expr))
-        (define value-string
-          (if (is-a? def-expr zinal:db:lambda%%)
-            (format "λ ~a" (string-join (map (curryr get-short-desc-or* "<nameless param>") (send def-expr get-all-params)) ", "))
-            "..."
-          )
-        )
-        (format "~a~a = ~a" (if (public*?) "public " "") (get-short-desc-or* child-handle* "<nameless def>") value-string)
-      )
-
-      (define (public*?)
-        (define module-handle (send this-ent* get-cone-root))
-        (findf (curry handles-equal? child-handle*) (send module-handle get-public-defs))
-      )
-
-      (define/override (get-event-handler)
-        (combine-keyname-event-handlers (list
-          (super get-event-handler)
-          (create-simple-event-handler "m"
-            (lambda (handle-event-info event)
-              (define module-handle (send this-ent* get-cone-root))
-              (send module-handle set-public!! child-handle* (not (public*?)))
-              #t
-            )
-          )
-        ))
-      )
-
-      (super-make-object DEF-STYLE get-def-text* child-handle)
-    ))
-
-    (define (insert-new-todo*!! index)
-      (define new-handle (send (send this get-cone-root) insert-into-body!! index))
-      (send ui-list* insert! index (get-module-ui-child* new-handle))
-    )
-
-    (define (get-module-ui-child* child-handle)
-      (if (is-a? child-handle zinal:db:def%%)
-        (make-object ui:module-def-child*% child-handle)
-        (get-module-non-def-child* child-handle)
-      )
-    )
-
-    (define (get-module-non-def-child* child-handle)
-      (define style&get-text
-        (send child-handle accept (make-object (class zinal:db:element-visitor% (super-make-object)
-
-          (define/override (visit-element e meh)
-            (error 'get-module-non-def-child* "Cannot parse entity for mysterious db handle")
-          )
-
-          (define/override (visit-reference db-ref-handle meh)
-            (list REF-STYLE get-ref-text)
-          )
-
-          (define/override (visit-assert db-assert-handle meh)
-            (list ASSERT-STYLE (const "assert ..."))
-          )
-
-          (define/override (visit-atom db-atom-handle meh)
-            (list ATOM-STYLE get-atom-text)
-          )
-
-          (define/override (visit-lambda db-lambda-handle meh)
-            (list NO-STYLE (const "(λ ...)"))
-          )
-
-          (define/override (visit-list db-list-handle meh)
-            (list NO-STYLE (const (if (pair? (send db-list-handle get-items)) "(...)" "()")))
-          )
-
-          (define/override (visit-module db-module-handle meh)
-            (error 'get-module-ui-child* "No. Just no.")
-          )
-
-          (define/override (visit-legacy-link db-legacy-link-handle meh)
-            (list LEGACY-STYLE (lambda (h) (send h get-name)))
-          )
-
-          (define/override (visit-unassigned db-unassigned-handle meh)
-            (list UNASSIGNED-STYLE get-unassigned-text)
-          )
-        )))
-      )
-      (define style (first style&get-text))
-      (define get-text (second style&get-text))
-      (make-object ui:module-child-var-scalar*% style (thunk (get-text child-handle)) child-handle)
-    )
-
-    (define (handle-module-child-right*! child-root-handle handle-event-info event)
-      (define root-slot (make-object slot% root-slot->root-slot-event-handler NOOP-FALLBACK-EVENT-HANDLER))
-      (spawn-entity*! root-slot child-root-handle #f)
-      (select! root-slot)
-      (send handle-event-info set-doesnt-require-reparse!)
-    )
-
-    (define (handle-module-child-left*! child-root-slot handle-event-info event)
-      (define child-handle (slot->db-handle child-root-slot))
-      (define module (send child-handle get-parent))
-      (assert "handle-module-child-left*! can only be used for the child of a module" (is-a? module zinal:db:module%%))
-      (define module-children (send module get-body))
-      (spawn-module*! module)
-      ; spawn module selects the module's root slot - we can rely on this to get the ui object via selected*
-      (define root-ui (slot/ui-item->ui-item selected*))
-      (assert "The module root ui should be a list" (is-a? root-ui ui:list%))
-      (select! (list-ref (send root-ui get-children) (list-index (curry handles-equal? child-handle) module-children)))
-      (send handle-event-info set-doesnt-require-reparse!)
-    )
-
-    (define (root-slot->root-slot-event-handler root-slot)
-      (combine-keyname-event-handlers (list
-        (create-replace-handler* root-slot #f get-visible-referables-for-module-child-slot*)
-        (create-unassign-handler* root-slot #f)
-        (make-object keyname-event-handler% (list (list (curry handle-module-child-left*! root-slot) '("left" "h"))))
-      ))
-    )
-
-    (define (get-visible-referables-for-module-child-slot* child-slot)
-      (define child-handle (slot->db-handle child-slot))
-      (define module (send child-handle get-parent))
-      (assert "get-visible-referables-for-module-child-slot* can only be used for the child of a module" (is-a? module zinal:db:module%%))
-      (define module-children (send module get-body))
-      (get-visible-referables-for-hypothetical-index* module module-children (list-index (curry handles-equal? child-handle) module-children))
-    )
-
-    (define/override (get-root-ui-item)
-      ui-list*
-    )
-
-    (super-make-object cone-root-handle)
-
-    (define header* #f)
-
-    (define add-require-event-handler*
-      (create-simple-event-handler "R"
-        (lambda (handle-event-info event)
-          (define this-module (send this get-cone-root))
-          (define module-to-require (get-module-from-user (filter (lambda (m) (send this-module can-require? m)) (get-all-modules*))))
-          (when module-to-require
-            (send (send this get-cone-root) require!! module-to-require)
-            (send header* reset-list*!)
-          )
-          #t
-        )
-      )
-    )
-
-    (define event-handler*
-      (combine-keyname-event-handlers (list
-        (create-name-change-handler (thunk (send this get-cone-root)))
-        add-require-event-handler*
-        (create-simple-event-handler "m"
-          (lambda (handle-event-info event)
-            (define module-handle (send this get-cone-root))
-            (cond
-              [(send module-handle is-main-module?)
-                (send module-handle set-main-module!! #f)
-              ]
-              [(send db* get-main-module)
-                (issue-warning "Cannot make main" "Only one module can be the main module")
-              ]
-              [else
-                (send module-handle set-main-module!! #t)
-              ]
-            )
-            #t
-          )
-        )
-        (create-simple-event-handler "d"
-          (lambda (handle-event-info event)
-            (define module-handle (send this get-cone-root))
-            (if (send module-handle can-delete?)
-              (when (navigate-to-fresh-module*! (get-all-modules* module-handle)) (send module-handle delete!!))
-              (issue-warning "Cannot delete module" "Either other modules require this module or contain references to defs in this module")
-            )
-            #t
-          )
-        )
-        (create-simple-event-handler "o"
-          (lambda (handle-event-info event)
-            (insert-new-todo*!! 0)
-            #t
-          )
-        )
-      ))
-    )
-
-    (define (get-module-text*)
-      (define prefix
-        (if (send (send this get-cone-root) is-main-module?)
-          "Main module"
-          "Module"
-        )
-      )
-      (format "~a: ~a requires" prefix (get-short-desc-or* (send this get-cone-root) "<nameless module>"))
-    )
-
-    (set! header* (make-object (class ui:list%
-
-      (define/override (get-event-handler)
-        (combine-keyname-event-handlers (list
-          (super get-event-handler)
-          event-handler*
-        ))
-      )
-
-      (define header-header*
-        (make-object ui:var-scalar% this-ent* (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
-      )
-
-      (define (required-module->event-handler* required-module-handle required-module-ui)
-        (combine-keyname-event-handlers (list
-          add-require-event-handler*
-          (create-simple-event-handler "d"
-            (lambda (handle-event-info event)
-              (send (send this-ent* get-cone-root) unrequire!! required-module-handle)
-              (reset-list*!)
-              (when (null? (send this get-children))
-                (select! this)
-              )
-              #t
-            )
-          )
-        ))
-      )
-
-      (define (module<? module-handle-1 module-handle-2)
-        (define (mdesc mh) (get-short-desc-or* mh ""))
-        (string<? (mdesc module-handle-1) (mdesc module-handle-2))
-      )
-
-      (define/public (reset-list*!)
-        (send this clear!)
-        (map-by-index
-          (lambda (i v) (send this insert! i (get-module-required-ui* v)))
-          (sort (send (send this-ent* get-cone-root) get-required-modules) module<?)
-        )
-      )
-
-      (define (get-module-required-ui* required-module-handle)
-        (make-object ui:var-scalar%
-          this-ent*
-          REF-STYLE
-          (thunk (get-short-desc-or* required-module-handle "<nameless module>"))
-          (curry required-module->event-handler* required-module-handle)
-          NOOP-FALLBACK-EVENT-HANDLER
-        )
-      )
-
-      (super-make-object this-ent* this-ent* header-header*)
-
-      (reset-list*!)
-    )))
-    (send header* set-horizontal! #t)
-
-    (set! ui-list* (make-object (class ui:list%
-
-      (define/override (get-event-handler)
-        (combine-keyname-event-handlers (list
-          (super get-event-handler)
-          event-handler*
-        ))
-      )
-
-      (super-make-object this-ent* this-ent* header*)
-    )))
-
-    (map-by-index
-      (lambda (i v) (send ui-list* insert! i (get-module-ui-child* v)))
-      (send (send this get-cone-root) get-body)
     )
   ))
 
@@ -1259,6 +1284,10 @@
 
     (define/public (db-get-list-handle)
       (send this get-cone-root)
+    )
+
+    (define/public (get-pseudo-headers)
+      '()
     )
 
     (define/public (get-header)
@@ -1308,6 +1337,10 @@
         (send this-ent* db-get-list-handle)
       )
 
+      (define/override (get-pseudo-headers)
+        (send this-ent* get-pseudo-headers)
+      )
+
       (super-make-object this-ent* this-ent* child-spawner! (get-header) (get-separator) (get-bookends))
     )))
 
@@ -1318,11 +1351,177 @@
     )
   ))
 
+  (define ent:typical-has-body% (class ent:typical-list% ; abstract
+
+    (init cone-root-handle child-spawner!)
+
+    (define/public (get-has-body-handle)
+      (send this get-cone-root)
+    )
+
+    (define/override (db-insert!! index)
+      (send (get-has-body-handle) insert-into-body!! index)
+    )
+
+    (define/override (db-can-remove? index)
+      (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
+    )
+
+    (define/override (db-remove!! index)
+      (send (get-has-body-handle) remove-from-body!! index)
+    )
+
+    (define/override (db-get-items)
+      (send (get-has-body-handle) get-body)
+    )
+
+    (define/override (db-get-list-handle)
+      (get-has-body-handle)
+    )
+
+    (define/override (get-separator)
+      (make-object ui:const% this NO-STYLE "; ")
+    )
+
+    (define/override (get-bookends)
+      (list
+        (make-object ui:const% this NO-STYLE "{")
+        (make-object ui:const% this NO-STYLE "}")
+      )
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:typical-has-args% (class ent:typical-list% ; abstract
+
+    (init cone-root-handle child-spawner!)
+
+    (define/public (get-has-args-handle)
+      (send this get-cone-root)
+    )
+
+    (define/override (db-insert!! index)
+      (send (get-has-args-handle) insert-arg!! index)
+    )
+
+    (define/override (db-can-remove? index)
+      (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
+    )
+
+    (define/override (db-remove!! index)
+      (send (get-has-args-handle) remove-arg!! index)
+    )
+
+    (define/override (db-get-items)
+      (send (get-has-args-handle) get-args)
+    )
+
+    (define/override (db-get-list-handle)
+      (get-has-args-handle)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:module% (class ent:typical-has-body%
+
+    (init cone-root-handle child-spawner!)
+
+    (define this-ent* this)
+
+    (define event-handler*
+      (combine-keyname-event-handlers (list
+        (create-name-change-handler (thunk (send this get-cone-root)))
+        (create-simple-event-handler "m"
+          (lambda (handle-event-info event)
+            (define module-handle (send this get-cone-root))
+            (cond
+              [(send module-handle is-main-module?)
+                (send module-handle set-main-module!! #f)
+              ]
+              [(send db* get-main-module)
+                (issue-warning "Cannot make main" "Only one module can be the main module")
+              ]
+              [else
+                (send module-handle set-main-module!! #t)
+              ]
+            )
+            #t
+          )
+        )
+        (create-simple-event-handler "d"
+          (lambda (handle-event-info event)
+            (define module-handle (send this get-cone-root))
+            (if (send module-handle can-delete?)
+              (when (navigate-to-fresh-module*! (get-all-modules* module-handle)) (send module-handle delete!!))
+              (issue-warning "Cannot delete module" "Either other modules require this module or contain references to defs in this module")
+            )
+            #t
+          )
+        )
+      ))
+    )
+
+    (define (get-module-text*)
+      (define prefix
+        (if (send (send this get-cone-root) is-main-module?)
+          "Main module"
+          "Module"
+        )
+      )
+      (format "~a: ~a requires:" prefix (get-short-desc-or* (send this get-cone-root) "<nameless module>"))
+    )
+
+    (define/override (get-header)
+      (make-object (class ui:set-list%
+
+        (define/override (db-get-items)
+          (send (send this-ent* get-cone-root) get-required-modules)
+        )
+
+        (define/override (db-add-item!!)
+          (define this-module (send this-ent* get-cone-root))
+          (define module-to-require (get-module-from-user (filter (lambda (m) (send this-module can-require? m)) (get-all-modules*))))
+          (cond
+            [module-to-require
+              (send this-module require!! module-to-require)
+              module-to-require
+            ]
+            [else
+              #f
+            ]
+          )
+        )
+
+        (define/override (db-can-remove-item? to-remove)
+          #t
+        )
+
+        (define/override (db-remove-item!! to-remove)
+          (send (send this-ent* get-cone-root) unrequire!! to-remove)
+        )
+
+        (define/override (get-item-ui-style)
+          REF-STYLE
+        )
+
+        (define header-header*
+          (make-object ui:var-scalar% this-ent* (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
+        )
+
+        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER header-header*)
+      ))
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
   (define ent:invokation% (class ent:typical-list% ; abstract
 
     (init cone-root-handle child-spawner!)
 
-    (abstract should-underline?)
+    (abstract get-header-style)
 
     (define/override (db-insert!! index)
       (super db-insert!! (add1 index))
@@ -1341,14 +1540,7 @@
     )
 
     (define/override (get-header)
-      (make-object ui:var-scalar% this (send (make-object style-delta% (get-style-change-command*)) set-delta-foreground "Cyan") get-header-text* header->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
-    )
-
-    (define/override (get-bookends)
-      (list
-        (make-object ui:const% this NO-STYLE "(")
-        (make-object ui:const% this NO-STYLE ")")
-      )
+      (make-object ui:var-scalar% this (get-header-style) get-header-text* header->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
     )
 
     (define/override (horizontal-by-default?)
@@ -1372,7 +1564,8 @@
 
     (define (header->event-handler* header)
       (define (interaction-function)
-        (request-new-item-creator (send (send this db-get-list-handle) get-visible-referables-underneath) '("legacy" "reference"))
+        (define list-handle (send this db-get-list-handle))
+        (request-new-item-creator list-handle (send list-handle get-visible-referables-underneath) '("legacy" "reference"))
       )
       (define (result-handler new-handle-initializer!!)
         (new-handle-initializer!! (send (get-func-handle*) unassign!!))
@@ -1384,10 +1577,6 @@
       (car (super db-get-items))
     )
 
-    (define (get-style-change-command*)
-      (if (should-underline?) 'change-toggle-underline 'change-nothing)
-    )
-
     (super-make-object cone-root-handle child-spawner!)
   ))
 
@@ -1395,8 +1584,8 @@
 
     (init cone-root-handle child-spawner!)
 
-    (define/override (should-underline?)
-      #f
+    (define/override (get-header-style)
+      LEGACY-STYLE
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -1406,8 +1595,8 @@
 
     (init cone-root-handle child-spawner!)
 
-    (define/override (should-underline?)
-      #t
+    (define/override (get-header-style)
+      REF-STYLE
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -1469,153 +1658,24 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:lambda-like% (class ent% ; abstract
+  (define ent:lambda-like% (class ent:typical-has-body% ; abstract
 
     (init cone-root-handle child-spawner!)
 
     (abstract get-params-header)
     (abstract get-lambda-handle)
 
-    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
-    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
-    ; get-root-ui-item
-    (super-make-object cone-root-handle)
-
-    (define this-ent* this)
-
-    (define params-separator* (make-object ui:const% this NO-STYLE ", "))
-
-    (define ui-params* (make-object (class ui:dynamic-slotted-list%
-
-      (define/override (db-insert!! index)
-        (define first-opt-index (get-first-opt-index*))
-        (if (<= index first-opt-index)
-          (send (db-get-list-handle) insert-required-param!! index)
-          (send (db-get-list-handle) insert-optional-param!! (- index first-opt-index))
-        )
-      )
-
-      (define/override (db-can-remove? index)
-        (define first-opt-index (get-first-opt-index*))
-        (if (< index first-opt-index)
-          (send (db-get-list-handle) can-remove-required-param? index)
-          (send (db-get-list-handle) can-remove-optional-param? (- index first-opt-index))
-        )
-      )
-
-      (define/override (db-remove!! index)
-        (define first-opt-index (get-first-opt-index*))
-        (if (< index first-opt-index)
-          (send (db-get-list-handle) remove-required-param!! index)
-          (send (db-get-list-handle) remove-optional-param!! (- index first-opt-index))
-        )
-      )
-
-      (define/override (db-get-items)
-        (send (db-get-list-handle) get-all-params)
-      )
-
-      (define/override (db-get-list-handle)
-        (get-lambda-handle)
-      )
-
-      (define/override (get-event-handler)
-        (combine-keyname-event-handlers (list
-          (send this create-movement-handler)
-          (send this create-insert-start-handler new-param-creator)
-          (send this create-insert-end-handler new-param-creator)
-        ))
-      )
-
-      (define/override (child-slot->event-handler slot)
-        (combine-keyname-event-handlers (list
-          (send this create-insert-before-handler slot new-param-creator)
-          (send this create-insert-after-handler slot new-param-creator)
-          (send this create-remove-handler slot)
-          (create-simple-event-handler "r"
-            (lambda (handle-event-info event)
-              (define first-opt-index (get-first-opt-index*))
-              (define slot-index (send this get-child-index slot))
-              (when (= slot-index first-opt-index)
-                (send (db-get-list-handle) make-last-optional-param-required!!)
-                (select! slot)
-              )
-              #t
-            )
-          )
-          (create-simple-event-handler "o"
-            (lambda (handle-event-info event)
-              (define first-opt-index (get-first-opt-index*))
-              (define slot-index (send this get-child-index slot))
-              (when (= slot-index (sub1 first-opt-index))
-                (send (db-get-list-handle) make-last-required-param-optional!!)
-                (select! slot)
-              )
-              #t
-            )
-          )
-        ))
-      )
-
-      (define (get-first-opt-index*)
-        (length (send (db-get-list-handle) get-required-params))
-      )
-
-      (define (new-param-creator visible-referables)
-        (define short-desc
-          (get-text-from-user
-            ; TODO we used to say "for ~ath (required|optional) param" but now we can't. Really we ought to be able to do this
-            "Enter short descriptor for param"
-            "A short descriptor, one or a few words, to identify this param"
-            #:validate non-empty-string?
-          )
-        )
-        (and
-          (and short-desc (non-empty-string? short-desc))
-          (lambda (param) (send param set-short-desc!! short-desc) param)
-        )
-      )
-
-      (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER child-spawner! (get-params-header) params-separator*)
-    )))
-
-    (send ui-params* set-horizontal! #t)
-
-    (define body-separator* (make-object ui:const% this NO-STYLE "; "))
-
-    (define bookends* (list
-      (make-object ui:const% this NO-STYLE "{")
-      (make-object ui:const% this NO-STYLE "}")
-    ))
-
-    (define ui-body* (make-object (class ui:dynamic-slotted-list%
-
-      (define/override (db-insert!! index)
-        (send (db-get-list-handle) insert-into-body!! index)
-      )
-
-      (define/override (db-can-remove? index)
-        (is-a? (list-ref (db-get-items) index) zinal:db:unassigned%%)
-      )
-
-      (define/override (db-remove!! index)
-        (send (db-get-list-handle) remove-from-body!! index)
-      )
-
-      (define/override (db-get-items)
-        (send (db-get-list-handle) get-body)
-      )
-
-      (define/override (db-get-list-handle)
-        (get-lambda-handle)
-      )
-
-      (super-make-object this-ent* this-ent* child-spawner! ui-params* body-separator*)
-    )))
-
-    (define/override (get-root-ui-item)
-      ui-body*
+    (define/override (get-has-body-handle)
+      (get-lambda-handle)
     )
+
+    (define child-spawner*! child-spawner!)
+
+    (define/override (get-header)
+      (make-object ui:params-list% this this child-spawner*! (get-lambda-handle) (get-params-header))
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
   ))
 
   (define ent:lambda% (class ent:lambda-like%
@@ -1640,7 +1700,7 @@
     (define this-ent* this)
 
     (define/override (get-params-header)
-      (make-object (class ui:def-list%
+      (make-object (class ui:possibly-public-def-list%
 
         (define/override (get-default-name-text)
           "<nameless def>"
@@ -1671,8 +1731,8 @@
 
     (define this-ent* this)
 
-    (define header*
-      (make-object (class ui:def-list%
+    (define/override (get-header)
+      (make-object (class ui:possibly-public-def-list%
 
         (define/override (get-default-name-text)
           "<nameless def>"
@@ -1682,7 +1742,156 @@
       ))
     )
 
-    (super-make-object cone-root-handle child-spawner! header*)
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:short-def% (class ent:short-definition%
+
+    (init cone-root-handle child-spawner!)
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:short-func-def% (class ent:short-definition%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-synopsis-text)
+      (has-params->short-params-string (send (send this get-cone-root) get-expr))
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:short-method-definition% (class ent% ; abstract
+
+    (init cone-root-handle child-spawner!)
+
+    (abstract get-prefix-string)
+    (abstract get-method-name)
+    (abstract get-name-change-handler)
+
+    (define this-ent* this)
+
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
+
+    (define ui-item* (make-object (class ui:list%
+
+      (define (get-params-text*)
+        (format "= ~a" (has-params->short-params-string (send (send this-ent* get-cone-root) get-lambda)))
+      )
+
+      (define/override (get-event-handler)
+        (combine-keyname-event-handlers (list
+          (super get-event-handler)
+          (create-navigate-to-root-handler* (send this-ent* get-cone-root))
+        ))
+      )
+
+      (super-make-object this-ent* this-ent*)
+
+      (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE (get-prefix-string)))
+      (send this insert! 1 (make-object ui:var-scalar% this-ent* DEF-STYLE (thunk (get-method-name)) (thunk* (get-name-change-handler)) NOOP-FALLBACK-EVENT-HANDLER))
+      ; TODO - this and other places will need to change to var-scalar if we ever get to a point of saving ui trees when switching roots
+      (send this insert! 2 (make-object ui:const% this-ent* NO-STYLE (get-params-text*)))
+      (send this set-horizontal! #t)
+    )))
+
+    (define/override (get-root-ui-item)
+      ui-item*
+    )
+  ))
+
+  (define ent:short-define-method% (class ent:short-method-definition%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-prefix-string)
+      "method"
+    )
+
+    (define/override (get-method-name)
+      (get-short-desc-or* (send (send this get-cone-root) get-method) "<nameless method>")
+    )
+
+    (define/override (get-name-change-handler)
+      (create-name-change-handler (thunk (send (send this get-cone-root) get-method)))
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:short-override-legacy-method% (class ent:short-method-definition%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-prefix-string)
+      "override legacy method"
+    )
+
+    (define/override (get-method-name)
+      (send (send this get-cone-root) get-legacy-method-name)
+    )
+
+    (define/override (get-name-change-handler)
+      (create-legacy-method-name-change-handler (thunk (send this get-cone-root)))
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:short-class-instance% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define this-ent* this)
+
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
+
+    (define ui-item* (make-object (class ui:list%
+
+      (define (get-super-text*)
+        (define super-class-handle (send (send this-ent* get-cone-root) get-super-class))
+        (if (is-a? super-class-handle zinal:db:legacy-link%%)
+          (send super-class-handle get-name)
+          (get-short-desc-or* (send super-class-handle get-referable) "<some class>")
+        )
+      )
+
+      (define/override (get-event-handler)
+        (combine-keyname-event-handlers (list
+          (super get-event-handler)
+          (create-navigate-to-root-handler* (send this-ent* get-cone-root))
+        ))
+      )
+
+      (super-make-object this-ent* this-ent*)
+
+      (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE "new anonymous"))
+      (send this insert! 1 (make-object ui:var-scalar% this-ent* REF-STYLE get-super-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+      (send this set-horizontal! #t)
+    )))
+
+    (define/override (get-root-ui-item)
+      ui-item*
+    )
+  ))
+
+  (define ent:short-define-class% (class ent:short-definition%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-prefix-text)
+      "class"
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
   ))
 
   (define ent:assert% (class ent%
@@ -1709,9 +1918,9 @@
       (define format-string-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
       (child-spawner! format-string-slot* (send (send this-ent* get-cone-root) get-format-string) this)
 
-      (send this insert! 0 (make-object ui:const% this ASSERT-STYLE "assert"))
+      (send this insert! 0 (make-object ui:const% this-ent* ASSERT-STYLE "assert"))
       (send this insert! 1 assertion-slot*)
-      (send this insert! 2 (make-object ui:const% this ASSERT-STYLE ":"))
+      (send this insert! 2 (make-object ui:const% this-ent* ASSERT-STYLE ":"))
       (send this insert! 3 format-string-slot*)
     )))
 
@@ -1789,7 +1998,7 @@
 
     (define this-ent* this)
 
-    (define header*
+    (define/override (get-header)
       (make-object (class ui:def-list%
 
         (define/override (get-default-name-text)
@@ -1800,7 +2009,7 @@
       ))
     )
 
-    (super-make-object cone-root-handle child-spawner! header*)
+    (super-make-object cone-root-handle child-spawner!)
   ))
 
   (define ent:required-param% (class ent%
@@ -1860,6 +2069,565 @@
     (super-make-object cone-root-handle)
   ))
 
+  (define ent:class% (class ent:typical-has-body% ; abstract
+
+    (init cone-root-handle child-spawner!)
+
+    ; a list of ui:item% that should be prepended to the header. Other than this list, the header starts with the superclass slot
+    (abstract get-header-prefix-list)
+
+    (define this-ent* this)
+    (define child-spawner*! child-spawner!)
+
+    (define/override (get-header)
+      (define header-header (make-object (class ui:list%
+
+        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
+
+        (define super-class-slot* #f)
+
+        (define (super-class-slot->event-handler slot)
+          (define class-handle (send this-ent* get-cone-root))
+          (define (interaction-function)
+            (cond
+              [(send class-handle can-set-super-class?)
+                (define choice (choose-zinal-or-legacy "Is the super class racket or zinal?" "Choose whether to refer to a legacy class or zinal class"))
+                (and choice
+                  (if (equal? choice 'legacy)
+                    (get-legacy-from-user)
+                    (get-referable-from-user
+                      (filter
+                        (conjoin (negate (curry handles-equal? class-handle)) (curryr is-a? zinal:db:define-class%%))
+                        (send class-handle get-visible-referables-underneath)
+                      )
+                    )
+                  )
+                )
+              ]
+              [else
+                (issue-warning "Can't change super class" "Changing the super class would orphan a method definition or super invokation, you hapless fool!")
+                #f
+              ]
+            )
+          )
+          (define (result-handler legacy-name/define-class-handle)
+            (define new-handle
+              (if (string? legacy-name/define-class-handle)
+                (send class-handle set-legacy-super-class!! #f legacy-name/define-class-handle)
+                (send class-handle set-super-class!! legacy-name/define-class-handle)
+              )
+            )
+            (spawn-entity*! super-class-slot* new-handle this)
+            (select! super-class-slot*)
+          )
+          (create-interaction-dependent-event-handler interaction-function result-handler "s")
+        )
+
+        (define header-prefix-list* (get-header-prefix-list))
+        (define prefix-size* (length header-prefix-list*))
+        (map-by-index
+          (lambda (index item) (send this insert! index item))
+          header-prefix-list*
+        )
+        (set! super-class-slot* (make-object slot% super-class-slot->event-handler NOOP-FALLBACK-EVENT-HANDLER))
+        (child-spawner*! super-class-slot* (send (send this-ent* get-cone-root) get-super-class) this)
+        (send this insert! prefix-size* super-class-slot*)
+        (send this insert! (add1 prefix-size*) (make-object ui:const% this-ent* NO-STYLE "implementing:"))
+      )))
+
+      (make-object ui:interface-set-list% this-ent* NOOP-FALLBACK-EVENT-HANDLER header-header)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:class-instance% (class ent:class%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-header-prefix-list)
+      (list
+        (make-object ui:const% this NO-STYLE "create anonymous instance of")
+      )
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:define-class% (class ent:class%
+
+    (init cone-root-handle child-spawner!)
+
+    (define child-spawner*! child-spawner!)
+    (define this-ent* this)
+    (define params-list* #f)
+    (define abstracts* #f)
+
+    (define (name-ui->event-handler* name-ui)
+      (create-name-change-handler (thunk (send this-ent* get-cone-root)))
+    )
+
+    (define (get-name-text*)
+      (get-short-desc-or* (send this-ent* get-cone-root) "<unnamed class>")
+    )
+
+    (define/override (get-header-prefix-list)
+      (list
+        (make-object ui:const% this-ent* NO-STYLE "class")
+        (make-object ui:var-scalar% this-ent* DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
+        (make-object ui:const% this-ent* NO-STYLE "subclass of")
+      )
+    )
+
+    (define/public (reset-abstracts)
+      (when abstracts* (send abstracts* reset!))
+    )
+
+    (define (get-abstracts*)
+      (make-object (class ui:set-list%
+
+        (define/override (db-get-items)
+          (define class-handle (send this-ent* get-cone-root))
+          (filter (lambda (m) (send class-handle is-method-abstract? m)) (send class-handle get-direct-methods))
+        )
+
+        (define/override (db-add-item!!)
+          (use-text-from-user
+            "Enter short descriptor for the new method"
+            "A short descriptor, one or a few words, to identify this method"
+            (lambda (result)
+              (send (send this-ent* get-cone-root) add-direct-method!! result)
+            )
+            non-empty-string?
+          )
+        )
+
+        (define/override (db-can-remove-item? to-remove)
+          (send (send this-ent* get-cone-root) can-remove-direct-method? to-remove)
+        )
+
+        (define/override (db-remove-item!! to-remove)
+          (send (send this-ent* get-cone-root) remove-direct-method!! to-remove)
+        )
+
+        (define/override (get-item-ui-style)
+          DEF-STYLE
+        )
+
+        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER (make-object ui:const% this NO-STYLE "abstract methods:"))
+      ))
+    )
+
+    (define/override (get-pseudo-headers)
+      (unless params-list*
+        (set! params-list*
+          (make-object ui:params-list% this NOOP-FALLBACK-EVENT-HANDLER child-spawner*! (send this get-cone-root) (make-object ui:const% this NO-STYLE "init params:"))
+        )
+        (set! abstracts*
+          (get-abstracts*)
+        )
+      )
+      (list
+        params-list*
+        abstracts*
+      )
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:define-method% (class ent:lambda-like%
+
+    (init cone-root-handle child-spawner!)
+
+    (define this-ent* this)
+
+    (define/override (get-params-header)
+      (make-object (class ui:list%
+
+        (define (name-ui->event-handler* name-ui)
+          (create-name-change-handler get-method*)
+        )
+
+        (define (get-name-text*)
+          (get-short-desc-or* (get-method*) "<unnamed method>")
+        )
+
+        (define (get-method*)
+          (send (send this-ent* get-cone-root) get-method)
+        )
+
+        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
+
+        (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE "method"))
+        (send this insert! 1 (make-object ui:var-scalar% this-ent* DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+        (send this insert! 2 (make-object ui:const% this-ent* NO-STYLE "= λ:"))
+        (send this set-horizontal! #t)
+      ))
+    )
+
+    (define/override (get-lambda-handle)
+      (send (send this get-cone-root) get-lambda)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:override-legacy-method% (class ent:lambda-like%
+
+    (init cone-root-handle child-spawner!)
+
+    (define this-ent* this)
+
+    (define/override (get-params-header)
+      (make-object (class ui:list%
+
+        (define (name-ui->event-handler* name-ui)
+          (create-legacy-method-name-change-handler (thunk (send this-ent* get-cone-root)))
+        )
+
+        (define (get-name-text*)
+          (send (send this-ent* get-cone-root) get-legacy-method-name)
+        )
+
+        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
+
+        (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE "override legacy"))
+        (send this insert! 1 (make-object ui:var-scalar% this-ent* DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+        (send this insert! 2 (make-object ui:const% this-ent* NO-STYLE "= λ:"))
+        (send this set-horizontal! #t)
+      ))
+    )
+
+    (define/override (get-lambda-handle)
+      (send (send this get-cone-root) get-lambda)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:invoke-method% (class ent:typical-has-args% ; abstract
+
+    (init cone-root-handle child-spawner!)
+
+    (abstract get-method-name)
+    (abstract get-method-style)
+    (abstract get-new-method-from-user)
+    (abstract set-method!!)
+
+    (define/public (get-alternative-object-ui)
+      #f
+    )
+
+    (define this-ent* this)
+    (define child-spawner*! child-spawner!)
+
+    (define/override (get-header)
+      (make-object (class ui:slotted-list%
+
+        (define/override (get-visible-referables-for-slot slot)
+          (send (send this-ent* get-cone-root) get-visible-referables-after)
+        )
+
+        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
+
+        (define (method-ui->event-handler* method-ui)
+          (define (interaction-function)
+            (get-new-method-from-user)
+          )
+          (define (result-handler result-from-user)
+            (set-method!! result-from-user)
+          )
+          (create-interaction-dependent-event-handler interaction-function result-handler "s")
+        )
+
+        (define method-ui* (make-object ui:var-scalar% this-ent* (get-method-style) (thunk (get-method-name)) method-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+        (define alternative-object-ui* (get-alternative-object-ui))
+        (cond
+          [alternative-object-ui*
+            (send this insert! 0 alternative-object-ui*)
+            (send this insert! 1 method-ui*)
+          ]
+          [else
+            (define object-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
+            (child-spawner*! object-slot* (send (send this-ent* get-cone-root) get-object) this)
+            (send this insert! 0 object-slot*)
+            (send this insert! 1 (make-object ui:const% this-ent* NO-STYLE "⇒"))
+            (send this insert! 2 method-ui*)
+          ]
+        )
+        (send this set-horizontal! #t)
+      ))
+    )
+
+    (define/override (horizontal-by-default?)
+      #t
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:invoke-zinal-method% (class ent:invoke-method%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-method-name)
+      (get-short-desc-or* (send (send this get-cone-root) get-method) "<unnamed method>")
+    )
+
+    (define/override (get-method-style)
+      REF-STYLE
+    )
+
+    (define/override (get-new-method-from-user)
+      (get-method-from-user (send (send this get-cone-root) get-visible-referables-after))
+    )
+
+    (define/override (set-method!! method-handle)
+      (send (send this get-cone-root) set-method!! method-handle)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:invoke-legacy-method% (class ent:invoke-method%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-method-name)
+      (send (send this get-cone-root) get-legacy-method-name)
+    )
+
+    (define/override (get-method-style)
+      LEGACY-STYLE
+    )
+
+    (define/override (get-new-method-from-user)
+      (use-text-from-user
+        "Enter the name of the racket method"
+        "It's not hard ..."
+        identity
+        non-empty-string?
+      )
+    )
+
+    (define/override (set-method!! name)
+      (send (send this get-cone-root) set-legacy-method-name!! name)
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:this-invoke-zinal-method% (class ent:invoke-zinal-method%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-alternative-object-ui)
+      (make-object ui:const% this CONST-VALUE-STYLE "⊙")
+    )
+
+    (define/override (get-new-method-from-user)
+      (define class-handle (get-containing-class* (send this get-cone-root)))
+      (auto-complete*
+        "Select a method"
+        "Start typing bits and pieces of the desired method's short descriptor"
+        (map (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>"))) (send class-handle get-all-methods))
+        handles-equal?
+      )
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:this-invoke-legacy-method% (class ent:invoke-legacy-method%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-alternative-object-ui)
+      (make-object ui:const% this CONST-VALUE-STYLE "⊙")
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:super-invoke-zinal-method% (class ent:invoke-zinal-method%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-alternative-object-ui)
+      (make-object ui:const% this CONST-VALUE-STYLE "🡡")
+    )
+
+    (define/override (get-new-method-from-user)
+      (get-super-method-from-user (send this get-cone-root))
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:super-invoke-legacy-method% (class ent:invoke-legacy-method%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-alternative-object-ui)
+      (make-object ui:const% this CONST-VALUE-STYLE "🡡")
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:this% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define ui-item*
+      (make-object ui:var-scalar% this CONST-VALUE-STYLE (const "⊙") THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-item*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:create-object% (class ent:typical-has-args%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (horizontal-by-default?)
+      #t
+    )
+
+    (define this-ent* this)
+    (define child-spawner*! child-spawner!)
+
+    (define/override (get-header)
+      (make-object (class ui:slotted-list%
+
+        (define/override (get-visible-referables-for-slot slot)
+          (send (send this-ent* get-cone-root) get-visible-referables-after)
+        )
+
+        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
+
+        (send this insert! 0 (make-object ui:const% this-ent* (send (make-object style-delta%) set-delta-foreground "Lime") "☼"))
+        (define class-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
+        (child-spawner*! class-slot* (send (send this-ent* get-cone-root) get-class-node) this)
+        (send this insert! 1 class-slot*)
+        (send this set-horizontal! #t)
+      ))
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:super-init% (class ent:typical-has-args%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (horizontal-by-default?)
+      #t
+    )
+
+    (define this-ent* this)
+
+    (define/override (get-header)
+      (make-object ui:const% this-ent* (send (make-object style-delta%) set-delta-foreground "Lime") "🡡☼")
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
+  (define ent:interface% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define this-ent* this)
+
+    ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
+    ; initialization, so we can resolve a cyclic dependency by calling super-make-object before overriding
+    ; get-root-ui-item
+    (super-make-object cone-root-handle)
+
+    (define header-header*
+      (make-object (class ui:list%
+
+        (define (name-ui->event-handler* name-ui)
+          (create-name-change-handler (thunk (send this-ent* get-cone-root)))
+        )
+
+        (define (get-name-text*)
+          (get-short-desc-or* (send this-ent* get-cone-root) "<unnamed interface>")
+        )
+
+        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
+
+        (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE "interface"))
+        (send this insert! 1 (make-object ui:var-scalar% this-ent* DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+        (send this set-horizontal! #t)
+      ))
+    )
+
+    (define header* (make-object ui:interface-set-list% this NOOP-FALLBACK-EVENT-HANDLER header-header*))
+
+    (define ui-item*
+      (make-object (class ui:set-list%
+
+        (define/override (get-event-handler)
+          (combine-keyname-event-handlers (list
+            (super get-event-handler)
+            (create-simple-event-handler "d"
+              (lambda (handle-event-info event)
+                (define interface-handle (send this-ent* get-cone-root))
+                (if (send interface-handle can-delete?)
+                  (when (navigate-to-fresh-module*! (get-all-modules*)) (send interface-handle delete!!))
+                  (issue-warning "Cannot delete interface" "Either this interface is a supertype of something or a reference to it exists")
+                )
+                #t
+              )
+            )
+          ))
+        )
+
+        (define/override (db-get-items)
+          (send (send this-ent* get-cone-root) get-direct-methods)
+        )
+
+        (define/override (db-add-item!!)
+          (use-text-from-user
+            "Enter a short description of the new method"
+            "A short descriptor, one or a few words, to identify the new method"
+            (lambda (result)
+              (send (send this-ent* get-cone-root) add-direct-method!! result)
+            )
+            non-empty-string?
+          )
+        )
+
+        (define/override (db-can-remove-item? to-remove)
+          (send (send this-ent* get-cone-root) can-remove-direct-method? to-remove)
+        )
+
+        (define/override (db-remove-item!! to-remove)
+          (send (send this-ent* get-cone-root) remove-direct-method!! to-remove)
+        )
+
+        (define/override (get-item-ui-style)
+          DEF-STYLE
+        )
+
+        (super-make-object this-ent* this-ent* header*)
+
+        (send this set-horizontal! #f)
+      ))
+    )
+
+    (define/override (get-root-ui-item)
+      ui-item*
+    )
+  ))
+
   ; UI IMPL
 
   (define ui:item% (class* object% (zinal:ui:item%% event-handler%% fallback-event-handler%%) ; abstract
@@ -1905,8 +2673,8 @@
       (cond
         [(not parent*)
           ; This is a special case - normally we return #t from every event handler to prevent a fallback handler from getting to handle the event,
-          ; but in the case of trying to go "out" when we're at the top level, we allow the fallback to handle it in case we want to go from a module
-          ; child back to the containing module
+          ; but in the case of trying to go "out" when we're at the top level, we allow the fallback to handle it in case we want to go from a root
+          ; child back to the containing root
           (send handle-event-info set-wasnt-handled!)
         ]
         [(send parent* horizontal?)
@@ -2109,7 +2877,7 @@
 
     (define header* header)
     (when header* (send header* set-parent! this))
-    (define separator* (or separator (make-object ui:const% this NO-STYLE " ")))
+    (define separator* (or separator (make-object ui:const% parent-ent NO-STYLE " ")))
     (send separator* set-parent! this)
     (define bookends* bookends)
     (when bookends* (for-each (lambda (b) (send b set-parent! this)) bookends*))
@@ -2155,33 +2923,40 @@
       (set! horizontal*? new-value)
     )
 
-    (define/public (insert! index new-child)
+    (define/public (insert-but-dont-select! index new-child)
       (define before (take children* index))
       (define after (drop children* index))
       (set! children* (append before (cons new-child after)))
       (when (is-a? new-child zinal:ui:item%%) (send new-child set-parent! this))
+    )
+
+    (define/public (insert! index new-child)
+      (insert-but-dont-select! index new-child)
       (select! new-child)
     )
 
-    (define/public (remove! child)
-      (define index (get-child-index child))
-      (assert "cannot remove child that's not even in the list" index)
+    (define/public (remove! child/index)
+      (define is-index? (number? child/index))
+      (define index (if is-index? child/index (get-child-index child/index)))
+      (define child (if is-index? (list-ref children* child/index) child/index))
       (set! children* (remq child children*))
-      (define num-children (length children*))
-      (define selection
-        (cond
-          [(< index num-children)
-            (list-ref children* index)
-          ]
-          [(> num-children 0)
-            (last children*)
-          ]
-          [else
-            this
-          ]
+      (when (eq? selected* (slot/ui-item->ui-item child))
+        (define num-children (length children*))
+        (define selection
+          (cond
+            [(< index num-children)
+              (list-ref children* index)
+            ]
+            [(> num-children 0)
+              (last children*)
+            ]
+            [else
+              this
+            ]
+          )
         )
+        (select! selection)
       )
-      (select! selection)
     )
 
     (define/public (clear!)
@@ -2222,7 +2997,7 @@
 
   (define ui:def-list% (class ui:list% ; abstract
 
-    (init parent-ent)
+    (init parent-ent [fallback-event-handler NOOP-FALLBACK-EVENT-HANDLER])
 
     (abstract get-default-name-text)
 
@@ -2244,12 +3019,47 @@
       (get-short-desc-or* (db-get-def-handle) (get-default-name-text))
     )
 
-    (define header* (make-object ui:list% parent-ent NOOP-FALLBACK-EVENT-HANDLER))
-    (send header* set-horizontal! #t)
-    (send header* insert! 0 (make-object ui:var-scalar% parent-ent DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
-    (send header* insert! 1 (make-object ui:const% parent-ent NO-STYLE (get-bridge-text)))
+    (super-make-object parent-ent fallback-event-handler)
 
-    (super-make-object parent-ent NOOP-FALLBACK-EVENT-HANDLER header*)
+    (send this set-horizontal! #t)
+    (send this insert! 0 (make-object ui:var-scalar% parent-ent DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+    (send this insert! 1 (make-object ui:const% parent-ent NO-STYLE (get-bridge-text)))
+  ))
+
+  (define ui:possibly-public-def-list% (class ui:def-list% ; abstract
+
+    (init parent-ent [fallback-event-handler NOOP-FALLBACK-EVENT-HANDLER])
+
+    (define/public (get-prefix-text)
+      #f
+    )
+
+    (define public* (make-object ui:const% parent-ent (send (make-object style-delta%) set-delta-foreground "Lime") "public"))
+
+    (define (update-publicity-ui*)
+      (define db-def-handle (send this db-get-def-handle))
+      (when (can-be-public*? db-def-handle)
+        (if (public*? db-def-handle)
+          (send this insert-but-dont-select! 0 public*)
+          (when (eq? public* (first (send this get-children))) (send this remove! 0))
+        )
+      )
+    )
+
+    (define/override (get-event-handler)
+      (combine-keyname-event-handlers (list
+        (super get-event-handler)
+        (create-modify-publicity-handler* (thunk (send this db-get-def-handle)) update-publicity-ui*)
+      ))
+    )
+
+    (super-make-object parent-ent fallback-event-handler)
+
+    (when (get-prefix-text)
+      (send this insert! 0 (make-object ui:const% parent-ent NO-STYLE (get-prefix-text)))
+    )
+
+    (update-publicity-ui*)
   ))
 
   (define ui:slotted-list% (class ui:list% ; abstract
@@ -2282,6 +3092,11 @@
     (abstract db-get-items)
     (abstract db-get-list-handle)
 
+    ; items that are not part of the header, but which will be prepended to the list
+    (define/public (get-pseudo-headers)
+      '()
+    )
+
     (define/override (get-event-handler)
       (combine-keyname-event-handlers (list
         (super get-event-handler)
@@ -2302,16 +3117,16 @@
     )
 
     (define/override (get-visible-referables-for-slot slot)
-      (get-visible-referables-for-hypothetical-index (send this get-child-index slot))
+      (get-visible-referables-for-hypothetical-index (get-ui-index* slot))
     )
 
     (define/public (remove-slot!! slot)
-      (db-remove!! (send this get-child-index slot))
+      (db-remove!! (get-db-index* slot))
       (send this remove! slot)
     )
 
     (define/public (create-insert-start-handler [new-item-creator request-new-item-creator])
-      (create-typical-insert-slot-handler (const 0) "I" new-item-creator)
+      (create-typical-insert-slot-handler get-offset* "I" new-item-creator)
     )
 
     (define/public (create-insert-end-handler [new-item-creator request-new-item-creator])
@@ -2319,24 +3134,21 @@
     )
 
     (define/public (create-insert-before-handler slot [new-item-creator request-new-item-creator])
-      (define (get-index) (send this get-child-index slot))
-      (create-typical-insert-slot-handler get-index "i" new-item-creator)
+      (create-typical-insert-slot-handler (thunk (get-ui-index* slot)) "i" new-item-creator)
     )
 
     (define/public (create-insert-after-handler slot [new-item-creator request-new-item-creator])
-      (define (get-index) (add1 (send this get-child-index slot)))
-      (create-typical-insert-slot-handler get-index "a" new-item-creator)
+      (create-typical-insert-slot-handler (thunk (add1 (get-ui-index* slot))) "a" new-item-creator)
     )
 
     (define/public (create-insert-todo-handler slot)
-      (define (get-index) (add1 (send this get-child-index slot)))
-      (create-typical-insert-slot-handler get-index "o" new-unassigned-creator)
+      (create-typical-insert-slot-handler (thunk (add1 (get-ui-index* slot))) "o" new-unassigned-creator)
     )
 
     (define/public (create-remove-handler slot)
       (create-simple-event-handler "d"
         (lambda (handle-event-info event)
-          (when (db-can-remove? (send this get-child-index slot)) (remove-slot!! slot))
+          (when (db-can-remove? (get-db-index* slot)) (remove-slot!! slot))
           #t
         )
       )
@@ -2346,7 +3158,7 @@
       (create-simple-event-handler "d"
         (lambda (handle-event-info event)
           (cond
-            [(db-can-remove? (send this get-child-index slot)) (remove-slot!! slot)]
+            [(db-can-remove? (get-db-index* slot)) (remove-slot!! slot)]
             [(unassignable? (slot->db-handle slot)) (reassign-slot*!! slot this)]
           )
           #t
@@ -2354,16 +3166,36 @@
       )
     )
 
-    (define (get-visible-referables-for-hypothetical-index index)
-      (get-visible-referables-for-hypothetical-index* (db-get-list-handle) (db-get-items) index)
+    (define (get-offset*)
+      (length (get-pseudo-headers))
     )
 
-    (define (create-insert-slot-handler get-index interaction->new-handle-initializer!! keyname)
+    (define (db-index->ui-index* db-index)
+      (+ db-index (get-offset*))
+    )
+
+    (define (ui-index->db-index* ui-index)
+      (- ui-index (get-offset*))
+    )
+
+    (define (get-ui-index* slot)
+      (send this get-child-index slot)
+    )
+
+    (define (get-db-index* slot)
+      (ui-index->db-index* (get-ui-index* slot))
+    )
+
+    (define (get-visible-referables-for-hypothetical-index ui-index)
+      (get-visible-referables-for-hypothetical-index* (db-get-list-handle) (db-get-items) (ui-index->db-index* ui-index))
+    )
+
+    (define (create-insert-slot-handler get-ui-index interaction->new-handle-initializer!! keyname)
       (define (result-handler new-handle-initializer!!)
-        (define index (get-index))
-        (define intermediate-handle (db-insert!! index))
+        (define ui-index (get-ui-index))
+        (define intermediate-handle (db-insert!! (ui-index->db-index* ui-index)))
         (define new-handle (new-handle-initializer!! intermediate-handle))
-        (insert-new-slot!! index new-handle)
+        (insert-new-slot! ui-index new-handle)
       )
       (create-interaction-dependent-event-handler
         interaction->new-handle-initializer!!
@@ -2372,17 +3204,17 @@
       )
     )
 
-    (define (create-typical-insert-slot-handler get-index keyname [new-item-creator request-new-item-creator])
+    (define (create-typical-insert-slot-handler get-ui-index keyname [new-item-creator request-new-item-creator])
       (define interaction->new-handle-initializer!!
-        (thunk (new-item-creator (get-visible-referables-for-hypothetical-index (get-index))))
+        (thunk (new-item-creator (db-get-list-handle) (get-visible-referables-for-hypothetical-index (get-ui-index))))
       )
-      (create-insert-slot-handler get-index interaction->new-handle-initializer!! keyname)
+      (create-insert-slot-handler get-ui-index interaction->new-handle-initializer!! keyname)
     )
 
-    (define (insert-new-slot!! index slot-handle [child-spawner*! spawn-entity*!])
+    (define (insert-new-slot! ui-index slot-handle [child-spawner*! spawn-entity*!])
       (define new-slot (make-object slot% child-slot->event-handler* this))
       (child-spawner*! new-slot slot-handle this)
-      (send this insert! index new-slot)
+      (send this insert! ui-index new-slot)
     )
 
     (define (child-slot->event-handler* slot)
@@ -2392,22 +3224,278 @@
     (super-make-object parent-ent fallback-event-handler header separator bookends)
 
     (map-by-index
-      (lambda (i v) (insert-new-slot!! i v child-spawner!))
+      (lambda (ui-index item) (send this insert! ui-index item))
+      (get-pseudo-headers)
+    )
+    (map-by-index
+      (lambda (db-index db-item) (insert-new-slot! (db-index->ui-index* db-index) db-item child-spawner!))
       (db-get-items)
     )
   ))
 
-  ; HELPER FUNCTIONS
+  (define ui:params-list% (class ui:dynamic-slotted-list%
 
-  (define (create-module*!!)
-    (define module-name
-      (get-text-from-user
-        "Enter the new module's name"
-        "A short descriptor, one or a few words, to name this module"
-        #:validate non-empty-string?
+    (init parent-ent fallback-event-handler child-spawner! has-params-handle [header #f])
+
+    (define has-params-handle* has-params-handle)
+
+    (define/override (db-insert!! index)
+      (define first-opt-index (get-first-opt-index*))
+      (if (<= index first-opt-index)
+        (send (db-get-list-handle) insert-required-param!! index)
+        (send (db-get-list-handle) insert-optional-param!! (- index first-opt-index))
       )
     )
-    (and module-name (non-empty-string? module-name) (send db* create-module!! module-name))
+
+    (define/override (db-can-remove? index)
+      (define first-opt-index (get-first-opt-index*))
+      (if (< index first-opt-index)
+        (send (db-get-list-handle) can-remove-required-param? index)
+        (send (db-get-list-handle) can-remove-optional-param? (- index first-opt-index))
+      )
+    )
+
+    (define/override (db-remove!! index)
+      (define first-opt-index (get-first-opt-index*))
+      (if (< index first-opt-index)
+        (send (db-get-list-handle) remove-required-param!! index)
+        (send (db-get-list-handle) remove-optional-param!! (- index first-opt-index))
+      )
+    )
+
+    (define/override (db-get-items)
+      (send (db-get-list-handle) get-all-params)
+    )
+
+    (define/override (db-get-list-handle)
+      has-params-handle*
+    )
+
+    (define/override (get-event-handler)
+      (combine-keyname-event-handlers (list
+        (send this create-movement-handler)
+        (send this create-insert-start-handler new-param-creator)
+        (send this create-insert-end-handler new-param-creator)
+      ))
+    )
+
+    (define/override (child-slot->event-handler slot)
+      (combine-keyname-event-handlers (list
+        (send this create-insert-before-handler slot new-param-creator)
+        (send this create-insert-after-handler slot new-param-creator)
+        (send this create-remove-handler slot)
+        (create-simple-event-handler "r"
+          (lambda (handle-event-info event)
+            (define first-opt-index (get-first-opt-index*))
+            (define slot-index (send this get-child-index slot))
+            (when (= slot-index first-opt-index)
+              (send (db-get-list-handle) make-last-optional-param-required!!)
+              (select! slot)
+            )
+            #t
+          )
+        )
+        (create-simple-event-handler "o"
+          (lambda (handle-event-info event)
+            (define first-opt-index (get-first-opt-index*))
+            (define slot-index (send this get-child-index slot))
+            (when (= slot-index (sub1 first-opt-index))
+              (send (db-get-list-handle) make-last-required-param-optional!!)
+              (select! slot)
+            )
+            #t
+          )
+        )
+      ))
+    )
+
+    (define (get-first-opt-index*)
+      (length (send (db-get-list-handle) get-required-params))
+    )
+
+    (define (new-param-creator parent-handle visible-referables)
+      (use-text-from-user
+        ; TODO we used to say "for ~ath (required|optional) param" but now we can't. Really we ought to be able to do this
+        "Enter short descriptor for param"
+        "A short descriptor, one or a few words, to identify this param"
+        (lambda (result)
+          (lambda (param) (send param set-short-desc!! result) param)
+        )
+        non-empty-string?
+      )
+    )
+
+    (super-make-object parent-ent fallback-event-handler child-spawner! header (make-object ui:const% parent-ent NO-STYLE ", "))
+
+    (send this set-horizontal! #t)
+  ))
+
+  (define ui:set-list% (class ui:list%
+
+    (init parent-ent fallback-event-handler [header #f])
+
+    ; all items must be zinal:db:describable%% , and they should not be part of the tree
+    (abstract db-get-items)
+    (abstract db-add-item!!)
+    (abstract db-can-remove-item?)
+    (abstract db-remove-item!!)
+    (abstract get-item-ui-style)
+
+    (define parent-ent* parent-ent)
+
+    (define/override (get-event-handler)
+      (combine-keyname-event-handlers (list
+        (super get-event-handler)
+        (add-item-event-handler* #f)
+      ))
+    )
+
+    (define/public (reset! [handle-to-select #f])
+      (define selected-index (list-index (curry eq? selected*) (send this get-children)))
+      (send this clear!)
+      (map-by-index
+        (lambda (i h)
+          (define to-insert
+            (make-object ui:var-scalar%
+              parent-ent*
+              (get-item-ui-style)
+              (thunk (get-short-desc-or* h "<unnamed>"))
+              (curry item-handle->event-handler* h)
+              NOOP-FALLBACK-EVENT-HANDLER
+            )
+          )
+          (if (and handle-to-select (handles-equal? handle-to-select h))
+            (send this insert! i to-insert)
+            (send this insert-but-dont-select! i to-insert)
+          )
+        )
+        (sort (db-get-items) item-handle<?)
+      )
+      (when (and (not handle-to-select) selected-index)
+        (define children (send this get-children))
+        (if (null? children)
+          (select! this)
+          (select! (list-ref children (min selected-index (sub1 (length children)))))
+        )
+      )
+    )
+
+    (define (item-handle->event-handler* item-handle item-ui)
+      (combine-keyname-event-handlers (list
+        (create-name-change-handler (const item-handle))
+        (add-item-event-handler* #t)
+        (create-simple-event-handler "d"
+          (lambda (handle-event-info event)
+            (cond
+              [(db-can-remove-item? item-handle)
+                (db-remove-item!! item-handle)
+                (reset!)
+              ]
+              [else
+                (issue-warning "Cannot remove item from set" "I don't really know why you can't, you just can't. Sucks to be you")
+              ]
+            )
+            #t
+          )
+        )
+      ))
+    )
+
+    (define (add-item-event-handler* augmented?)
+      (make-object keyname-event-handler% (list (list
+        (lambda (handle-event-info event)
+          (define added-handle (db-add-item!!))
+          (when added-handle (reset! added-handle))
+          #t
+        )
+        (append '("I" "A") (if augmented? '("i" "a" "o") '()))
+      )))
+    )
+
+    (define (item-handle<? item-handle-1 item-handle-2)
+      (define (desc ih) (get-short-desc-or* ih ""))
+      (string<? (desc item-handle-1) (desc item-handle-2))
+    )
+
+    (super-make-object parent-ent fallback-event-handler header (make-object ui:const% parent-ent NO-STYLE ", "))
+
+    (send this set-horizontal! #t)
+    (reset!)
+  ))
+
+  (define ui:interface-set-list% (class ui:set-list%
+
+    (init parent-ent fallback-event-handler [header #f])
+
+    (define parent-ent* parent-ent)
+
+    (define/override (db-get-items)
+      (send (send parent-ent* get-cone-root) get-direct-super-interfaces)
+    )
+
+    (define/override (db-add-item!!)
+      (define type-handle (send parent-ent* get-cone-root))
+      (define interface-to-implement (get-interface-from-user (filter (lambda (i) (send type-handle can-add-direct-super-interface? i)) (send db* get-all-interfaces))))
+      (cond
+        [interface-to-implement
+          (send type-handle add-direct-super-interface!! interface-to-implement)
+          interface-to-implement
+        ]
+        [else
+          #f
+        ]
+      )
+    )
+
+    (define/override (db-can-remove-item? to-remove)
+      (send (send parent-ent* get-cone-root) can-remove-direct-super-interface? to-remove)
+    )
+
+    (define/override (db-remove-item!! to-remove)
+      (send (send parent-ent* get-cone-root) remove-direct-super-interface!! to-remove)
+    )
+
+    (define/override (get-item-ui-style)
+      REF-STYLE
+    )
+
+    (super-make-object parent-ent fallback-event-handler header)
+  ))
+
+  ; HELPER FUNCTIONS
+
+  (define (has-params->short-params-string has-params-handle)
+    (define param-names
+      (map
+        (lambda (p)
+          (format (if (send p get-default) "[~a]" "~a") (get-short-desc-or* p "<nameless param>"))
+        )
+        (send has-params-handle get-all-params)
+      )
+    )
+    (format "λ: ~a" (string-join param-names ", "))
+  )
+
+  (define (create-module*!!)
+    (use-text-from-user
+      "Enter the new module's name"
+      "A short descriptor, one or a few words, to name this module"
+      (lambda (result)
+        (send db* create-module!! result)
+      )
+      non-empty-string?
+    )
+  )
+
+  (define (create-interface*!!)
+    (use-text-from-user
+      "Enter the new interface's name"
+      "A short descriptor, one or a few words, to name this interface"
+      (lambda (result)
+        (send db* create-interface!! result)
+      )
+      non-empty-string?
+    )
   )
 
   (define (get-module-from-user [selectable-modules (get-all-modules*)])
@@ -2420,21 +3508,21 @@
         selectable-modules
       )
     )
-    (auto-complete* "Choose a module to go to" "Start typing bits and pieces of the desired module's name" handles&choices handles-equal?)
+    (auto-complete* "Choose a module" "Start typing bits and pieces of the desired module's name" handles&choices handles-equal?)
   )
 
-  (define (navigate-to-fresh-module*! [selectable-modules (get-all-modules*)])
+  (define (navigate-to-fresh-module*! [selectable-modules (get-all-modules*)] [default-to-main? #t])
     (define main-module (send db* get-main-module))
     (define next-module
       (or
-        (and (member main-module selectable-modules handles-equal?) main-module)
+        (and default-to-main? (member main-module selectable-modules handles-equal?) main-module)
         (if (pair? selectable-modules)
           (get-module-from-user selectable-modules)
           (create-module*!!)
         )
       )
     )
-    (when next-module (spawn-module*! next-module))
+    (when next-module (spawn-root-entity*! next-module))
     next-module
   )
 
@@ -2443,8 +3531,16 @@
     (remove (curry handles-equal? module-to-exclude) (send db* get-all-modules))
   )
 
-  (define (issue-warning title message)
-    (message-box title message #f '(ok caution))
+  (define (get-interface-from-user selectable-interfaces)
+    (define handles&choices
+      (map
+        (lambda (interface)
+          (list interface (get-short-desc-or* interface "<unnamed interface>"))
+        )
+        selectable-interfaces
+      )
+    )
+    (auto-complete* "Choose an interface" "Start typing bits and pieces of the desired interface's name" handles&choices handles-equal?)
   )
 
   (define (unassignable? handle)
@@ -2489,16 +3585,29 @@
     (make-object keyname-event-handler% (list (list handler-function (list keyname))))
   )
 
+  (define (create-legacy-method-name-change-handler get-legacy-method-handle)
+    (define (interaction-function)
+      (use-text-from-user
+        "Enter the new legacy method name"
+        "The exact name of the racket method you want to change this to"
+        identity
+        non-empty-string?
+      )
+    )
+    (define (result-handler new-name)
+      (send (get-legacy-method-handle) set-legacy-method-name!! new-name)
+    )
+    (create-interaction-dependent-event-handler interaction-function result-handler "s")
+  )
+
   (define (create-name-change-handler get-describable-handle)
     (define (interaction-function)
-      (define new-name
-        (get-text-from-user
-          "Enter the new name"
-          "A short descriptor, one or a few words, to name this thing"
-          #:validate non-empty-string?
-        )
+      (use-text-from-user
+        "Enter the new name"
+        "A short descriptor, one or a few words, to name this thing"
+        identity
+        non-empty-string?
       )
-      (and (non-empty-string? new-name) new-name)
     )
     (define (result-handler new-name)
       (send (get-describable-handle) set-short-desc!! new-name)
@@ -2506,17 +3615,18 @@
     (create-interaction-dependent-event-handler interaction-function result-handler "s")
   )
 
-  (define/public (create-replace-handler* slot ui-parent get-visible-referables-for-slot)
+  (define (create-replace-handler* slot ui-parent get-visible-referables-for-slot)
     (define (interaction-function)
+      (define handle (slot->db-handle slot))
       (and
-        (unassignable? (slot->db-handle slot))
-        (request-new-item-creator (get-visible-referables-for-slot slot))
+        (unassignable? handle)
+        (request-new-item-creator (send handle get-parent) (get-visible-referables-for-slot slot))
       )
     )
     (create-interaction-dependent-event-handler interaction-function (lambda (nhi) (reassign-slot*!! slot ui-parent nhi)) "s")
   )
 
-  (define/public (create-unassign-handler* slot ui-parent)
+  (define (create-unassign-handler* slot ui-parent)
     (create-simple-event-handler "d"
       (lambda (handle-event-info event)
         (when (unassignable? (slot->db-handle slot)) (reassign-slot*!! slot ui-parent))
@@ -2525,7 +3635,30 @@
     )
   )
 
-  (define/public (reassign-slot*!! slot ui-parent [new-handle-initializer!! identity])
+  (define (create-modify-publicity-handler* get-define-handle ui-callback)
+    (create-simple-event-handler "m"
+      (lambda (handle-event-info event)
+        (define define-handle (get-define-handle))
+        (when (can-be-public*? define-handle)
+          (send (send define-handle get-parent) set-public!! define-handle (not (public*? define-handle)))
+          (ui-callback)
+        )
+        #t
+      )
+    )
+  )
+
+  (define (create-navigate-to-root-handler* root-handle)
+    (make-object keyname-event-handler% (list (list
+      (lambda (handle-event-info event)
+        (spawn-root-entity*! root-handle)
+        (send handle-event-info set-doesnt-require-reparse!)
+      )
+      '("space" "enter")
+    )))
+  )
+
+  (define (reassign-slot*!! slot ui-parent [new-handle-initializer!! identity])
     (define intermediate-handle (send (slot->db-handle slot) unassign!!))
     (define new-handle (new-handle-initializer!! intermediate-handle))
     (spawn-entity*! slot new-handle ui-parent)
@@ -2557,11 +3690,95 @@
     (send new-ent assign-to-slot! slot ui-parent)
   )
 
-  (define (spawn-module*! module)
-    (assert "can't spawn #f module" module)
-    (define root-slot (make-object slot% THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
-    (spawn-entity*! root-slot module #f)
+  (define (root-slot->root-event-handler* root-slot)
+    (make-object keyname-event-handler% (list (list
+      (lambda (handle-event-info event)
+        (define root-handle (slot->db-handle root-slot))
+        (cond
+          [(is-one-of? root-handle (list zinal:db:module%% zinal:db:interface%%))
+            (navigate-to-fresh-module*! (get-all-modules* root-handle) #f)
+          ]
+          [else
+            (define (find-first-root-ancestor h)
+              (define p (send h get-parent))
+              (assert "could not find root ancestor of non-module, non-interface root handle" p)
+              (if (can-be-root*? p) p (find-first-root-ancestor p))
+            )
+            (define (find-root-handle-slot s)
+              (define s-children (send (send s get-ent) get-cone-leaves))
+              (or
+                (findf (compose1 (curry handles-equal? root-handle) slot->db-handle) s-children)
+                (ormap find-root-handle-slot s-children)
+              )
+            )
+            (define new-root-slot (spawn-root-entity*! (find-first-root-ancestor root-handle)))
+            (define new-root-handle-slot (find-root-handle-slot new-root-slot))
+            (assert "could not find the previous root handle underneath the new root handle" new-root-handle-slot)
+            (select! new-root-handle-slot)
+          ]
+        )
+        (send handle-event-info set-doesnt-require-reparse!)
+      )
+      '("space" "enter" "backspace")
+    )))
+  )
+
+  (define (spawn-root-entity*! root-handle)
+    (assert "attempt to spawn a root for a non-root type" (can-be-root*? root-handle))
+    (define root-slot (make-object slot% root-slot->root-event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+    (define new-ent (make-object (parse-root-entity*! root-handle) root-handle spawn-entity*!))
+    (send new-ent assign-to-slot! root-slot #f)
     (select! root-slot)
+    root-slot
+  )
+
+  (define (can-be-root*? handle)
+    ; TODO maybe make some definitions present inline
+    (is-one-of? handle (list zinal:db:def%% zinal:db:define-method%% zinal:db:override-legacy-method%% zinal:db:subtype%% zinal:db:module%%))
+  )
+
+  (define (function-definition*? handle)
+    (and (is-a? handle zinal:db:def%%) (is-a? (send handle get-expr) zinal:db:lambda%%))
+  )
+
+  (define (parse-root-entity*! root-handle)
+    (send root-handle accept (make-object (class zinal:db:element-visitor% (super-make-object)
+
+      (define/override (visit-element e meh)
+        (error 'parse-root-entity*! "Cannot parse entity for non-root type")
+      )
+
+      (define/override (visit-define-method root-define-method-handle meh)
+        ent:define-method%
+      )
+
+      (define/override (visit-override-legacy-method root-override-legacy-handle meh)
+        ent:override-legacy-method%
+      )
+
+      (define/override (visit-interface root-interface-handle meh)
+        ent:interface%
+      )
+
+      (define/override (visit-define-class root-define-class-handle meh)
+        ent:define-class%
+      )
+
+      (define/override (visit-class-instance root-class-instance-handle meh)
+        ent:class-instance%
+      )
+
+      (define/override (visit-module root-module-handle meh)
+        ent:module%
+      )
+
+      (define/override (visit-def root-def-handle meh)
+        (if (function-definition*? root-def-handle)
+          ent:func-def%
+          ent:def%
+        )
+      )
+    )))
   )
 
   (define (parse-non-nil-list-entity*! db-list-handle)
@@ -2597,6 +3814,56 @@
         (error 'parse-entity*! "Cannot parse entity for mysterious db handle")
       )
 
+      (define/override (visit-invoke-method db-invoke-method-handle meh)
+        (if (is-a? (send db-invoke-method-handle get-object) zinal:db:this%%)
+          ent:this-invoke-zinal-method%
+          ent:invoke-zinal-method%
+        )
+      )
+
+      (define/override (visit-invoke-legacy-method db-invoke-legacy-method-handle meh)
+        (if (is-a? (send db-invoke-legacy-method-handle get-object) zinal:db:this%%)
+          ent:this-invoke-legacy-method%
+          ent:invoke-legacy-method%
+        )
+      )
+
+      (define/override (visit-create-object db-create-object-handle meh)
+        ent:create-object%
+      )
+
+      (define/override (visit-super-init db-super-init-handle meh)
+        ent:super-init%
+      )
+
+      (define/override (visit-invoke-super-method db-invoke-super-method-handle meh)
+        ent:super-invoke-zinal-method%
+      )
+
+      (define/override (visit-invoke-legacy-super-method db-invoke-legacy-super-method-handle meh)
+        ent:super-invoke-legacy-method%
+      )
+
+      (define/override (visit-define-method db-define-method-handle meh)
+        ent:short-define-method%
+      )
+
+      (define/override (visit-override-legacy-method db-override-legacy-handle meh)
+        ent:short-override-legacy-method%
+      )
+
+      (define/override (visit-this db-this-handle meh)
+        ent:this%
+      )
+
+      (define/override (visit-define-class db-define-class-handle meh)
+        ent:short-define-class%
+      )
+
+      (define/override (visit-class-instance db-class-instance-handle meh)
+        ent:short-class-instance%
+      )
+
       (define/override (visit-reference db-ref-handle meh)
         ent:ref%
       )
@@ -2628,14 +3895,13 @@
       )
 
       (define/override (visit-module db-module-handle meh)
-        ent:module%
+        (error 'parse-entity*! "Modules should never be parsed in the ordinary way - all parsing should parse the root with spawn-root-entity*!")
       )
 
       (define/override (visit-def db-def-handle meh)
-        (define def-expr (send db-def-handle get-expr))
-        (if (is-a? def-expr zinal:db:lambda%%)
-          ent:func-def%
-          ent:def%
+        (if (function-definition*? db-def-handle)
+          ent:short-func-def%
+          ent:short-def%
         )
       )
 
