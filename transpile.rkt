@@ -2,6 +2,7 @@
 ; the uglier module syntax instead
 (module transpile racket
 
+(require racket/set)
 ; for list-index
 (require srfi/1)
 
@@ -19,7 +20,7 @@
   (define methods (append-map (lambda (i) (if (is-a? i zinal:db:type%%) (send i get-direct-methods) '())) identifiables))
   (set! identifiables (append identifiables methods))
   (define included-modules '())
-  (define transpilation (transpile-all-interfaces all-interfaces identifiables))
+  (define transpilation (append (transpile-requires (send db get-all-legacies)) (transpile-all-interfaces (send db get-all-interfaces) identifiables)))
   (define (include-module module)
     (for-each include-module (send module get-required-modules))
     (unless (findf (curry equals*? module) included-modules)
@@ -54,6 +55,34 @@
   )
 )
 
+(define (transpile-requires all-legacies)
+  (define requires-data (make-hash))
+  (for-each
+    (lambda (l)
+      (define library (send l get-library))
+      (when library
+        (hash-update! requires-data library (curryr set-add (send l get-name)) set)
+      )
+    )
+    all-legacies
+  )
+  (define requires
+    (hash-map
+      requires-data
+      (lambda (library id-set)
+        (define name-pairs
+          (set-map
+            id-set
+            (lambda (name) (list (string->symbol name) (get-non-standard-legacy-id library name)))
+          )
+        )
+        (append (list 'only-in (string->symbol library)) name-pairs)
+      )
+    )
+  )
+  (list (cons 'require requires))
+)
+
 ; TODO This implementation is rather slow and a bit goofy.
 ; I've come up with 2 alternatives so far:
 ;
@@ -74,7 +103,11 @@
 (define (get-unique-id identifiable identifiables)
   (define num-id (list-index (curry equals*? identifiable) identifiables))
   (assert (format "Could not find identifiable ~a in identifiables" (send identifiable get-short-desc)) num-id)
-  (string->symbol (format "zinal-id:_~a" (add1 num-id)))
+  (string->symbol (format "zinal_id:_~a" (add1 num-id)))
+)
+
+(define (get-non-standard-legacy-id library name)
+  (string->symbol (format "zinal_legacy:~a::~a" library name))
 )
 
 (define (equals*? elem1 elem2)
@@ -140,11 +173,7 @@
   (define/override (visit-legacy-link l identifiables)
     (define library (send l get-library))
     (define name (send l get-name))
-    (if library
-      ; TODO NYI
-      (error 'visit-legacy-link "Support for non-standard libraries not yet implemented: ~a :: ~a" library name)
-      (string->symbol name)
-    )
+    (if library (get-non-standard-legacy-id library name) (string->symbol name))
   )
 
   (define/override (visit-invoke-method im identifiables)

@@ -70,12 +70,6 @@
   (message-box title message #f '(ok caution))
 )
 
-(define (choose-zinal-or-legacy title message)
-  (define racket/zinal '("zinal (non-legacy)" "racket (legacy)"))
-  (define choice-index (get-choice-from-user title message racket/zinal))
-  (and choice-index (if (zero? choice-index) 'zinal 'legacy))
-)
-
 (define (get-zinal-super-class* subclass)
   (define super-class-ref (send subclass get-super-class))
   (and (is-a? super-class-ref zinal:db:class-ref%%) (send super-class-ref get-define-class))
@@ -658,20 +652,51 @@
   )
 )
 
-(define (get-legacy-from-user)
+(define (get-standard-legacy-from-user)
   (use-text-from-user
     "Enter the standard library identifier"
-    "Enter the standard library identifier"
+    "It must be from the standard racket library. Use the non-standard option if you want to use an identifier from a different library"
     identity
     ; TODO we need to add a reflective validator
     (conjoin non-empty-string? (negate (curryr member ILLEGAL-STANDARD-LEGACIES)))
   )
 )
 
-(define (new-legacy-creator parent-handle visible-referables)
-  (define result (get-legacy-from-user))
+(define (get-non-standard-legacy-from-user)
+  (define library
+    (use-text-from-user
+      "Enter the library name"
+      "Enter exactly what you would enter as the argument to racket 'require - e.g. 'racket/hash' (without quotes)"
+      identity
+      ; TODO we need to add a reflective validator
+      non-empty-string?
+    )
+  )
+  (define name
+    (and library
+      (use-text-from-user
+        "Enter the identifier name"
+        "Does this really need explaining?"
+        identity
+        ; TODO we need to add a reflective validator
+        non-empty-string?
+      )
+    )
+  )
+  (and name (list library name))
+)
+
+(define (new-standard-legacy-creator parent-handle visible-referables)
+  (define result (get-standard-legacy-from-user))
   (and result
     (lambda (unassigned) (send unassigned assign-legacy-link!! #f result))
+  )
+)
+
+(define (new-non-standard-legacy-creator parent-handle visible-referables)
+  (define library&name (get-non-standard-legacy-from-user))
+  (and library&name
+    (lambda (unassigned) (send unassigned assign-legacy-link!! (first library&name) (second library&name)))
   )
 )
 
@@ -782,22 +807,18 @@
 )
 
 (define (switch-r/z r/z-title r-title r-result-handler z-handler)
-  (define r/z-choice (choose-zinal-or-legacy r/z-title "The choice is yours, and yours alone"))
-  (cond
-    [(equal? r/z-choice 'legacy)
+  (define zinal/racket '("zinal (non-legacy)" "racket (legacy)"))
+  (define choice-index (get-choice-from-user r/z-title "The choice is yours, and yours alone" zinal/racket))
+  (and choice-index
+    (if (zero? choice-index)
+      (z-handler)
       (use-text-from-user
         r-title
         "It's not hard ..."
         r-result-handler
         non-empty-string?
       )
-    ]
-    [(equal? r/z-choice 'zinal)
-      (z-handler)
-    ]
-    [else
-      #f
-    ]
+    )
   )
 )
 
@@ -948,7 +969,8 @@
   "define" new-define-creator
   "lambda" new-lambda-creator
   "reference" new-value-read-creator
-  "legacy" new-legacy-creator
+  "legacy (standard library)" new-standard-legacy-creator
+  "legacy (non-standard library)" new-non-standard-legacy-creator
   "TODO" new-unassigned-creator
 
   "invoke method" new-invoke-method-creator
@@ -1549,7 +1571,7 @@
       (define func (get-func-handle*))
       (cond
         [(is-a? func zinal:db:legacy-link%%)
-          (send func get-name)
+          (legacy-handle->string func)
         ]
         [(is-a? func zinal:db:reference%%)
           (get-short-desc-or* (send func get-referable) "<nameless ref>")
@@ -1563,7 +1585,7 @@
     (define (header->event-handler* header)
       (define (interaction-function)
         (define list-handle (send this db-get-list-handle))
-        (request-new-item-creator list-handle (send list-handle get-visible-referables-underneath) '("legacy" "reference"))
+        (request-new-item-creator list-handle (send list-handle get-visible-referables-underneath) '("legacy (standard library)" "legacy (non-standard library)" "reference"))
       )
       (define (result-handler new-handle-initializer!!)
         (new-handle-initializer!! (send (get-func-handle*) unassign!!))
@@ -1857,7 +1879,7 @@
       (define (get-super-text*)
         (define super-class-handle (send (send this-ent* get-cone-root) get-super-class))
         (if (is-a? super-class-handle zinal:db:legacy-link%%)
-          (send super-class-handle get-name)
+          (legacy-handle->string super-class-handle)
           (get-short-desc-or* (send super-class-handle get-referable) "<some class>")
         )
       )
@@ -2038,7 +2060,7 @@
     (init cone-root-handle child-spawner!)
 
     (define (get-text)
-      (send (send this get-cone-root) get-name)
+      (legacy-handle->string (send this get-cone-root))
     )
 
     (define ui-scalar*
@@ -2089,17 +2111,31 @@
           (define (interaction-function)
             (cond
               [(send class-handle can-set-super-class?)
-                (define choice (choose-zinal-or-legacy "Is the super class racket or zinal?" "Choose whether to refer to a legacy class or zinal class"))
-                (and choice
-                  (if (equal? choice 'legacy)
-                    (get-legacy-from-user)
+                (define choice-index
+                  (get-choice-from-user
+                    "Is the super class zinal or racket?"
+                    "Choose whether to refer to a zinal class, standard lib legacy class, or non-standard lib legacy class"
+                    '("zinal class" "racket class (standard library)" "racket class (non-standard library)")
+                  )
+                )
+                (case choice-index
+                  [(0)
                     (get-referable-from-user
                       (filter
                         (conjoin (negate (curry handles-equal? class-handle)) (curryr is-a? zinal:db:define-class%%))
                         (send class-handle get-visible-referables-underneath)
                       )
                     )
-                  )
+                  ]
+                  [(1)
+                    (get-standard-legacy-from-user)
+                  ]
+                  [(2)
+                    (get-non-standard-legacy-from-user)
+                  ]
+                  [else
+                    #f
+                  ]
                 )
               ]
               [else
@@ -2108,11 +2144,21 @@
               ]
             )
           )
-          (define (result-handler legacy-name/define-class-handle)
+          (define (result-handler result)
             (define new-handle
-              (if (string? legacy-name/define-class-handle)
-                (send class-handle set-legacy-super-class!! #f legacy-name/define-class-handle)
-                (send class-handle set-super-class!! legacy-name/define-class-handle)
+              (cond
+                [(is-a? result zinal:db:define-class%%)
+                  (send class-handle set-super-class!! result)
+                ]
+                [(string? result)
+                  (send class-handle set-legacy-super-class!! #f result)
+                ]
+                [(and (pair? result) (= 2 (length result)) (andmap string? result))
+                  (send class-handle set-legacy-super-class!! (first result) (second result))
+                ]
+                [else
+                  (error 'super-class-slot->event-handler "Bad super-class choice result:" result)
+                ]
               )
             )
             (spawn-entity*! super-class-slot* new-handle this)
@@ -3461,6 +3507,12 @@
   ))
 
   ; HELPER FUNCTIONS
+
+  (define (legacy-handle->string legacy-handle)
+    (define library (send legacy-handle get-library))
+    (define name (send legacy-handle get-name))
+    (if library (format "~a→~a" library name) name)
+  )
 
   (define (has-params->short-params-string has-params-handle)
     (define param-names
