@@ -8,7 +8,6 @@
 (require "ents.rkt")
 (require "db.rkt")
 (require "sql-db.rkt")
-(require "transpile.rkt")
 (require "ui.rkt")
 
 (define static-text%
@@ -187,6 +186,4 @@
 (send main-window show #t)
 (send main-window maximize #t)
 (send main-canvas focus)
-
-; (transpile main-db)
 )
