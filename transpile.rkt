@@ -15,8 +15,7 @@
 (define (transpile db)
   (define main-module (send db get-main-module))
   (assert "Currently, we can only transpile programs with a main module, libraries will be supported later" main-module)
-  (define all-interfaces (send db get-all-interfaces))
-  (define identifiables (append (send db get-all-referables) all-interfaces))
+  (define identifiables (send db get-all-referables))
   (define methods (append-map (lambda (i) (if (is-a? i zinal:db:type%%) (send i get-direct-methods) '())) identifiables))
   (set! identifiables (append identifiables methods))
   (define included-modules '())
@@ -24,7 +23,7 @@
   (define (include-module module)
     (for-each include-module (send module get-required-modules))
     (unless (findf (curry equals*? module) included-modules)
-      (set! transpilation (append transpilation (db-elem->scheme module identifiables)))
+      (set! transpilation (append transpilation (db-elems->scheme (send module get-body) identifiables)))
       (set! included-modules (cons module included-modules))
     )
   )
@@ -289,4 +288,9 @@
     )
   )
 )))
+
+; Example usage
+; (require "sql-db.rkt")
+; (define main-db (make-object zinal:sql-db% "junk.db"))
+; (transpile main-db)
 )
