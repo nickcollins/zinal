@@ -3,8 +3,6 @@
 (module ents racket
 
 (require racket/gui/base)
-; for hash-union
-(require racket/hash)
 (require racket/set)
 ; for list-index
 (require srfi/1)
