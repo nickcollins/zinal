@@ -4,6 +4,31 @@
 
 (provide (all-defined-out))
 
+(define ILLEGAL-STANDARD-LEGACIES '(
+  "new"
+  "super-new"
+  "make-object"
+  "super-make-object"
+  "super"
+  "send"
+  "this"
+  "class"
+  "class*"
+  "interface"
+  "init"
+  "abstract"
+  "define/public"
+  "define/override"
+  "augment"
+  "define"
+  "lambda"
+  "assert"
+  "module"
+  "require"
+  "provide"
+  "define-syntax-rule"
+))
+
 ; TODO write more complete/thorough/detailed comments
 ;
 ; VISIBILITY RULES:

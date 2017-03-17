@@ -107,31 +107,6 @@
   mod
 )
 
-(define INVALID_LEGACIES '(
-  "new"
-  "super-new"
-  "make-object"
-  "super-make-object"
-  "super"
-  "send"
-  "this"
-  "class"
-  "class*"
-  "interface"
-  "init"
-  "abstract"
-  "define/public"
-  "define/override"
-  "augment"
-  "define"
-  "lambda"
-  "assert"
-  "module"
-  "require"
-  "provide"
-  "define-syntax-rule"
-))
-
 (define DEFAULT-LIBRARY "")
 
 (define BOGUS-ID -1)
@@ -3054,7 +3029,7 @@
       )
       (assert
         (format "You can't use a legacy for which there's a corresponding primitive: ~a" name)
-        (or library (not (member name INVALID_LEGACIES)))
+        (or library (not (member name ILLEGAL-STANDARD-LEGACIES)))
       )
     )
 

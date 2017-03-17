@@ -666,7 +666,7 @@
     "Enter the standard library identifier"
     identity
     ; TODO we need to add a reflective validator
-    non-empty-string?
+    (conjoin non-empty-string? (negate (curryr member ILLEGAL-STANDARD-LEGACIES)))
   )
 )
 
