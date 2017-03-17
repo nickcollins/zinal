@@ -1747,7 +1747,7 @@
         (define/public (get-library)
           (send this assert-valid)
           (define stored-result (get-cell* (send this get-id) "library"))
-          (and (non-empty-string? stored-result) stored-result)
+          (if (equal? stored-result DEFAULT-LIBRARY) #f stored-result)
         )
 
         (define/public (get-name)
