@@ -108,6 +108,9 @@
   ; for the newly minted module
   create-module!! ; ([short-desc] [long-desc])
 
+  ; Returns a list of all zinal:db:legacy-link%% in this db, in no particular order
+  get-all-legacies ; ()
+
   ; Returns a list of all zinal:db:referable%% in this db, in no particular order
   get-all-referables ; ()
 

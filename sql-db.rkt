@@ -155,6 +155,26 @@
       (module-id->handle! new-module-id)
     )
 
+    (define/public (get-all-legacies)
+      ; TODO use UNION to optimize this
+      (append*
+        (hash-map
+          CAN-BE-REF-COLS
+          (lambda (table cols)
+            (append-map
+              (lambda (col)
+                (map
+                  (curryr get-node-handle! col)
+                  (query-list db* (format "SELECT ~a.id FROM ~a INNER JOIN legacies ON ~a.~a = legacies.id" table table table col))
+                )
+              )
+              cols
+            )
+          )
+        )
+      )
+    )
+
     (define/public (get-all-referables)
       (append* (get-all-interfaces) (map get-node-referables-of-type* '("params" "defines" "defined_classes")))
     )
