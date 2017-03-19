@@ -36,7 +36,7 @@
   "method_defines"
     '(["method_id" "INT"] ["lambda_id" "INT"])
   "legacy_overrides"
-    '(["legacy_name" "TEXT"] ["lambda_id" "INT"])
+    '(["legacy_name" "TEXT"] ["lambda_id" "INT"] ["is_augment" "INT"])
   "super_inits"
     '(["args_id" "INT" 'hidden])
   "method_invokations"
@@ -849,6 +849,17 @@
         (send this assert-valid)
         (assert-valid-legacy-method-name* name)
         (set-cell-dangerous*!! (send this get-id) "legacy_name" name)
+        (void)
+      )
+
+      (define/public (is-augment?)
+        (send this assert-valid)
+        (equal? SQL-TRUE (get-cell* (send this get-id) "is_augment"))
+      )
+
+      (define/public (set-is-augment!! should-be-augment?)
+        (send this assert-valid)
+        (q!! query-exec "UPDATE ~a SET is_augment = ?2" (send this get-id) (list (if should-be-augment? SQL-TRUE SQL-FALSE)))
         (void)
       )
 
@@ -2098,6 +2109,7 @@
               (create-normal!! "legacy_overrides" loc (list
                 (list "legacy_name" method-name)
                 (list "lambda_id" BOGUS-ID)
+                (list "is_augment" SQL-FALSE)
               ))
             )
             (create-lambda!! (make-object loc% override-id "lambda_id"))

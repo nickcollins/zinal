@@ -1863,6 +1863,17 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
+  (define ent:short-augment-legacy-method% (class ent:short-override-legacy-method%
+
+    (init cone-root-handle child-spawner!)
+
+    (define/override (get-prefix-string)
+      "augment legacy method"
+    )
+
+    (super-make-object cone-root-handle child-spawner!)
+  ))
+
   (define ent:short-class-instance% (class ent%
 
     (init cone-root-handle child-spawner!)
@@ -2334,9 +2345,24 @@
           (send (send this-ent* get-cone-root) get-legacy-method-name)
         )
 
+        (define (get-prefix-text*)
+          (define prefix (if (send (send this-ent* get-cone-root) is-augment?) "augment" "override"))
+          (format "~a legacy" prefix)
+        )
+
+        (define (prefix-ui->event-handler* prefix-ui)
+          (create-simple-event-handler "a"
+            (lambda (handle-event-info event)
+              (define override-handle (send this-ent* get-cone-root))
+              (send override-handle set-is-augment!! (not (send override-handle is-augment?)))
+              #t
+            )
+          )
+        )
+
         (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
 
-        (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE "override legacy"))
+        (send this insert! 0 (make-object ui:var-scalar% this-ent* NO-STYLE get-prefix-text* prefix-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
         (send this insert! 1 (make-object ui:var-scalar% this-ent* DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
         (send this insert! 2 (make-object ui:const% this-ent* NO-STYLE "= λ:"))
         (send this set-horizontal! #t)
@@ -3899,7 +3925,10 @@
       )
 
       (define/override (visit-override-legacy-method db-override-legacy-handle meh)
-        ent:short-override-legacy-method%
+        (if (send db-override-legacy-handle is-augment?)
+          ent:short-augment-legacy-method%
+          ent:short-override-legacy-method%
+        )
       )
 
       (define/override (visit-this db-this-handle meh)

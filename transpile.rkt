@@ -239,11 +239,24 @@
   )
 
   (define/override (visit-override-legacy-method olm identifiables)
-    (visit-lambda-like
-      'define/override
-      (string->symbol (send olm get-legacy-method-name))
-      (send olm get-lambda)
-      identifiables
+    (define name (string->symbol (send olm get-legacy-method-name)))
+    (define lambda* (send olm get-lambda))
+    (if (send olm is-augment?)
+      (list 'begin
+        (visit-lambda-like
+          'define
+          name
+          lambda*
+          identifiables
+        )
+        (list 'augment name)
+      )
+      (visit-lambda-like
+        'define/override
+        name
+        lambda*
+        identifiables
+      )
     )
   )
 

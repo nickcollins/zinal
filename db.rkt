@@ -506,6 +506,13 @@
   ; Returns the lambda that defines the overridden method. Comparable to zinal:db:define-method%% ,
   ; the returned lambda is permanent and cannot be unassign!! , created nor destroyed
   get-lambda ; ()
+
+  ; Returns #t if this is meant to augment a legacy super method rather than override, per se
+  is-augment? ; ()
+
+  ; If should-be-augment? is #f , makes this no longer be an augmentation of the legacy super
+  ; method. Otherwise, makes this become an augmentation. No meaningful return value.
+  set-is-augment!! ; (should-be-augment?)
 ))
 
 ; A node which, when evaluated, intializes the immediate/direct super class. In order to transpile,
