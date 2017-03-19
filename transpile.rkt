@@ -80,7 +80,10 @@
       )
     )
   )
-  (list (cons 'require requires))
+  (if (pair? requires)
+    (list (cons 'require requires))
+    '()
+  )
 )
 
 ; TODO This implementation is rather slow and a bit goofy.
