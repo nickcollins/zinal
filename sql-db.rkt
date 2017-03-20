@@ -2763,15 +2763,14 @@
             [("interface_refs") db-interface-ref%]
             [("asserts") db-assert%]
             [("atoms")
-              (define type (string->symbol (get-cell* id "type")))
-              ; TODO - it appears we'll have to do the case over strings, not symbols
+              (define type (get-cell* id "type"))
               (case type
-                [(number) db-number%]
-                [(character) db-char%]
-                [(string) db-string%]
-                [(boolean) db-bool%]
-                [(symbol) db-symbol%]
-                [(keyword) db-keyword%]
+                [("number") db-number%]
+                [("character") db-char%]
+                [("string") db-string%]
+                [("boolean") db-bool%]
+                [("symbol") db-symbol%]
+                [("keyword") db-keyword%]
                 [else (error 'create-handle*! "Invalid atom type ~a for id ~a" type id)]
               )
             ]
