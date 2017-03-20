@@ -414,6 +414,8 @@
         (make-object auto-complete-dialog% title message keys&choices key-equalifier)
       )
       (send dialog show #t)
+      ; ugly hack to solve some weird gui focus race condition. See blame for more details.
+      (sleep .05)
       (send dialog get-choice)
     ]
     [else
@@ -492,6 +494,8 @@
     [(pair? choices)
       (define dialog (make-object discrete-choice-dialog% title message choices))
       (send dialog show #t)
+      ; ugly hack to solve some weird gui focus race condition. See blame for more details.
+      (sleep .05)
       (send dialog get-choice)
     ]
     [else
@@ -621,8 +625,6 @@
   )
 )
 
-; TODO fucking terrible inconsistent focus issues. AFAICT they started happening after "upgrading"
-; to 16.04.1
 (define (new-value-read-creator parent-handle visible-referables)
   (define chosen-handle (get-referable-from-user visible-referables))
   (and chosen-handle
