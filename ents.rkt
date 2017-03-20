@@ -1113,7 +1113,6 @@
 
   (define ASSERT-STYLE (send (make-object style-delta%) set-delta-foreground "Lime"))
 
-  ; TODO make strings underlined, and make the empty string be ε but in a different color
   (define ATOM-STYLE (send (make-object style-delta%) set-delta-foreground "Orchid"))
 
   (define (get-atom-text atom-handle)
@@ -1130,6 +1129,8 @@
       ]
     )
   )
+
+  (define STRING-STYLE (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Orchid"))
 
   (define DEF-STYLE (send (make-object style-delta%) set-delta-foreground "Yellow"))
 
@@ -1979,6 +1980,36 @@
 
     (define ui-scalar*
       (make-object ui:var-scalar% this ATOM-STYLE (thunk (get-atom-text (send this get-cone-root))) THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:string% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define ui-scalar*
+      (make-object ui:var-scalar% this STRING-STYLE (thunk (send (send this get-cone-root) get-val)) THING->NOOP this)
+    )
+
+    (define/override (get-root-ui-item)
+      ui-scalar*
+    )
+
+    (super-make-object cone-root-handle)
+  ))
+
+  (define ent:empty-string% (class ent%
+
+    (init cone-root-handle child-spawner!)
+
+    (define ui-scalar*
+      (make-object ui:var-scalar% this CONST-VALUE-STYLE (const "ε") THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -3937,7 +3968,13 @@
       )
 
       (define/override (visit-atom db-atom-handle meh)
-        ent:atom%
+        (if (is-a? db-atom-handle zinal:db:string%%)
+          (if (non-empty-string? (send db-atom-handle get-val))
+            ent:string%
+            ent:empty-string%
+          )
+          ent:atom%
+        )
       )
 
       (define/override (visit-lambda db-lambda-handle meh)
