@@ -39,7 +39,7 @@
 
 (define zinal:ui:element-visitor%
   (class object%
-    (super-new)
+    (super-make-object)
 
     (define/public (visit-item i data) #f)
     (define/public (visit-scalar s data) (visit-item s data))

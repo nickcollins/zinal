@@ -164,8 +164,8 @@
 
 ; PROGRAM
 
-(define main-window (new frame% [label "zinal"]))
-(define main-canvas (new editor-canvas% [parent main-window]))
+(define main-window (make-object frame% "zinal"))
+(define main-canvas (make-object editor-canvas% main-window))
 (send main-canvas set-canvas-background (make-object color% #x15 #x15 #x15))
 
 (define main-db (make-object zinal:sql-db% "junk.db"))

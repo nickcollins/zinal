@@ -243,7 +243,7 @@
         ; check.
         (define valid*? #t)
 
-        (super-new)
+        (super-make-object)
       )
     )
 
@@ -346,12 +346,14 @@
 
         (define loc* loc)
 
-        (super-new [id (send loc get-cell)])
+        (super-make-object (send loc get-cell))
       )
     )
 
     (define db-describable-node%
       (class* db-node% (zinal:db:describable%%)
+
+        (init loc)
 
         (define/public (get-short-desc)
           (get-short-desc* this)
@@ -369,7 +371,7 @@
           (set-long-desc*!! this new-desc)
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
@@ -1060,6 +1062,8 @@
     (define db-lambda%
       (class* db-node% (zinal:db:lambda%%)
 
+        (init loc)
+
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-lambda this data)
@@ -1147,12 +1151,14 @@
           (remove-from-body*!! this index)
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-def%
       (class* db-describable-node% (zinal:db:def%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1196,12 +1202,14 @@
           (query-value db* "SELECT id FROM define_refs WHERE define_id = ?1" (send this get-id))
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-list%
       (class* db-node% (zinal:db:list%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1247,7 +1255,7 @@
           (send this assert-valid)
           (define list-header-id (send this get-id))
           (define insertion-point-id (nth-list-insertion-point* list-header-id index index))
-          (define insertion-point-loc (new loc% [id insertion-point-id] [col "cdr_id"]))
+          (define insertion-point-loc (make-object loc% insertion-point-id "cdr_id"))
           (define old-cdr (send insertion-point-loc get-cell))
           ; We captured the original cdr_id, so we can safely delete this node's cdr
           (set-loc-dangerous*!! insertion-point-loc BOGUS-ID)
@@ -1255,7 +1263,7 @@
             (create-normal!! "list_nodes" insertion-point-loc (list (list "owner_id" list-header-id) (list "car_id" BOGUS-ID) (list "cdr_id" old-cdr)))
           )
           ; returns the car_id loc so that the caller can set the node
-          (new loc% [id new-node-id] [col "car_id"])
+          (make-object loc% new-node-id "car_id")
         )
 
         (define/public (remove*!! index expect-unassigned?)
@@ -1265,7 +1273,7 @@
           (define id-to-delete (get-cell* insertion-point-id "cdr_id"))
           (assert (format "Index out of bounds: ~a" index) (not (= id-to-delete NIL-ID)))
           (define id-to-contract (get-cell* id-to-delete "cdr_id"))
-          (define loc-to-delete (new loc% [id id-to-delete] [col "car_id"]))
+          (define loc-to-delete (make-object loc% id-to-delete "car_id"))
           (when expect-unassigned?
             (define unassigned-handle (get-node-handle! loc-to-delete))
             (assert
@@ -1306,7 +1314,7 @@
           )
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
@@ -1515,6 +1523,8 @@
     (define db-param%
       (class* db-describable-node% (zinal:db:param%%)
 
+        (init loc)
+
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-param this data)
@@ -1566,7 +1576,7 @@
           (query-value db* "SELECT id FROM param_refs WHERE param_id = ?1" (send this get-id))
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
@@ -1625,6 +1635,8 @@
     (define db-atom%
       (class* db-node% (zinal:db:atom%%) ; abstract
 
+        (init loc)
+
         (abstract get-val)
 
         (define/override (accept visitor [data #f])
@@ -1647,12 +1659,14 @@
           (get-cell* (send this get-id) "value")
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-number%
       (class* db-atom% (zinal:db:number%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1667,12 +1681,14 @@
           )
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-char%
       (class* db-atom% (zinal:db:char%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1689,12 +1705,14 @@
           (integer->char int-value)
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-string%
       (class* db-atom% (zinal:db:string%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1705,12 +1723,14 @@
           (send this assert-correct-type-and-get-stored-value 'string)
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-bool%
       (class* db-atom% (zinal:db:bool%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1726,12 +1746,14 @@
           )
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-symbol%
       (class* db-atom% (zinal:db:symbol%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1742,12 +1764,14 @@
           (string->symbol (send this assert-correct-type-and-get-stored-value 'symbol))
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-keyword%
       (class* db-atom% (zinal:db:keyword%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1758,12 +1782,14 @@
           (string->keyword (send this assert-correct-type-and-get-stored-value 'keyword))
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-legacy%
       (class* db-node% (zinal:db:legacy-link%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1786,12 +1812,14 @@
           (get-cell* (send this get-id) "name")
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-reference%
       (class* db-node% (zinal:db:reference%%) ; abstract
+
+        (init loc)
 
         (abstract get-referable-id-col)
 
@@ -1811,12 +1839,14 @@
           (is-referable-visible*? this (get-referable))
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-param-ref%
       (class* db-reference% (zinal:db:param-ref%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1831,12 +1861,14 @@
           (send this get-referable)
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
     (define db-def-ref%
       (class* db-reference% (zinal:db:def-ref%%)
+
+        (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -1851,7 +1883,7 @@
           (send this get-referable)
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
@@ -1894,6 +1926,8 @@
     (define db-unassigned%
       (class* db-describable-node% (zinal:db:unassigned%%)
 
+        (init loc)
+
         (define/override (accept visitor [data #f])
           (send this assert-valid)
           (send visitor visit-unassigned this data)
@@ -1925,16 +1959,16 @@
                 )
               )
             )
-            (create-unassigned!! (new loc% [id assert-id] [col "assertion_id"]))
-            (create-unassigned!! (new loc% [id assert-id] [col "format_string_id"]))
-            (create-list-header!! (new loc% [id assert-id] [col "format_args_id"]))
+            (create-unassigned!! (make-object loc% assert-id "assertion_id"))
+            (create-unassigned!! (make-object loc% assert-id "format_string_id"))
+            (create-list-header!! (make-object loc% assert-id "format_args_id"))
           ))
         )
 
         (define/public (assign-def!! [short-desc #f] [long-desc #f])
           (assign*!! (lambda (loc)
             (define define-id (create-describable-normal!! "defines" loc short-desc long-desc (list (list "expr_id" BOGUS-ID))))
-            (create-unassigned!! (new loc% [id define-id] [col "expr_id"]))
+            (create-unassigned!! (make-object loc% define-id "expr_id"))
             (create-something!! "define_refs" (list (list "define_id" define-id)))
           ))
         )
@@ -2186,7 +2220,7 @@
           (assert (format "~a is not within a class" (send this get-id)) (get-containing-class* this))
         )
 
-        (super-new)
+        (super-make-object loc)
       )
     )
 
@@ -2196,7 +2230,7 @@
       (class object%
         (init id col)
         (assert (format "cannot create loc with id ~a which is not a number" id) (number? id))
-        (super-new)
+        (super-make-object)
         (define id* id)
         (define col* col)
         (define/public (get-id) id*)
@@ -2521,7 +2555,7 @@
       (send caller assert-valid)
       (define reqd-params (get-required-params* caller))
       (assert "There is no required param to convert into an optional param" (pair? reqd-params))
-      (define last-reqd-param-default-loc (new loc% [id (send (last reqd-params) get-id)] [col "default_id"]))
+      (define last-reqd-param-default-loc (make-object loc% (send (last reqd-params) get-id) "default_id"))
       (assert "attempt to convert optional param to optional" (= NIL-ID (send last-reqd-param-default-loc get-cell)))
       (set-loc-dangerous*!! last-reqd-param-default-loc BOGUS-ID)
       (create-unassigned!! last-reqd-param-default-loc)
@@ -2556,7 +2590,7 @@
       (assert "There is no optional param to convert into a required param" (pair? opt-params))
       (define first-opt-param (car opt-params))
       (send (send first-opt-param get-default) delete-and-invalidate*!!)
-      (set-id!! (new loc% [id (send first-opt-param get-id)] [col "default_id"]) NIL-ID)
+      (set-id!! (make-object loc% (send first-opt-param get-id) "default_id") NIL-ID)
       (void)
     )
 
@@ -2662,7 +2696,7 @@
 
     ; id&col is a horrible abomination but it seems the least painful way to use locs as hash keys
     (define (id&col->loc id&col)
-      (new loc% [id (first id&col)] [col (second id&col)])
+      (make-object loc% (first id&col) (second id&col))
     )
 
     (define (make-id&col id col)
@@ -2849,8 +2883,8 @@
           )
         )
       )
-      (create-list-header!! (new loc% [id lambda-id] [col "params_id"]))
-      (create-list-header!! (new loc% [id lambda-id] [col "body_id"]))
+      (create-list-header!! (make-object loc% lambda-id "params_id"))
+      (create-list-header!! (make-object loc% lambda-id "body_id"))
       lambda-id
     )
 
@@ -2858,7 +2892,7 @@
       (define param-id
         (create-describable-normal!! "params" loc short-desc long-desc (list (list "default_id" (if required? NIL-ID BOGUS-ID))))
       )
-      (unless required? (create-unassigned!! (new loc% [id param-id] [col "default_id"])))
+      (unless required? (create-unassigned!! (make-object loc% param-id "default_id")))
       (create-something!! "param_refs" (list (list "param_id" param-id)))
       param-id
     )

@@ -126,7 +126,7 @@
 
   (define handler-function&keynames=pairs* handler-function&keynames=pairs)
 
-  (define keymap* (new keymap%))
+  (define keymap* (make-object keymap%))
   (begin
     (define seen-keynames (mutable-set))
     (for-each
@@ -237,6 +237,10 @@
 (define choice-dialog%
   (class dialog% ; abstract
 
+    (init label)
+
+    (abstract get-choice-from-ui*)
+
     (define/override (on-subwindow-char receiver key-event)
       (case (send key-event get-key-code)
         [(#\return)
@@ -256,10 +260,8 @@
       (super on-activate activated?)
       ; TODO this is a dirty dirty hack to force the choice% to focus against its will
       ; TODO see https://groups.google.com/forum/#!msg/racket-users/ph2nfGslyuA/AjAM6wMMAwAJ
-      (send this on-subwindow-char this (new key-event% [key-code #\tab]))
+      (send this on-subwindow-char this (make-object key-event% #\tab))
     )
-
-    (abstract get-choice-from-ui*)
 
     (define (on-close)
       (set! chosen*
@@ -271,7 +273,7 @@
     )
     (augment on-close)
 
-    (super-new)
+    (super-make-object label)
 
     (define chosen* #f)
     (define has-been-chosen* #f)
@@ -289,6 +291,12 @@
 
 (define auto-complete-dialog%
   (class choice-dialog%
+
+    ; key-equalifier takes two key args and returns whether they're equivalent.
+    ; The first arg will never be #f, but the second one may be
+    (init title message keys&choices [key-equalifier equal?])
+
+    (define this* this)
 
     (define auto-complete-list-box%
       (class list-box%
@@ -332,7 +340,7 @@
           )
         )
 
-        (super-new)
+        (super-make-object message '() this* (const #f) '(single vertical-label))
 
         (define/private (build-choices*! selection-key)
           (send this clear)
@@ -393,21 +401,10 @@
       (and cur-index (send chooser* get-data cur-index))
     )
 
-    ; key-equalifier takes two key args and returns whether they're equivalent.
-    ; The first arg will never be #f, but the second one may be
-    (init title message keys&choices [key-equalifier equal?])
-
-    (super-new [label title])
+    (super-make-object title)
 
     (define keys&choices* (sort keys&choices (lambda (a b) (string<? (second a) (second b)))))
-    (define chooser*
-      (new auto-complete-list-box%
-        [label message]
-        [choices '()]
-        [parent this]
-        [style '(single vertical-label)]
-      )
-    )
+    (define chooser* (make-object auto-complete-list-box%))
   )
 )
 
@@ -415,12 +412,7 @@
   (cond
     [(pair? keys&choices)
       (define dialog
-        (new auto-complete-dialog%
-          [title title]
-          [message message]
-          [keys&choices keys&choices]
-          [key-equalifier key-equalifier]
-        )
+        (make-object auto-complete-dialog% title message keys&choices key-equalifier)
       )
       (send dialog show #t)
       (send dialog get-choice)
@@ -433,6 +425,10 @@
 
 (define discrete-choice-dialog%
   (class choice-dialog%
+
+    (init title message choices)
+
+    (define this* this)
 
     (define keyboard-choice%
       (class choice%
@@ -474,7 +470,7 @@
           )
         )
 
-        (super-new)
+        (super-make-object message choices this* (const #f) '(vertical-label))
 
         (define chars "")
       )
@@ -484,27 +480,18 @@
       (send chooser* get-selection)
     )
 
-    (init title message choices)
-
-    (super-new [label title])
+    (super-make-object title)
 
     (define choices* choices)
     (define num-choices* (length choices))
-    (define chooser*
-      (new keyboard-choice%
-        [label message]
-        [choices choices]
-        [parent this]
-        [style '(vertical-label)]
-      )
-    )
+    (define chooser* (make-object keyboard-choice%))
   )
 )
 
 (define (get-choice-from-user title message choices)
   (cond
     [(pair? choices)
-      (define dialog (new discrete-choice-dialog% [title title] [message message] [choices choices]))
+      (define dialog (make-object discrete-choice-dialog% title message choices))
       (send dialog show #t)
       (send dialog get-choice)
     ]
@@ -1163,6 +1150,8 @@
     ; ents.
     (init cone-root-handle)
 
+    (abstract get-root-ui-item)
+
     (define cone-root* cone-root-handle)
     (define slot* #f)
 
@@ -1196,8 +1185,6 @@
     (define/public (get-slot)
       slot*
     )
-
-    (abstract get-root-ui-item)
 
     (super-make-object)
   ))
@@ -2878,6 +2865,8 @@
 
     (init parent-ent style-delta item->event-handler fallback-event-handler)
 
+    (abstract get-text)
+
     (define style-delta* style-delta)
     (define event-handler* (item->event-handler this))
 
@@ -2895,8 +2884,6 @@
     (define/public (get-style-delta)
       style-delta*
     )
-
-    (abstract get-text)
 
     (super-make-object parent-ent fallback-event-handler)
   ))
