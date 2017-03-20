@@ -1,10 +1,15 @@
 ; Similar to "#lang racket"
 (module translate racket
 
+(require racket/set)
+
 (require "misc.rkt")
 (require "db.rkt")
 
 (provide translate)
+
+(define BNS (make-base-namespace))
+(define BASE-LEGACIES (set-subtract (list->set (namespace-mapped-symbols BNS)) (list->set (map string->symbol ILLEGAL-STANDARD-LEGACIES))))
 
 ; Reads racket-file , which must only use features supported by zinal, and creates a new module in
 ; db whose contents will correspond to the scheme logic in racket-file . Translation does not claim
@@ -286,13 +291,20 @@
       (send db-unassigned assign-keyword!! datum)
     ]
     [(symbol? datum)
-      ; TODO Later we'll translate at least some of these to legacies or refs
-      (send db-unassigned set-short-desc!! (~a datum))
+      (if (is-legacy? datum)
+        (send db-unassigned assign-legacy-link!! #f (symbol->string datum))
+        ; TODO Later we'll translate at least some of these to refs
+        (send db-unassigned set-short-desc!! (~a datum))
+      )
     ]
     [else
       (error 'translate-datum "type for datum ~a is indeterminable" datum)
     ]
   )
+)
+
+(define (is-legacy? datum)
+  (set-member? BASE-LEGACIES datum)
 )
 
 (define (add-direct-super-interfaces!! db super-interface-symbols db-sub-type)
@@ -324,4 +336,5 @@
 ; (translate "ui.rkt" main-db)
 ; (translate "sql-db.rkt" main-db)
 ; (translate "ents.rkt" main-db)
+; (translate "main.rkt" main-db)
 )
