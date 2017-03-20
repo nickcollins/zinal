@@ -219,9 +219,6 @@
           (eq? this other-element)
         )
 
-        ; TODO Ugh - these should be private to the file or to the sql-db% class, but it's unlikely that any way of doing so is going
-        ; to happen post-bootstrap
-
         (define/public (get-id)
           (assert-valid)
           id*
@@ -231,7 +228,6 @@
           (assert (format "This element has already been deleted or unassigned, and can no longer be used: ~a" id*) valid*?)
         )
 
-        ; TODO we should probably force this to call a subclass method for handles* invalidation
         (define/public (invalidate!)
           (set! valid*? #f)
         )

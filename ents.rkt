@@ -3371,7 +3371,6 @@
 
     (define (new-param-creator parent-handle visible-referables)
       (use-text-from-user
-        ; TODO we used to say "for ~ath (required|optional) param" but now we can't. Really we ought to be able to do this
         "Enter short descriptor for param"
         "A short descriptor, one or a few words, to identify this param"
         (lambda (result)
