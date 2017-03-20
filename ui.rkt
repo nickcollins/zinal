@@ -1,5 +1,4 @@
-; We'd rather use #lang racket, but sadly the read function has a hard time with that, so we use
-; the uglier module syntax instead
+; Similar to "#lang racket"
 (module ui racket
 
 (provide (all-defined-out))
