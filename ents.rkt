@@ -1117,20 +1117,18 @@
   (define ATOM-STYLE (send (make-object style-delta%) set-delta-foreground "Orchid"))
 
   (define (get-atom-text atom-handle)
-    (define prepend
-      (cond
-        [(is-a? atom-handle zinal:db:symbol%%)
-          "'"
-        ]
-        [(is-a? atom-handle zinal:db:char%%)
-          "#\\"
-        ]
-        [else
-          ""
-        ]
-      )
+    (define raw-value (send atom-handle get-val))
+    (cond
+      [(is-a? atom-handle zinal:db:symbol%%)
+        (format "'~a" raw-value)
+      ]
+      [(is-a? atom-handle zinal:db:char%%)
+        (~s raw-value)
+      ]
+      [else
+        (~a raw-value)
+      ]
     )
-    (format "~a~a" prepend (send atom-handle get-val))
   )
 
   (define DEF-STYLE (send (make-object style-delta%) set-delta-foreground "Yellow"))
