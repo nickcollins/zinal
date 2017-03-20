@@ -291,10 +291,29 @@
       (send db-unassigned assign-keyword!! datum)
     ]
     [(symbol? datum)
-      (if (is-legacy? datum)
-        (send db-unassigned assign-legacy-link!! #f (symbol->string datum))
-        ; TODO Later we'll translate at least some of these to refs
-        (send db-unassigned set-short-desc!! (~a datum))
+      (define datum-as-string (symbol->string datum))
+      (define (unique-referable)
+        (define possible-referables (filter (lambda (r) (equal? datum-as-string (send r get-short-desc))) (send db-unassigned get-visible-referables-after)))
+        (and (= 1 (length possible-referables)) (car possible-referables))
+      )
+      (cond
+        [(is-legacy? datum)
+          (send db-unassigned assign-legacy-link!! #f datum-as-string)
+        ]
+        [(unique-referable) =>
+          (lambda (ur)
+            (cond
+              [(is-a? ur zinal:db:param%%) (send db-unassigned assign-param-ref!! ur)]
+              [(is-a? ur zinal:db:def%%) (send db-unassigned assign-def-ref!! ur)]
+              [(is-a? ur zinal:db:define-class%%) (send db-unassigned assign-class-ref!! ur)]
+              [(is-a? ur zinal:db:interface%%) (send db-unassigned assign-interface-ref!! ur)]
+              [else (error 'translate-datum "Invalid referable")]
+            )
+          )
+        ]
+        [else
+          (send db-unassigned set-short-desc!! datum-as-string)
+        ]
       )
     ]
     [else
