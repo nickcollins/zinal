@@ -9,7 +9,7 @@
 (provide (prefix-out zinal: sql-db%))
 
 ; All indexed db queries must check that id is real first. higher-level stuff need not check directly
-(define-syntax-rule (assert-real-id id)
+(define (assert-real-id id)
   (assert (format "id ~a was non-positive" id) (and (number? id) (positive? id)))
 )
 
