@@ -9,12 +9,126 @@
 (require "sql-db.rkt")
 (require "ui.rkt")
 
+(define no-delta (make-object style-delta%))
+
+; necessary for perf
+(define lite-ui-info%
+  (class object%
+
+    (init root-ui-item)
+
+    (super-make-object)
+
+    (define pos-info% (class object%
+      (init text style-delta is-selected?)
+      (define text* text)
+      (define style-delta* style-delta)
+      (define selected*? is-selected?)
+      (define/public (get-text) text*)
+      (define/public (get-style-delta) style-delta*)
+      (define/public (selected?) selected*?)
+      (super-make-object)
+    ))
+
+    (define pos->pos-info* (make-hash))
+    (define last-pos* 0)
+
+    (define/public (get-pos->pos-info)
+      pos->pos-info*
+    )
+
+    (define/public (equal-text? other-info)
+      (define other-pos->pos-info (send other-info get-pos->pos-info))
+      (andmap identity (hash-map pos->pos-info* (lambda (pos info)
+        (define other-info (hash-ref other-pos->pos-info pos #f))
+        (and
+          other-info
+          (equal? (send info get-text) (send other-info get-text))
+          (send (send info get-style-delta) equal? (send other-info get-style-delta))
+        )
+      )))
+    )
+
+    (define (add-snip text style-delta selected?)
+      (define text-len (string-length text))
+      (assert "Empty text in ui-item" (> text-len 0))
+      (hash-set! pos->pos-info* last-pos* (make-object pos-info% text style-delta selected?))
+      (set! last-pos* (+ last-pos* text-len))
+    )
+
+    (define (add-ui-list ui-list preceeding-whitespace selected?)
+      (define children (send ui-list get-children))
+      (define header (send ui-list get-header))
+      (define separator (send ui-list get-horizontal-separator))
+      (define bookends (send ui-list get-bookends))
+      (cond
+        [(send ui-list horizontal?)
+          (when bookends (add-ui-item (first bookends) preceeding-whitespace selected?))
+          (when header
+            (add-ui-item header preceeding-whitespace selected?)
+            (add-snip " " no-delta selected?)
+          )
+          (if (pair? children)
+            (foldl
+              (lambda (child prepend-separator?)
+                (when prepend-separator? (add-ui-item separator preceeding-whitespace selected?))
+                (add-ui-item child preceeding-whitespace selected?)
+                #t
+              )
+              #f
+              children
+            )
+            (unless (or header bookends)
+              (add-snip "()" no-delta selected?)
+            )
+          )
+          (when bookends (add-ui-item (second bookends) preceeding-whitespace selected?))
+        ]
+        [else ; vertical
+          (define child-whitespace (string-append preceeding-whitespace "    "))
+          (cond
+            [header (add-ui-item header preceeding-whitespace selected?)]
+            [bookends (add-ui-item (first bookends) preceeding-whitespace selected?)]
+            [else (add-snip "(" no-delta selected?)]
+          )
+          (if (pair? children)
+            (for-each
+              (lambda (child)
+                (add-snip (string-append (string #\newline) child-whitespace) no-delta #f)
+                (add-ui-item child child-whitespace selected?)
+              )
+              children
+            )
+            (unless header
+              (if bookends
+                (add-ui-item (second bookends) preceeding-whitespace selected?)
+                (add-snip ")" no-delta selected?)
+              )
+            )
+          )
+        ]
+      )
+    )
+
+    (define (add-ui-item ui-item preceeding-whitespace selected-context?)
+      (define selected? (or selected-context? (send ui-item selected?)))
+      (if (is-a? ui-item zinal:ui:scalar%%)
+        (add-snip (send ui-item get-text) (send ui-item get-style-delta) selected?)
+        (add-ui-list ui-item preceeding-whitespace selected?)
+      )
+    )
+
+    (add-ui-item root-ui-item "" #f)
+  )
+)
+
 (define static-text%
   (class text%
 
-    (init event-handler!! root-ui-item)
+    (init event-handler!! ui-info)
 
     (define event-handler*!! event-handler!!)
+    (define ui-info* ui-info)
     (define can-insert*? #t)
 
     (define/override (on-event event)
@@ -59,102 +173,48 @@
       )
     )
 
-    (define no-delta (make-object style-delta%))
-
-    (define (get-style delta selected?)
-      (if selected?
+    (define (get-style pos-info)
+      (if (send pos-info selected?)
         selected-style
-        (send styles find-or-create-style base-style delta)
+        (send styles find-or-create-style base-style (send pos-info get-style-delta))
       )
+    )
+
+    (define/public (reselect! new-ui-info)
+      (define pos->pos-info (send ui-info* get-pos->pos-info))
+      (define new-pos->pos-info (send new-ui-info get-pos->pos-info))
+      (hash-map pos->pos-info (lambda (pos old-info)
+        (define new-info (hash-ref new-pos->pos-info pos))
+        (when (xor (send old-info selected?) (send new-info selected?))
+          (send this change-style (get-style new-info) pos (+ pos (string-length (send new-info get-text))))
+        )
+      ))
+      (set! ui-info* new-ui-info)
+    )
+
+    (define/public (scroll!)
+      (define pos->pos-info (send ui-info* get-pos->pos-info))
+      (define drop-not-selected
+        (dropf
+          (sort (hash-keys pos->pos-info) <)
+          (lambda (p)
+            (not (send (hash-ref pos->pos-info p) selected?))
+          )
+        )
+      )
+      (when (pair? drop-not-selected) (send this scroll-to-position (car drop-not-selected)))
     )
 
     (send this hide-caret #t)
 
-    (define (add-snip text style-delta selected?)
-      (define style (get-style style-delta selected?))
-      (define pos (send this get-start-position))
-      (send this change-style style)
-      (send this insert text)
-      (send this change-style base-style)
-      (and selected? pos)
-    )
-
-    (define (display-ui-list ui-list preceeding-whitespace selected?)
-      (define children (send ui-list get-children))
-      (define header (send ui-list get-header))
-      (define separator (send ui-list get-horizontal-separator))
-      (define bookends (send ui-list get-bookends))
-      (define pos #f)
-      (define (update-pos! new-pos) (unless pos (set! pos new-pos)))
-      (cond
-        [(send ui-list horizontal?)
-          (when bookends (display-ui-item (first bookends) preceeding-whitespace selected?))
-          (when header
-            (update-pos! (display-ui-item header preceeding-whitespace selected?))
-            (add-snip " " no-delta selected?)
-          )
-          (if (pair? children)
-            (foldl
-              (lambda (child prepend-separator?)
-                (when prepend-separator? (display-ui-item separator preceeding-whitespace selected?))
-                (update-pos! (display-ui-item child preceeding-whitespace selected?))
-                #t
-              )
-              #f
-              children
-            )
-            (unless (or header bookends)
-              (add-snip "()" no-delta selected?)
-            )
-          )
-          (when bookends (display-ui-item (second bookends) preceeding-whitespace selected?))
-        ]
-        [else ; vertical
-          (define child-whitespace (string-append preceeding-whitespace "    "))
-          (cond
-            [header
-              (update-pos! (display-ui-item header preceeding-whitespace selected?))
-            ]
-            [bookends
-              (display-ui-item (first bookends) preceeding-whitespace selected?)
-            ]
-            [else
-              (add-snip "(" no-delta selected?)
-            ]
-          )
-          (if (pair? children)
-            (for-each
-              (lambda (child)
-                (send this insert #\newline)
-                (send this insert child-whitespace)
-                (update-pos! (display-ui-item child child-whitespace selected?))
-              )
-              children
-            )
-            (unless header
-              (if bookends
-                (display-ui-item (second bookends) preceeding-whitespace selected?)
-                (add-snip ")" no-delta selected?)
-              )
-            )
-          )
-        ]
+    (for-each
+      (lambda (pos)
+        (define info (hash-ref (send ui-info* get-pos->pos-info) pos))
+        (send this change-style (get-style info))
+        (send this insert (send info get-text))
+        (send this change-style base-style)
       )
-      pos
-    )
-
-    (define (display-ui-item ui-item preceeding-whitespace selected-context?)
-      (define selected? (or selected-context? (send ui-item selected?)))
-      (if (is-a? ui-item zinal:ui:scalar%%)
-        (add-snip (send ui-item get-text) (send ui-item get-style-delta) selected?)
-        (display-ui-list ui-item preceeding-whitespace selected?)
-      )
-    )
-
-    (define scroll-pos* (display-ui-item root-ui-item "" #f))
-
-    (define/public (scroll!)
-      (when scroll-pos* (send this scroll-to-position scroll-pos*))
+      (sort (hash-keys (send ui-info* get-pos->pos-info)) <)
     )
 
     (set! can-insert*? #f)
@@ -170,10 +230,20 @@
 (define main-db (make-object zinal:sql-db% "junk.db"))
 (define main-ent-manager (make-object zinal:ent:manager% main-db))
 
+(define last-ui-info* #f)
 (define (display-ui! ui-item)
-  (define new-editor (make-object static-text% handle-event!! ui-item))
-  (send main-canvas set-editor new-editor)
-  (send new-editor scroll!)
+  (define new-ui-info (make-object lite-ui-info% ui-item))
+  (cond
+    [(and last-ui-info* (send new-ui-info equal-text? last-ui-info*))
+      (send (send main-canvas get-editor) reselect! new-ui-info)
+    ]
+    [else
+      (define new-editor (make-object static-text% handle-event!! new-ui-info))
+      (send main-canvas set-editor new-editor)
+    ]
+  )
+  (set! last-ui-info* new-ui-info)
+  (send (send main-canvas get-editor) scroll!)
   (void)
 )
 

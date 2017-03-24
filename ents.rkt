@@ -92,14 +92,14 @@
 (define handle-event-info% (class object%
 
   (define was-handled*? #t)
-  (define requires-reparse*? #t)
+  (define was-db-affected*? #t)
 
   (define/public (was-handled?)
     was-handled*?
   )
 
-  (define/public (requires-reparse?)
-    (and was-handled*? requires-reparse*?)
+  (define/public (was-db-affected?)
+    (and was-handled*? was-db-affected*?)
   )
 
   (define/public (set-wasnt-handled!)
@@ -108,8 +108,8 @@
     #t
   )
 
-  (define/public (set-doesnt-require-reparse!)
-    (set! requires-reparse*? #f)
+  (define/public (set-db-wasnt-affected!)
+    (set! was-db-affected*? #f)
     ; for convenience; also terrible
     #t
   )
@@ -996,6 +996,14 @@
   (define ent-manager* this)
   (define selected* #f)
 
+  ; TODO We want ui:scalar% to only refresh its text if the db has actually changed somehow, because the db calls required to update the text
+  ; are expensive. There are several major changes that could be made to the framework that might facilitate this, like making db handles
+  ; hashable, or giving every ent% a refresh! method that is invoked when that ent is first created and when it's reparsed. These are good
+  ; options to consider for later, but for now they require large reworkings and rethinkings of things, and aren't worth the time required to
+  ; do them properly. So for now it's sufficient just to keep a count of the parses that have happened so ui:var-scalar% can compare to the
+  ; global count and refresh if necessary
+  (define parse-count* 0)
+
   (define/public (get-initial-ui!)
     (unless (navigate-to-fresh-module*!)
       (get-initial-ui!)
@@ -1006,10 +1014,11 @@
   (define/public (handle-event!! event)
     (assert "Something must always be selected" selected*)
     (define global-event-info (handle-global-event*!! event))
-    (assert "global events currently cannot require reparse" (not (send global-event-info requires-reparse?)))
+    (assert "global events currently cannot require reparse" (not (send global-event-info was-db-affected?)))
     (unless (send global-event-info was-handled?)
       (define event-info (send selected* handle-event!! event))
-      (when (send event-info requires-reparse?)
+      (when (send event-info was-db-affected?)
+        (set! parse-count* (add1 parse-count*))
         (maybe-reparse*! (send (send (send selected* get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path* selected*)))
       )
     )
@@ -1065,25 +1074,25 @@
   (define (change-module*! handle-event-info event)
     (define module-to-go-to (get-module-from-user))
     (when module-to-go-to (spawn-root-entity*! module-to-go-to))
-    (send handle-event-info set-doesnt-require-reparse!)
+    (send handle-event-info set-db-wasnt-affected!)
   )
 
   (define (create-new-module*!! handle-event-info event)
     (define module-to-go-to (create-module*!!))
     (when module-to-go-to (spawn-root-entity*! module-to-go-to))
-    (send handle-event-info set-doesnt-require-reparse!)
+    (send handle-event-info set-db-wasnt-affected!)
   )
 
   (define (change-interface*! handle-event-info event)
     (define interface-to-go-to (get-interface-from-user (send db* get-all-interfaces)))
     (when interface-to-go-to (spawn-root-entity*! interface-to-go-to))
-    (send handle-event-info set-doesnt-require-reparse!)
+    (send handle-event-info set-db-wasnt-affected!)
   )
 
   (define (create-new-interface*!! handle-event-info event)
     (define interface-to-go-to (create-interface*!!))
     (when interface-to-go-to (spawn-root-entity*! interface-to-go-to))
-    (send handle-event-info set-doesnt-require-reparse!)
+    (send handle-event-info set-db-wasnt-affected!)
   )
 
   (define global-event-handler*
@@ -2759,6 +2768,7 @@
     (define (handle-left*! handle-event-info event)
       (cond
         [(not parent*)
+          ; TODO this comment is outdated
           ; This is a special case - normally we return #t from every event handler to prevent a fallback handler from getting to handle the event,
           ; but in the case of trying to go "out" when we're at the top level, we allow the fallback to handle it in case we want to go from a root
           ; child back to the containing root
@@ -2773,7 +2783,7 @@
           (select! parent*)
         ]
       )
-      (send handle-event-info set-doesnt-require-reparse!)
+      (send handle-event-info set-db-wasnt-affected!)
     )
 
     (define (handle-right*! handle-event-info event)
@@ -2784,7 +2794,7 @@
         (select-nearby-item-or*! (get-all-children) 0 +1 (thunk (select-next-sibling*! this)))
         (select-next-sibling*! this)
       )
-      (send handle-event-info set-doesnt-require-reparse!)
+      (send handle-event-info set-db-wasnt-affected!)
     )
 
     (define (get-child-of-first-vertical-ancestor* item)
@@ -2797,7 +2807,7 @@
 
     (define (handle-down*! handle-event-info event)
       (select-next-sibling*! (get-child-of-first-vertical-ancestor* this))
-      (send handle-event-info set-doesnt-require-reparse!)
+      (send handle-event-info set-db-wasnt-affected!)
     )
 
     (define (handle-up*! handle-event-info event)
@@ -2809,7 +2819,7 @@
         ))
         vert-child
       )
-      (send handle-event-info set-doesnt-require-reparse!)
+      (send handle-event-info set-db-wasnt-affected!)
     )
 
     (define/public (selected?)
@@ -2940,13 +2950,19 @@
     (init parent-ent style-delta text-getter item->event-handler fallback-event-handler)
 
     (define text-getter* text-getter)
+    (define current-text* #f)
+    (define last-seen-parse-count* 0)
 
     (define/override (accept visitor [data #f])
       (send visitor visit-var-scalar this data)
     )
 
     (define/override (get-text)
-      (text-getter*)
+      (unless (and current-text* (= last-seen-parse-count* parse-count*))
+        (set! current-text* (text-getter*))
+        (set! last-seen-parse-count* parse-count*)
+      )
+      current-text*
     )
 
     (super-make-object parent-ent style-delta item->event-handler fallback-event-handler)
@@ -3744,7 +3760,7 @@
     (make-object keyname-event-handler% (list (list
       (lambda (handle-event-info event)
         (spawn-root-entity*! root-handle)
-        (send handle-event-info set-doesnt-require-reparse!)
+        (send handle-event-info set-db-wasnt-affected!)
       )
       '("space" "enter")
     )))
@@ -3809,7 +3825,7 @@
             (select! new-root-handle-slot)
           ]
         )
-        (send handle-event-info set-doesnt-require-reparse!)
+        (send handle-event-info set-db-wasnt-affected!)
       )
       '("space" "enter" "backspace")
     )))
