@@ -351,7 +351,9 @@
 ; Example use:
 ; (require "sql-db.rkt")
 ; (define main-db (make-object zinal:sql-db% "junk.db"))
+; (translate "misc.rkt" main-db)
 ; (translate "db.rkt" main-db)
+; (translate "db-util.rkt" main-db)
 ; (translate "ui.rkt" main-db)
 ; (translate "sql-db.rkt" main-db)
 ; (translate "ents.rkt" main-db)

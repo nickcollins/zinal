@@ -7,6 +7,7 @@
 
 (require "misc.rkt")
 (require "db.rkt")
+(require "db-util.rkt")
 
 (provide transpile)
 

@@ -5,6 +5,7 @@
 
 (require "misc.rkt")
 (require "db.rkt")
+(require "db-util.rkt")
 
 (provide (prefix-out zinal: sql-db%))
 

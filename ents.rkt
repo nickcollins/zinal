@@ -7,6 +7,7 @@
 
 (require "misc.rkt")
 (require "db.rkt")
+(require "db-util.rkt")
 (require "ui.rkt")
 
 (provide zinal:ent:manager%)
@@ -28,13 +29,6 @@
 ; implementation of those handlers are the responsibility of the ent.
 
 ; HELPER FUNCTIONS
-
-(define (handles-equal? handle1 handle2)
-  (or
-    (and (not handle1) (not handle2))
-    (and handle1 handle2 (send handle1 equals? handle2))
-  )
-)
 
 (define (standard*? db-legacy-link-handle)
   (not (send db-legacy-link-handle get-library))
