@@ -2736,7 +2736,7 @@
     (define (select-nearby-item-or*! items index increment alt)
       (define num-items (length items))
       (define (get-candidate) (list-ref items index))
-      (if (or (< index 0) (>= index num-items))
+      (if (or (negative? index) (>= index num-items))
         (alt)
         (if (is-a? (get-candidate) zinal:ui:const%%)
           (select-nearby-item-or*! items (+ index increment) increment alt)

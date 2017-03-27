@@ -2613,7 +2613,7 @@
     (define (assert-valid-param-index* caller index required?)
       (assert
         (format "index ~a not a valid index for ~a param" index (if required? "required" "optional"))
-        (and (>= index 0) (< index (length (if required? (get-required-params* caller) (get-optional-params* caller)))))
+        (and (non-negative? index) (< index (length (if required? (get-required-params* caller) (get-optional-params* caller)))))
       )
     )
 
