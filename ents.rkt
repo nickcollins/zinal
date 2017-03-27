@@ -3,8 +3,7 @@
 
 (require racket/gui/base)
 (require racket/set)
-; for list-index
-(require srfi/1)
+(require (only-in srfi/1 list-index))
 
 (require "misc.rkt")
 (require "db.rkt")
@@ -3635,8 +3634,7 @@
   )
 
   (define (get-all-modules* [module-to-exclude #f])
-    ; UGH - srfi/1 redefines remove, so this uses the filter-like definition it provides rather than the standard lib definition
-    (remove (curry handles-equal? module-to-exclude) (send db* get-all-modules))
+    (remove module-to-exclude (send db* get-all-modules) handles-equal?)
   )
 
   (define (get-interface-from-user selectable-interfaces)
