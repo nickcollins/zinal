@@ -1012,7 +1012,7 @@
       (define event-info (send selected* handle-event!! event))
       (when (send event-info was-db-affected?)
         (set! parse-count* (add1 parse-count*))
-        (maybe-reparse*! (send (send (send selected* get-root) get-parent-ent) get-slot) (reverse (get-backwards-selection-path* selected*)))
+        (maybe-reparse*! (get-root-slot*) (reverse (get-backwards-selection-path* selected*)))
       )
     )
     (send selected* get-root)
@@ -1020,6 +1020,10 @@
 
   (define (select! slot/item)
     (set! selected* (slot/ui-item->ui-item slot/item))
+  )
+
+  (define (get-root-slot*)
+    (send (send (send selected* get-root) get-parent-ent) get-slot)
   )
 
   (define (get-backwards-selection-path* ui-item)
@@ -1088,12 +1092,42 @@
     (send handle-event-info set-db-wasnt-affected!)
   )
 
+  (define (find-prev-todo*! handle-event-info event)
+    (find-todo*! db-search-prev handle-event-info event)
+  )
+
+  (define (find-next-todo*! handle-event-info event)
+    (find-todo*! db-search-next handle-event-info event)
+  )
+
+  (define (find-todo*! searcher handle-event-info event)
+    (define current-handle (send (send selected* get-parent-ent) get-cone-root))
+    (define todo-handle (searcher (curryr is-a? zinal:db:unassigned%%) current-handle))
+    (when todo-handle
+      (define current-root-slot (get-root-slot*))
+      (define todo-root-handle (find-first-root-ancestor todo-handle))
+      (assert "found todo handle has no valid root" todo-root-handle)
+      (define new-root-slot
+        (if (handles-equal? (slot->db-handle current-root-slot) todo-root-handle)
+          current-root-slot
+          (spawn-root-entity*! todo-root-handle)
+        )
+      )
+      (define new-selection (find-handle-under-slot new-root-slot todo-handle))
+      (assert "could not find the todo handle underneath the new root slot" new-selection)
+      (select! new-selection)
+    )
+    (send handle-event-info set-db-wasnt-affected!)
+  )
+
   (define global-event-handler*
     (make-object keyname-event-handler% (list
       (list change-module*! '("e"))
       (list create-new-module*!! '("E"))
       (list change-interface*! '("c:e"))
       (list create-new-interface*!! '("c:E"))
+      (list find-next-todo*! '("t"))
+      (list find-prev-todo*! '("T"))
     ))
   )
 
@@ -3799,20 +3833,10 @@
             (navigate-to-fresh-module*! (get-all-modules* root-handle) #f)
           ]
           [else
-            (define (find-first-root-ancestor h)
-              (define p (send h get-parent))
-              (assert "could not find root ancestor of non-module, non-interface root handle" p)
-              (if (can-be-root*? p) p (find-first-root-ancestor p))
-            )
-            (define (find-root-handle-slot s)
-              (define s-children (send (send s get-ent) get-cone-leaves))
-              (or
-                (findf (compose1 (curry handles-equal? root-handle) slot->db-handle) s-children)
-                (ormap find-root-handle-slot s-children)
-              )
-            )
-            (define new-root-slot (spawn-root-entity*! (find-first-root-ancestor root-handle)))
-            (define new-root-handle-slot (find-root-handle-slot new-root-slot))
+            (define first-root-ancestor (find-first-root-ancestor root-handle))
+            (assert "could not find root ancestor of non-module, non-interface root handle" first-root-ancestor)
+            (define new-root-slot (spawn-root-entity*! first-root-ancestor))
+            (define new-root-handle-slot (find-handle-under-slot new-root-slot root-handle))
             (assert "could not find the previous root handle underneath the new root handle" new-root-handle-slot)
             (select! new-root-handle-slot)
           ]
@@ -3835,6 +3859,21 @@
   (define (can-be-root*? handle)
     ; TODO maybe make some definitions present inline
     (is-one-of? handle (list zinal:db:def%% zinal:db:define-method%% zinal:db:override-legacy-method%% zinal:db:subtype%% zinal:db:module%%))
+  )
+
+  (define (find-first-root-ancestor h)
+    (define parent (send h get-parent))
+    (and parent
+      (if (can-be-root*? parent) parent (find-first-root-ancestor parent))
+    )
+  )
+
+  (define (find-handle-under-slot slot handle)
+    (define slot-children (send (send slot get-ent) get-cone-leaves))
+    (or
+      (findf (compose1 (curry handles-equal? handle) slot->db-handle) slot-children)
+      (ormap (curryr find-handle-under-slot handle) slot-children)
+    )
   )
 
   (define (function-definition*? handle)

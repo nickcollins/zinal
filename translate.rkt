@@ -5,6 +5,7 @@
 
 (require "misc.rkt")
 (require "db.rkt")
+(require "db-util.rkt")
 
 (provide translate)
 
@@ -30,7 +31,20 @@
   (define module-name (second file-data))
   (define module (send db create-module!! (symbol->string module-name)))
   (translate-body module-children module)
+  (second-pass module)
   (void)
+)
+
+(define (second-pass module-handle)
+  (audit-unassigned* module-handle module-handle)
+)
+
+(define (audit-unassigned* module-handle current-handle)
+  (define next-handle (db-search-next (disjoin (curry handles-equal? module-handle) (curryr is-a? zinal:db:unassigned%%)) current-handle))
+  (when (is-a? next-handle zinal:db:unassigned%%)
+    (define ref-name (send next-handle get-short-desc))
+    (audit-unassigned* module-handle (or (and ref-name (translate-reference ref-name next-handle)) next-handle))
+  )
 )
 
 (define (translate-list-like inserter list-data)
@@ -207,6 +221,20 @@
   )
 )
 
+(define (translate-reference ref-name db-unassigned)
+  (define possible-referables (filter (lambda (r) (equal? ref-name (send r get-short-desc))) (send db-unassigned get-visible-referables-underneath)))
+  (define (ref) (car possible-referables))
+  (and (= 1 (length possible-referables))
+    (cond
+      [(is-a? (ref) zinal:db:param%%) (send db-unassigned assign-param-ref!! (ref))]
+      [(is-a? (ref) zinal:db:def%%) (send db-unassigned assign-def-ref!! (ref))]
+      [(is-a? (ref) zinal:db:define-class%%) (send db-unassigned assign-class-ref!! (ref))]
+      [(is-a? (ref) zinal:db:interface%%) (send db-unassigned assign-interface-ref!! (ref))]
+      [else (error 'translate-reference "Invalid referable")]
+    )
+  )
+)
+
 (define (translate-datum datum db-unassigned)
   (cond
     [(list? datum)
@@ -292,28 +320,11 @@
     ]
     [(symbol? datum)
       (define datum-as-string (symbol->string datum))
-      (define (unique-referable)
-        (define possible-referables (filter (lambda (r) (equal? datum-as-string (send r get-short-desc))) (send db-unassigned get-visible-referables-after)))
-        (and (= 1 (length possible-referables)) (car possible-referables))
-      )
-      (cond
-        [(is-legacy? datum)
-          (send db-unassigned assign-legacy-link!! #f datum-as-string)
-        ]
-        [(unique-referable) =>
-          (lambda (ur)
-            (cond
-              [(is-a? ur zinal:db:param%%) (send db-unassigned assign-param-ref!! ur)]
-              [(is-a? ur zinal:db:def%%) (send db-unassigned assign-def-ref!! ur)]
-              [(is-a? ur zinal:db:define-class%%) (send db-unassigned assign-class-ref!! ur)]
-              [(is-a? ur zinal:db:interface%%) (send db-unassigned assign-interface-ref!! ur)]
-              [else (error 'translate-datum "Invalid referable")]
-            )
-          )
-        ]
-        [else
+      (if (is-legacy? datum)
+        (send db-unassigned assign-legacy-link!! #f datum-as-string)
+        (unless (translate-reference datum-as-string db-unassigned)
           (send db-unassigned set-short-desc!! datum-as-string)
-        ]
+        )
       )
     ]
     [else
