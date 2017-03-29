@@ -233,6 +233,9 @@
 
     (abstract get-choice-from-ui*)
 
+    (define chosen* #f)
+    (define has-been-chosen* #f)
+
     (define/override (on-subwindow-char receiver key-event)
       (case (send key-event get-key-code)
         [(#\return)
@@ -265,19 +268,16 @@
     )
     (augment on-close)
 
-    (super-make-object label)
-
-    (define chosen* #f)
-    (define has-been-chosen* #f)
-
     (define/public (get-choice)
       chosen*
     )
 
-    (define/private (close*!)
+    (define (close*!)
       (send this on-close)
       (send this show #f)
     )
+
+    (super-make-object label)
   )
 )
 
@@ -289,9 +289,13 @@
     (init title message keys&choices [key-equalifier equal?])
 
     (define this* this)
+    (define keys&choices* (sort keys&choices (lambda (a b) (string<? (second a) (second b)))))
+    (define chooser* #f)
 
     (define auto-complete-list-box%
       (class list-box%
+
+        (define chars '())
 
         (define/override (on-subwindow-char receiver key-event)
           (define cur-selection-cur-index (send this get-selection))
@@ -332,9 +336,7 @@
           )
         )
 
-        (super-make-object message '() this* (const #f) '(single vertical-label))
-
-        (define/private (build-choices*! selection-key)
+        (define (build-choices*! selection-key)
           (send this clear)
           (for-each
             (lambda (pair)
@@ -361,7 +363,7 @@
           (send this min-height (+ 60 (* 25 (send this get-number))))
         )
 
-        (define/private (subsequence? candidate sequence)
+        (define (subsequence? candidate sequence)
           (cond
             [(null? candidate)
               #t
@@ -378,12 +380,13 @@
           )
         )
 
-        (define/private (reset-choices*!)
+        (define (reset-choices*!)
           (set! chars '())
           (build-choices*! #f)
         )
 
-        (define chars '())
+        (super-make-object message '() this* (const #f) '(single vertical-label))
+
         (reset-choices*!)
       )
     )
@@ -395,8 +398,7 @@
 
     (super-make-object title)
 
-    (define keys&choices* (sort keys&choices (lambda (a b) (string<? (second a) (second b)))))
-    (define chooser* (make-object auto-complete-list-box%))
+    (set! chooser* (make-object auto-complete-list-box%))
   )
 )
 
@@ -423,9 +425,14 @@
     (init title message choices)
 
     (define this* this)
+    (define choices* choices)
+    (define num-choices* (length choices))
+    (define chooser* #f)
 
     (define keyboard-choice%
       (class choice%
+
+        (define chars "")
 
         (define/override (on-subwindow-char receiver key-event)
           (define current-selection (send this get-selection))
@@ -465,8 +472,6 @@
         )
 
         (super-make-object message choices this* (const #f) '(vertical-label))
-
-        (define chars "")
       )
     )
 
@@ -476,9 +481,7 @@
 
     (super-make-object title)
 
-    (define choices* choices)
-    (define num-choices* (length choices))
-    (define chooser* (make-object keyboard-choice%))
+    (set! chooser* (make-object keyboard-choice%))
   )
 )
 
@@ -988,6 +991,7 @@
   (define db* db)
   (define ent-manager* this)
   (define selected* #f)
+  (define global-event-handler* #f)
 
   ; TODO We want ui:scalar% to only refresh its text if the db has actually changed somehow, because the db calls required to update the text
   ; are expensive. There are several major changes that could be made to the framework that might facilitate this, like making db handles
@@ -1120,18 +1124,19 @@
     (send handle-event-info set-db-wasnt-affected!)
   )
 
-  (define global-event-handler*
-    (make-object keyname-event-handler% (list
-      (list change-module*! '("e"))
-      (list create-new-module*!! '("E"))
-      (list change-interface*! '("c:e"))
-      (list create-new-interface*!! '("c:E"))
-      (list find-next-todo*! '("t"))
-      (list find-prev-todo*! '("T"))
-    ))
-  )
-
   (define (handle-global-event*!! event)
+    (unless global-event-handler*
+      (set! global-event-handler*
+        (make-object keyname-event-handler% (list
+          (list change-module*! '("e"))
+          (list create-new-module*!! '("E"))
+          (list change-interface*! '("c:e"))
+          (list create-new-interface*!! '("c:E"))
+          (list find-next-todo*! '("t"))
+          (list find-prev-todo*! '("T"))
+        ))
+      )
+    )
     (send global-event-handler* handle-event!! event)
   )
 

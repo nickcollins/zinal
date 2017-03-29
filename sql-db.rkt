@@ -204,6 +204,12 @@
 
         (assert-real-id id)
 
+        (define id* id)
+        ; This object will be invalidated if the data it's referring to gets deleted or unassigned. Any attempts to do something with
+        ; an invalid handle will cause an exception. Calling code is responsible for never using a stale handle, but this is a sanity
+        ; check.
+        (define valid*? #t)
+
         (define/public (get-db)
           (assert-valid)
           sql-db*
@@ -233,12 +239,6 @@
           (set! valid*? #f)
         )
 
-        (define id* id)
-        ; This object will be invalidated if the data it's referring to gets deleted or unassigned. Any attempts to do something with
-        ; an invalid handle will cause an exception. Calling code is responsible for never using a stale handle, but this is a sanity
-        ; check.
-        (define valid*? #t)
-
         (super-make-object)
       )
     )
@@ -264,6 +264,8 @@
       (class* db-element% (zinal:db:node%%) ; abstract
 
         (init loc)
+
+        (define loc* loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -339,8 +341,6 @@
             ]
           )
         )
-
-        (define loc* loc)
 
         (super-make-object (send loc get-cell))
       )
@@ -578,9 +578,9 @@
           (can-set-super-class?)
         )
         (send (get-super-class) delete-and-invalidate*!!)
-        (define loc (get-super-class-loc*))
-        (creator loc)
-        (get-node-handle! loc)
+        (define super-loc (get-super-class-loc*))
+        (creator super-loc)
+        (get-node-handle! super-loc)
       )
 
       (define (get-super-class-loc*)
