@@ -338,14 +338,20 @@
 
         (define (build-choices*! selection-key)
           (send this clear)
+          (define found-exact-match? #f)
           (for-each
             (lambda (pair)
               (define key (car pair))
               (define choice (second pair))
-              (when (subsequence? chars (string->list (string-downcase choice)))
+              (define choice-list (string->list (string-downcase choice)))
+              (when (subsequence? chars choice-list)
                 (send this append choice key)
                 (define cur-index (sub1 (send this get-number)))
-                (when (and selection-key (key-equalifier selection-key key))
+                (when (equal? chars choice-list)
+                  (set! found-exact-match? #t)
+                  (send this set-selection cur-index)
+                )
+                (when (and (not found-exact-match?) selection-key (key-equalifier selection-key key))
                   (send this set-selection cur-index)
                 )
               )
@@ -353,9 +359,6 @@
             keys&choices*
           )
           (when (zero? (send this get-number)) (reset-choices*!))
-          ; TODO we need to laser in on any reference that's an exact match
-          ; if we type "n", we don't want it to be underneath "index", because then there's no way to get
-          ; to "n" without resorting to the arrow keys or mouse
           (unless (send this get-selection)
             (send this set-selection 0)
           )
