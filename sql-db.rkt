@@ -10,6 +10,11 @@
 
 (provide (prefix-out zinal: sql-db%))
 
+(define has-reference-id* (interface (zinal:db:referable%%)
+
+  get-reference-id* ; ()
+))
+
 ; All indexed db queries must check that id is real first. higher-level stuff need not check directly
 (define (assert-real-id id)
   (assert (format "id ~a was non-positive" id) (and (number? id) (positive? id)))
@@ -286,7 +291,7 @@
 
         (define/public (get-parent)
           (send this assert-valid)
-          (convert-to-valid-parent* (send loc* get-id))
+          (convert-to-valid-parent* (send loc* get-loc-id))
         )
 
         (define/public (get-module)
@@ -307,14 +312,14 @@
         (define/public (can-unassign?)
           (send this assert-valid)
           (define col (send loc* get-col))
-          (define table (get-table (send loc* get-id)))
+          (define table (get-table (send loc* get-loc-id)))
           (not (equal? "superclass_id" col))
         )
 
         (define/public (unassign!!)
           (send this assert-valid)
           (assert
-            (format "Cannot unassign node (~a, ~a):~a" (send loc* get-id) (send loc* get-col) (send this get-id))
+            (format "Cannot unassign node (~a, ~a):~a" (send loc* get-loc-id) (send loc* get-col) (send this get-id))
             (can-unassign?)
           )
           (delete-and-invalidate*!!)
@@ -374,7 +379,7 @@
 
     ; OOP
 
-    (define db-interface% (class* db-non-node-element% (zinal:db:interface%%)
+    (define db-interface% (class* db-non-node-element% (zinal:db:interface%% has-reference-id*)
 
       (init id)
 
@@ -591,7 +596,7 @@
       (super-make-object loc)
     ))
 
-    (define db-define-class% (class* db-class% (zinal:db:define-class%%)
+    (define db-define-class% (class* db-class% (zinal:db:define-class%% has-reference-id*)
 
       (init loc)
 
@@ -780,22 +785,22 @@
       (super-make-object id)
     ))
 
-    (define db-general-define-method% (class db-node% ; abstract
+    (define db-general-define-method% (class* db-node% (zinal:db:parent-node%%) ; abstract
 
       (init loc)
 
       (define/override (delete-and-invalidate*!!)
-        (send (get-lambda) delete-and-invalidate*!!)
+        (send (get-lambda-impl) delete-and-invalidate*!!)
         (delete-id*!! (send this get-id))
         (super delete-and-invalidate*!!)
       )
 
       (define/public (get-children)
         (send this assert-valid)
-        (list (get-lambda))
+        (list (get-lambda-impl))
       )
 
-      (define/public (get-lambda)
+      (define/public (get-lambda-impl)
         (send this assert-valid)
         (get-node-handle! (send this get-id) "lambda_id")
       )
@@ -825,6 +830,10 @@
       (define/public (is-override?)
         (send this assert-valid)
         (does-any-super-define-method? this (get-method))
+      )
+
+      (define/public (get-lambda)
+        (send this get-lambda-impl)
       )
 
       (super-make-object loc)
@@ -860,6 +869,10 @@
         (send this assert-valid)
         (q!! query-exec "UPDATE ~a SET is_augment = ?2" (send this get-id) (list (if should-be-augment? SQL-TRUE SQL-FALSE)))
         (void)
+      )
+
+      (define/public (get-lambda)
+        (send this get-lambda-impl)
       )
 
       (super-make-object loc)
@@ -912,16 +925,16 @@
       (init loc)
 
       (define/override (delete-and-invalidate*!!)
-        (send (get-object) delete-and-invalidate*!!)
+        (send (get-object-impl*) delete-and-invalidate*!!)
         (super delete-and-invalidate*!!)
       )
 
       (define/override (get-children)
         (send this assert-valid)
-        (cons (get-object) (super get-children))
+        (cons (get-object-impl*) (super get-children))
       )
 
-      (define/public (get-object)
+      (define/public (get-object-impl*)
         (send this assert-valid)
         (get-node-handle! (send this get-id) "object_id")
       )
@@ -936,6 +949,10 @@
       (define/override (accept visitor [data #f])
         (send this assert-valid)
         (send visitor visit-invoke-method this data)
+      )
+
+      (define/public (get-object)
+        (send this get-object-impl*)
       )
 
       (define/public (get-method)
@@ -961,6 +978,10 @@
       (define/override (accept visitor [data #f])
         (send this assert-valid)
         (send visitor visit-invoke-legacy-method this data)
+      )
+
+      (define/public (get-object)
+        (send this get-object-impl*)
       )
 
       (define/public (get-legacy-method-name)
@@ -1153,7 +1174,7 @@
     )
 
     (define db-def%
-      (class* db-describable-node% (zinal:db:def%%)
+      (class* db-describable-node% (zinal:db:def%% has-reference-id*)
 
         (init loc)
 
@@ -1277,7 +1298,7 @@
           (when expect-unassigned?
             (define unassigned-handle (get-node-handle! loc-to-delete))
             (assert
-              (format "You can only remove!! an unassigned: (~a, ~a):~a" (send loc-to-delete get-id) (send loc-to-delete get-col) (send loc-to-delete get-cell))
+              (format "You can only remove!! an unassigned: (~a, ~a):~a" (send loc-to-delete get-loc-id) (send loc-to-delete get-col) (send loc-to-delete get-cell))
               (is-a? unassigned-handle zinal:db:unassigned%%)
             )
             (send unassigned-handle delete-and-invalidate*!!)
@@ -1467,7 +1488,7 @@
         (assert-is* to-be-required zinal:db:module%%)
         (and
           (not (send to-be-required is-main-module?))
-          (not (path? to-be-required this (lambda (m) (send m get-required-modules))))
+          (not (path*? to-be-required this (lambda (m) (send m get-required-modules))))
         )
       )
 
@@ -1521,7 +1542,7 @@
     ))
 
     (define db-param%
-      (class* db-describable-node% (zinal:db:param%%)
+      (class* db-describable-node% (zinal:db:param%% has-reference-id*)
 
         (init loc)
 
@@ -1926,7 +1947,7 @@
     (define db-unassigned%
       (class* db-describable-node% (zinal:db:unassigned%%)
 
-        (init loc)
+        (init init-loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
@@ -2198,17 +2219,17 @@
           ))
         )
 
-        (define/private (assign-atom*!! type storage-value)
+        (define (assign-atom*!! type storage-value)
           (assign*!! (lambda (loc)
             (create-normal!! "atoms" loc (list (list "type" (symbol->string type)) (list "value" storage-value)))
           ))
         )
 
-        (define/private (assign-ref*!! referable)
+        (define (assign-ref*!! referable)
           (assign*!! (curryr create-reference!! referable))
         )
 
-        (define/private (assign*!! assigner!!)
+        (define (assign*!! assigner!!)
           (send this assert-valid)
           (define loc (send this get-loc))
           (delete-and-invalidate*!!)
@@ -2220,7 +2241,7 @@
           (assert (format "~a is not within a class" (send this get-id)) (get-containing-class* this))
         )
 
-        (super-make-object loc)
+        (super-make-object init-loc)
       )
     )
 
@@ -2233,7 +2254,7 @@
         (super-make-object)
         (define id* id)
         (define col* col)
-        (define/public (get-id) id*)
+        (define/public (get-loc-id) id*)
         (define/public (get-col) col*)
         (define/public (get-cell) (get-cell* id* col*))
         (define/public (get-id&col) (list id* col*))
@@ -2256,7 +2277,7 @@
       (assert-is* to-super zinal:db:interface%%)
       (or
         (is-a? caller zinal:db:class%%)
-        (not (path? to-super caller get-direct-super-interfaces*))
+        (not (path*? to-super caller get-direct-super-interfaces*))
       )
     )
 
@@ -2296,7 +2317,7 @@
       (void)
     )
 
-    (define/public (get-all-methods* caller)
+    (define (get-all-methods* caller)
       (send caller assert-valid)
       (define direct-methods (if (is-a? caller zinal:db:type%%) (get-direct-methods* caller) '()))
       (append direct-methods (append-map get-direct-methods* (get-all-super-types caller)))
@@ -2386,7 +2407,7 @@
     )
 
     (define (does-this-or-any-super-declare-method? subtype method [severed-edge #f])
-      (path? subtype (send method get-containing-type) get-direct-super-types severed-edge)
+      (path*? subtype (send method get-containing-type) get-direct-super-types severed-edge)
     )
 
     (define (does-any-super-define-method? subclass method [severed-edge #f])
@@ -2848,7 +2869,7 @@
       (assert-bogus-id loc)
       (define expanded-assocs
         (append
-          (list (list "parent_id" (send loc get-id)) (list "parent_col" (send loc get-col)))
+          (list (list "parent_id" (send loc get-loc-id)) (list "parent_col" (send loc get-col)))
           col-value-assocs
         )
       )
@@ -2916,7 +2937,7 @@
     (define (assert-bogus-id loc)
       (define id (send loc get-cell))
       (assert
-        (format "cell ~a:~a should be ~a but is ~a" (send loc get-id) (send loc get-col) BOGUS-ID id)
+        (format "cell ~a:~a should be ~a but is ~a" (send loc get-loc-id) (send loc get-col) BOGUS-ID id)
         (= BOGUS-ID id)
       )
     )
@@ -2930,7 +2951,7 @@
 
     ; WARNING: This function can orphan extant nodes.
     (define (set-loc-dangerous*!! loc value)
-      (set-cell-dangerous*!! (send loc get-id) (send loc get-col) value)
+      (set-cell-dangerous*!! (send loc get-loc-id) (send loc get-col) value)
     )
 
     ; WARNING: This function can orphan extant nodes.
@@ -3118,11 +3139,11 @@
       (unless (is-a? container zinal:db:interface%%) (assert-visible* location-node container))
     )
 
-    (define (path? a b get-children* [severed-edge #f])
+    (define (path*? a b get-children* [severed-edge #f])
       (or
         (equals*? a b)
         (ormap
-          (curryr path? b get-children* severed-edge)
+          (curryr path*? b get-children* severed-edge)
           (filter (negate (curry severed? severed-edge a)) (get-children* a))
         )
       )

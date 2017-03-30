@@ -11,6 +11,17 @@
 
 (define no-delta (make-object style-delta%))
 
+(define pos-info% (class object%
+  (init text style-delta is-selected?)
+  (define text* text)
+  (define style-delta* style-delta)
+  (define selected*? is-selected?)
+  (define/public (get-text) text*)
+  (define/public (get-style-delta) style-delta*)
+  (define/public (selected?) selected*?)
+  (super-make-object)
+))
+
 ; necessary for perf
 (define lite-ui-info%
   (class object%
@@ -18,17 +29,6 @@
     (init root-ui-item)
 
     (super-make-object)
-
-    (define pos-info% (class object%
-      (init text style-delta is-selected?)
-      (define text* text)
-      (define style-delta* style-delta)
-      (define selected*? is-selected?)
-      (define/public (get-text) text*)
-      (define/public (get-style-delta) style-delta*)
-      (define/public (selected?) selected*?)
-      (super-make-object)
-    ))
 
     (define pos->pos-info* (make-hash))
     (define last-pos* 0)
