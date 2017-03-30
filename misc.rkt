@@ -3,7 +3,7 @@
 
 (require (only-in srfi/1 list-index))
 
-(provide assert string-suffix? non-negative? map-by-index is-one-of? tree-search-next tree-search-prev)
+(provide assert non-negative? map-by-index is-one-of? tree-search-next tree-search-prev unique)
 
 ; MACROS
 
@@ -13,13 +13,8 @@
 
 ; FUNCTIONS
 
-; ugh - in srfi/13, but that seems to redefine string-join
-(define (string-suffix? suf s)
-  (let (
-    [s-len (string-length s)]
-    [suf-len (string-length suf)])
-    (equal? (substring s (- s-len suf-len) s-len) suf)
-  )
+(define (unique lst)
+  (and lst (= 1 (length lst)) (car lst))
 )
 
 (define non-negative? (negate negative?))

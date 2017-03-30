@@ -2,6 +2,7 @@
 (module sql-db racket
 
 (require db)
+(require (only-in srfi/13 string-suffix?))
 
 (require "misc.rkt")
 (require "db.rkt")
