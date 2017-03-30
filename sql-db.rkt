@@ -1258,6 +1258,9 @@
           (define new-node-id
             (create-normal!! "list_nodes" insertion-point-loc (list (list "owner_id" list-header-id) (list "car_id" BOGUS-ID) (list "cdr_id" old-cdr)))
           )
+          (unless (= NIL-ID old-cdr)
+            (set-cell-dangerous*!! old-cdr "parent_id" new-node-id)
+          )
           ; returns the car_id loc so that the caller can set the node
           (make-object loc% new-node-id "car_id")
         )
@@ -1905,7 +1908,7 @@
 
       (define/override (accept visitor [data #f])
         (send this assert-valid)
-        (send visitor visit-define-class-ref this data)
+        (send visitor visit-interface-ref this data)
       )
 
       (define/override (get-referable-id-col)

@@ -37,16 +37,19 @@
       pos->pos-info*
     )
 
-    (define/public (equal-text? other-info)
-      (define other-pos->pos-info (send other-info get-pos->pos-info))
-      (andmap identity (hash-map pos->pos-info* (lambda (pos info)
-        (define other-info (hash-ref other-pos->pos-info pos #f))
-        (and
-          other-info
-          (equal? (send info get-text) (send other-info get-text))
-          (send (send info get-style-delta) equal? (send other-info get-style-delta))
-        )
-      )))
+    (define/public (equal-text? other-lite-ui-info)
+      (define other-pos->pos-info (send other-lite-ui-info get-pos->pos-info))
+      (and
+        (andmap (lambda (p) (hash-ref pos->pos-info* p #f)) (hash-keys other-pos->pos-info))
+        (andmap identity (hash-map pos->pos-info* (lambda (pos info)
+          (define other-info (hash-ref other-pos->pos-info pos #f))
+          (and
+            other-info
+            (equal? (send info get-text) (send other-info get-text))
+            (send (send info get-style-delta) equal? (send other-info get-style-delta))
+          )
+        )))
+      )
     )
 
     (define (add-snip text style-delta selected?)
