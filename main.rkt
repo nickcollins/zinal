@@ -226,12 +226,15 @@
 
 ; PROGRAM
 
+(define db-file-path (get-file "Choose a zinal sqlite db to open"))
+(unless db-file-path (exit))
+
+(define main-db (make-object zinal:sql-db% db-file-path))
+(define main-ent-manager (make-object zinal:ent:manager% main-db))
+
 (define main-window (make-object frame% "zinal"))
 (define main-canvas (make-object editor-canvas% main-window))
 (send main-canvas set-canvas-background (make-object color% #x15 #x15 #x15))
-
-(define main-db (make-object zinal:sql-db% "junk.db"))
-(define main-ent-manager (make-object zinal:ent:manager% main-db))
 
 (define last-ui-info* #f)
 (define (display-ui! ui-item)
