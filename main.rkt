@@ -2,12 +2,15 @@
 (module main racket
 
 (require racket/gui/base)
+(require (only-in racket/exn exn->string))
+(require (only-in compiler/embed create-embedding-executable))
 
 (require "misc.rkt")
 (require "ents.rkt")
 (require "db.rkt")
 (require "sql-db.rkt")
 (require "ui.rkt")
+(require "transpile.rkt")
 
 (define no-delta (make-object style-delta%))
 
@@ -224,6 +227,42 @@
   )
 )
 
+(define (compile-db db output-file-path)
+  (when output-file-path
+    ; TODO not sure what the best way to do concurrency is but this will have to do for now
+    (define dialog (make-object dialog% "Compiling ..."))
+    (define compilation-finished? #f)
+    (define compile-thread (thread (thunk
+      (with-handlers
+        ([(const #t) (lambda (e)
+          (set! compilation-finished? #t)
+          (message-box "Cannot compile" (exn->string e) #f '(ok caution))
+          (send dialog show #f)
+        )])
+        (define transpiled-data (transpile db))
+        (define compiled-units
+          (parameterize ([current-namespace (make-base-namespace)])
+            (map compile (list
+              (append (list 'module '__zinal_dummy_module__ 'racket) transpiled-data)
+              (list 'dynamic-require '''__zinal_dummy_module__ #f)
+            ))
+          )
+        )
+        (create-embedding-executable output-file-path #:modules '() #:literal-expressions compiled-units)
+        (set! compilation-finished? #t)
+        (send dialog show #f)
+      )
+    )))
+    (make-object message% "Compiling - this may take a while ..." dialog)
+    (make-object button% "Cancel" dialog (thunk* (kill-thread compile-thread) (send dialog show #f)))
+    (unless compilation-finished?
+      (send dialog show #t)
+    )
+    ; TODO hack because i don't know how to disable the x button
+    (unless (thread-dead? compile-thread) (kill-thread compile-thread))
+  )
+)
+
 ; PROGRAM
 
 (define db-file-path (get-file "Choose a zinal sqlite db to open"))
@@ -234,6 +273,9 @@
 
 (define main-window (make-object frame% "zinal"))
 (define main-canvas (make-object editor-canvas% main-window))
+(define menu-bar (make-object menu-bar% main-window))
+(define compile-menu (make-object menu% "compile" menu-bar))
+(void (make-object menu-item% "compile" compile-menu (thunk* (compile-db main-db (put-file "Choose the executable destination")))))
 (send main-canvas set-canvas-background (make-object color% #x15 #x15 #x15))
 
 (define last-ui-info* #f)
