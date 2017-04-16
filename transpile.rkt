@@ -8,8 +8,13 @@
 (require "misc.rkt")
 (require "db.rkt")
 (require "db-util.rkt")
+(require "sql-db.rkt")
 
 (provide transpile)
+
+(define ID-PREFIX "zinal_id:_")
+
+(define transpiler #f)
 
 ; reads the db, transpiles its contents into scheme, and returns a scheme list of all expressions required by the main
 ; module in an appropriate order
@@ -20,16 +25,41 @@
   (define methods (append-map (lambda (i) (if (is-a? i zinal:db:type%%) (send i get-direct-methods) '())) identifiables))
   (set! identifiables (append identifiables methods))
   (define included-modules '())
-  (define transpilation (append (transpile-requires (send db get-all-legacies)) (transpile-all-interfaces (send db get-all-interfaces) identifiables)))
-  (define (include-module module)
-    (for-each include-module (send module get-required-modules))
-    (unless (findf (curry equals*? module) included-modules)
-      (set! transpilation (append transpilation (db-elems->scheme (send module get-body) identifiables)))
-      (set! included-modules (cons module included-modules))
+  (define transpilation (append
+    (error-setup identifiables)
+    (transpile-requires (send db get-all-legacies))
+    (transpile-all-interfaces (send db get-all-interfaces) identifiables)
+  ))
+  (define (include-module db-module)
+    (for-each include-module (send db-module get-required-modules))
+    (unless (findf (curry equals*? db-module) included-modules)
+      (set! transpilation (append transpilation (db-elems->scheme (send db-module get-body) identifiables)))
+      (set! included-modules (cons db-module included-modules))
     )
   )
   (include-module main-module)
   transpilation
+)
+
+(define (error-setup identifiables)
+  ; TODO this (and other things) should use quasiquote, but i haven't figure out how to make that work with translation
+  (list
+    (list 'define 'zinal:_ordered-identifiable-strings_ (cons 'list (map (curryr get-short-desc-or "<unnamed>") identifiables)))
+    (list 'define 'zinal:_orig-error-display-handler_ (list 'error-display-handler))
+    (list 'error-display-handler (list 'lambda (list 'msg 'ex)
+      (list 'define 'orig-error-port (list 'current-error-port))
+      (list 'define 'error-port (list 'open-output-string))
+      (list 'current-error-port 'error-port)
+      (list 'zinal:_orig-error-display-handler_ 'msg 'ex)
+      (list 'current-error-port 'orig-error-port)
+      (list 'define 'display-result (list 'regexp-replace* (list 'pregexp (format "~a\\d+\\b" ID-PREFIX)) (list 'get-output-string 'error-port) (list 'lambda (list 'id)
+        ; Note - this algo must invert identifiable->unique-id
+        (list 'list-ref 'zinal:_ordered-identifiable-strings_ (list 'sub1 (list 'string->number (list 'substring 'id (string-length ID-PREFIX)))))
+      )))
+      (list 'display 'display-result 'orig-error-port)
+      (list 'close-output-port 'error-port)
+    ))
+  )
 )
 
 (define (db-elem->scheme elem identifiables)
@@ -47,7 +77,7 @@
       (define supers (send i get-direct-super-interfaces))
       (list
         'define
-        (get-unique-id i identifiables)
+        (identifiable->unique-id i identifiables)
         (list* 'interface (db-elems->scheme supers identifiables) (db-elems->scheme methods identifiables))
       )
     )
@@ -89,7 +119,7 @@
 ; TODO This implementation is rather slow and a bit goofy.
 ; I've come up with 2 alternatives so far:
 ;
-; a) Add a 'get-unique-id' method to zinal:db:referable%% .
+; a) Add a 'identifiable->unique-id' method to zinal:db:referable%% .
 ;    This option makes the caller code trivial and very performant, and it can be trivially
 ;    implemented by the sql db. However, it adds an awkward burden to the db api, that may
 ;    be difficult or awkward to implement if we switch to a graph database. Also, it is
@@ -103,10 +133,11 @@
 ;    goofy solution, so I'm going to just do the goofy solution for now, until there's
 ;    evidence of perf issues, which is the only thing that b) majorly improves on over the
 ;    current solution
-(define (get-unique-id identifiable identifiables)
+(define (identifiable->unique-id identifiable identifiables)
   (define num-id (list-index (curry equals*? identifiable) identifiables))
   (assert (format "Could not find identifiable ~a in identifiables" (send identifiable get-short-desc)) num-id)
-  (string->symbol (format "zinal_id:_~a" (add1 num-id)))
+  ; Note - this algo must invert the one that is output for error handling setup
+  (string->symbol (format "~a~a" ID-PREFIX (add1 num-id)))
 )
 
 (define (get-non-standard-legacy-id library name)
@@ -117,7 +148,7 @@
   (send elem1 equals? elem2)
 )
 
-(define transpiler (make-object (class zinal:db:element-visitor%
+(set! transpiler (make-object (class zinal:db:element-visitor%
   (super-make-object)
 
   (define/override (visit-element e identifiables)
@@ -130,7 +161,7 @@
       (format "Can't compile reference to ~a because it's not visible" (send referable get-short-desc))
       (send r is-referable-visible?)
     )
-    (get-unique-id referable identifiables)
+    (identifiable->unique-id referable identifiables)
   )
 
   (define/override (visit-lambda l identifiables)
@@ -161,12 +192,12 @@
   )
 
   (define/override (visit-def d identifiables)
-    (list 'define (get-unique-id d identifiables) (db-elem->scheme (send d get-expr) identifiables))
+    (list 'define (identifiable->unique-id d identifiables) (db-elem->scheme (send d get-expr) identifiables))
   )
 
   (define/override (visit-param p identifiables)
     (define default (send p get-default))
-    (define param-identifier (get-unique-id p identifiables))
+    (define param-identifier (identifiable->unique-id p identifiables))
     (if default
       (list param-identifier (db-elem->scheme default identifiables))
       param-identifier
@@ -204,7 +235,7 @@
   )
 
   (define/override (visit-super-init si identifiables)
-    (visit-has-args '(super-make-object) si identifiables)
+    (visit-has-args (list 'super-make-object) si identifiables)
   )
 
   (define/override (visit-invoke-super-method ism identifiables)
@@ -276,7 +307,7 @@
     )
     (list
       'define
-      (get-unique-id c identifiables)
+      (identifiable->unique-id c identifiables)
       (visit-class* c (list* init abstracts) identifiables)
     )
   )
@@ -293,15 +324,15 @@
   )
 
   (define/override (visit-interface i identifiables)
-    (get-unique-id i identifiables)
+    (identifiable->unique-id i identifiables)
   )
 
   (define/override (visit-method m identifiables)
-    (get-unique-id m identifiables)
+    (identifiable->unique-id m identifiables)
   )
 
   (define/override (visit-unassigned u identifiables)
-    (error 'visit-unassigned "Ya can't build scheme code if ya got unassigned shit!")
+    (error 'visit-unassigned "The program cannot be compiled if it contains any unassigned nodes")
   )
 
   (define (visit-has-args before-args has-args identifiables)
@@ -333,9 +364,4 @@
     )
   )
 )))
-
-; Example usage
-; (require "sql-db.rkt")
-; (define main-db (make-object zinal:sql-db% "junk.db"))
-; (transpile main-db)
 )

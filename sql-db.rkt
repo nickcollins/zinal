@@ -2420,10 +2420,6 @@
       )
     )
 
-    (define (get-define-methods class)
-      (filter (curryr is-a? zinal:db:define-method%%) (send class get-body))
-    )
-
     (define (get-method* handle)
       (assert-is-one* handle (list zinal:db:define-method%% zinal:db:invoke-method%% zinal:db:invoke-super-method%%))
       (id->handle! (get-cell* (send handle get-id) "method_id"))

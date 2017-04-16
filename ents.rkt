@@ -9,8 +9,19 @@
 (require "db.rkt")
 (require "db-util.rkt")
 (require "ui.rkt")
+(require "ui-styles.rkt")
 
 (provide zinal:ent:manager%)
+
+(define event-handler%% (interface ()
+
+  handle-event!! ; (event)
+))
+
+(define fallback-event-handler%% (interface ()
+
+  handle-child-event!! ; (event)
+))
 
 ; TERMINOLOGY AND CONCEPTS
 
@@ -38,10 +49,6 @@
   (and (standard*? db-legacy-link-handle) (equal? name (send db-legacy-link-handle get-name)))
 )
 
-(define (get-short-desc-or* db-describable-handle alt)
-  (or (send db-describable-handle get-short-desc) alt)
-)
-
 (define (can-be-public*? define-handle)
   (and
     (is-one-of? define-handle (list zinal:db:def%% zinal:db:define-class%%))
@@ -67,19 +74,7 @@
   (and (is-a? super-class-ref zinal:db:class-ref%%) (send super-class-ref get-define-class))
 )
 
-(define NO-STYLE (make-object style-delta%))
-
 ; EVENT HANDLER
-
-(define event-handler%% (interface ()
-
-  handle-event!! ; (event)
-))
-
-(define fallback-event-handler%% (interface ()
-
-  handle-child-event!! ; (event)
-))
 
 ; Everything is terrible
 (define handle-event-info% (class object%
@@ -212,17 +207,6 @@
 
   (super-make-object)
 ))
-
-(define (slot/ui-item->ui-item slot/ui-item)
-  (if (is-a? slot/ui-item slot%)
-    (send (send slot/ui-item get-ent) get-root-ui-item)
-    slot/ui-item
-  )
-)
-
-(define (slot->db-handle slot)
-  (send (send slot get-ent) get-cone-root)
-)
 
 ; INTERACTION GUI
 
@@ -618,7 +602,7 @@
     (auto-complete*
       "Select a referable"
       "Start typing bits and pieces of the desired referable's short descriptor"
-      (map (lambda (handle) (list handle (get-short-desc-or* handle "<no desc>"))) allowed-referables)
+      (map (lambda (handle) (list handle (get-short-desc-or handle "<no desc>"))) allowed-referables)
       handles-equal?
     )
   )
@@ -687,7 +671,9 @@
   )
 )
 
-(define new-unassigned-creator (const identity))
+(define (new-unassigned-creator parent-handle visible-referables)
+  identity
+)
 
 (define (get-method-from-user choosable-referables)
   (define visible-types (filter (curryr is-a? zinal:db:type%%) choosable-referables))
@@ -697,7 +683,7 @@
       (auto-complete*
         "Select the type which possesses the method"
         "Sorry, zinal isn't smart enough to figure out the appropriate type from context, so please enlighten"
-        (map (lambda (type-handle) (list type-handle (get-short-desc-or* type-handle "<unnamed type>"))) visible-types)
+        (map (lambda (type-handle) (list type-handle (get-short-desc-or type-handle "<unnamed type>"))) visible-types)
         handles-equal?
       )
     )
@@ -706,7 +692,7 @@
     (auto-complete*
       "Select a method"
       "Start typing bits and pieces of the desired method's short descriptor"
-      (map (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>"))) (send type-with-desired-method get-all-methods))
+      (map (lambda (method-handle) (list method-handle (get-short-desc-or method-handle "<unnamed method>"))) (send type-with-desired-method get-all-methods))
       handles-equal?
     )
   )
@@ -720,7 +706,7 @@
         "Select a super method"
         "Start typing bits and pieces of the desired method's short descriptor"
         (map
-          (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>")))
+          (lambda (method-handle) (list method-handle (get-short-desc-or method-handle "<unnamed method>")))
           (filter (lambda (m) (not (send super-class-handle is-method-abstract? m))) (send super-class-handle get-all-methods))
         )
         handles-equal?
@@ -741,7 +727,7 @@
         "Select a method to define or override"
         "Start typing bits and pieces of the desired method's short descriptor"
         (map
-          (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>")))
+          (lambda (method-handle) (list method-handle (get-short-desc-or method-handle "<unnamed method>")))
           (filter (lambda (m) (not (send class-handle get-direct-definition-of-method m))) (send class-handle get-all-methods))
         )
         handles-equal?
@@ -842,7 +828,7 @@
           (auto-complete*
             "Select a method"
             "Start typing bits and pieces of the desired method's short descriptor"
-            (map (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>"))) (send (get-containing-class* parent-handle) get-all-methods))
+            (map (lambda (method-handle) (list method-handle (get-short-desc-or method-handle "<unnamed method>"))) (send (get-containing-class* parent-handle) get-all-methods))
             handles-equal?
           )
         )
@@ -1100,30 +1086,12 @@
   )
 
   (define (find-prev-todo*! handle-event-info event)
-    (find-todo*! db-search-prev handle-event-info event)
+    (find-prev*! (curryr is-a? zinal:db:unassigned%%))
+    (send handle-event-info set-db-wasnt-affected!)
   )
 
   (define (find-next-todo*! handle-event-info event)
-    (find-todo*! db-search-next handle-event-info event)
-  )
-
-  (define (find-todo*! searcher handle-event-info event)
-    (define current-handle (send (send selected* get-parent-ent) get-cone-root))
-    (define todo-handle (searcher (curryr is-a? zinal:db:unassigned%%) current-handle))
-    (when todo-handle
-      (define current-root-slot (get-root-slot*))
-      (define todo-root-handle (find-first-root-ancestor todo-handle))
-      (assert "found todo handle has no valid root" todo-root-handle)
-      (define new-root-slot
-        (if (handles-equal? (slot->db-handle current-root-slot) todo-root-handle)
-          current-root-slot
-          (spawn-root-entity*! todo-root-handle)
-        )
-      )
-      (define new-selection (find-handle-under-slot new-root-slot todo-handle))
-      (assert "could not find the todo handle underneath the new root slot" new-selection)
-      (select! new-selection)
-    )
+    (find-next*! (curryr is-a? zinal:db:unassigned%%))
     (send handle-event-info set-db-wasnt-affected!)
   )
 
@@ -1145,19 +1113,11 @@
 
   ; ENTS
 
-  ; Some style and text-getter consts that are used by some ents
-
-  (define CONST-VALUE-STYLE (send (make-object style-delta%) set-delta-foreground "Pink"))
-
-  (define REF-STYLE (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Cyan"))
+  ; Some text-getters that are used by some ents
 
   (define (get-ref-text ref-handle)
-    (get-short-desc-or* (send ref-handle get-referable) "<nameless ref>")
+    (get-short-desc-or (send ref-handle get-referable) "<nameless ref>")
   )
-
-  (define ASSERT-STYLE (send (make-object style-delta%) set-delta-foreground "Lime"))
-
-  (define ATOM-STYLE (send (make-object style-delta%) set-delta-foreground "Orchid"))
 
   (define (get-atom-text atom-handle)
     (define raw-value (send atom-handle get-val))
@@ -1174,16 +1134,8 @@
     )
   )
 
-  (define STRING-STYLE (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Orchid"))
-
-  (define DEF-STYLE (send (make-object style-delta%) set-delta-foreground "Yellow"))
-
-  (define LEGACY-STYLE (send (make-object style-delta%) set-delta-foreground "Cyan"))
-
-  (define UNASSIGNED-STYLE (send (make-object style-delta% 'change-bold) set-delta-foreground "Chocolate"))
-
   (define (get-unassigned-text unassigned-handle)
-    (get-short-desc-or* unassigned-handle "<?>")
+    (get-short-desc-or unassigned-handle "<?>")
   )
 
   (define ent% (class* object% (fallback-event-handler%%) ; abstract
@@ -1351,8 +1303,8 @@
 
     (define/public (get-bookends)
       (list
-        (make-object ui:const% this NO-STYLE "(")
-        (make-object ui:const% this NO-STYLE ")")
+        (make-object ui:const% this zinal:ui:style:NO-STYLE "(")
+        (make-object ui:const% this zinal:ui:style:NO-STYLE ")")
       )
     )
 
@@ -1431,13 +1383,13 @@
     )
 
     (define/override (get-separator)
-      (make-object ui:const% this NO-STYLE "; ")
+      (make-object ui:const% this zinal:ui:style:NO-STYLE "; ")
     )
 
     (define/override (get-bookends)
       (list
-        (make-object ui:const% this NO-STYLE "{")
-        (make-object ui:const% this NO-STYLE "}")
+        (make-object ui:const% this zinal:ui:style:NO-STYLE "{")
+        (make-object ui:const% this zinal:ui:style:NO-STYLE "}")
       )
     )
 
@@ -1521,7 +1473,7 @@
           "Module"
         )
       )
-      (format "~a: ~a requires:" prefix (get-short-desc-or* (send this get-cone-root) "<nameless module>"))
+      (format "~a: ~a requires:" prefix (get-short-desc-or (send this get-cone-root) "<nameless module>"))
     )
 
     (define/override (get-header)
@@ -1554,11 +1506,11 @@
         )
 
         (define/override (get-item-ui-style)
-          REF-STYLE
+          zinal:ui:style:REF-STYLE
         )
 
         (define header-header*
-          (make-object ui:var-scalar% this-ent* (send (make-object style-delta% 'change-bold) set-delta-foreground "Lime") get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
+          (make-object ui:var-scalar% this-ent* zinal:ui:style:MODULE-STYLE get-module-text* (const event-handler*) NOOP-FALLBACK-EVENT-HANDLER)
         )
 
         (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER header-header*)
@@ -1605,7 +1557,7 @@
           (legacy-handle->string func)
         ]
         [(is-a? func zinal:db:reference%%)
-          (get-short-desc-or* (send func get-referable) "<nameless ref>")
+          (get-short-desc-or (send func get-referable) "<nameless ref>")
         ]
         [else
           (error 'get-header-text* "invalid type")
@@ -1636,7 +1588,7 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-header-style)
-      LEGACY-STYLE
+      zinal:ui:style:LEGACY-STYLE
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -1647,7 +1599,7 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-header-style)
-      REF-STYLE
+      zinal:ui:style:REF-STYLE
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -1675,8 +1627,8 @@
 
     (define/override (get-bookends)
       (list
-        (make-object ui:const% this (make-object style-delta% 'change-bold) "[")
-        (make-object ui:const% this (make-object style-delta% 'change-bold) "]")
+        (make-object ui:const% this zinal:ui:style:LIST-STYLE "[")
+        (make-object ui:const% this zinal:ui:style:LIST-STYLE "]")
       )
     )
 
@@ -1697,8 +1649,8 @@
 
     (define/override (get-bookends)
       (list
-        (make-object ui:const% this (make-object style-delta% 'change-bold) "'(")
-        (make-object ui:const% this (make-object style-delta% 'change-bold) ")")
+        (make-object ui:const% this zinal:ui:style:LIST-STYLE "'(")
+        (make-object ui:const% this zinal:ui:style:LIST-STYLE ")")
       )
     )
 
@@ -1734,7 +1686,7 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-params-header)
-      (make-object ui:const% this NO-STYLE "λ:")
+      (make-object ui:const% this zinal:ui:style:NO-STYLE "λ:")
     )
 
     (define/override (get-lambda-handle)
@@ -1844,10 +1796,10 @@
 
       (super-make-object this-ent* this-ent*)
 
-      (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE (get-prefix-string)))
-      (send this insert! 1 (make-object ui:var-scalar% this-ent* DEF-STYLE (thunk (get-method-name)) (thunk* (get-name-change-handler)) NOOP-FALLBACK-EVENT-HANDLER))
+      (send this insert! 0 (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE (get-prefix-string)))
+      (send this insert! 1 (make-object ui:var-scalar% this-ent* zinal:ui:style:DEF-STYLE (thunk (get-method-name)) (thunk* (get-name-change-handler)) NOOP-FALLBACK-EVENT-HANDLER))
       ; TODO - this and other places will need to change to var-scalar if we ever get to a point of saving ui trees when switching roots
-      (send this insert! 2 (make-object ui:const% this-ent* NO-STYLE (get-params-text*)))
+      (send this insert! 2 (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE (get-params-text*)))
       (send this set-horizontal! #t)
     )))
 
@@ -1865,7 +1817,7 @@
     )
 
     (define/override (get-method-name)
-      (get-short-desc-or* (send (send this get-cone-root) get-method) "<nameless method>")
+      (get-short-desc-or (send (send this get-cone-root) get-method) "<nameless method>")
     )
 
     (define/override (get-name-change-handler)
@@ -1922,7 +1874,7 @@
         (define super-class-handle (send (send this-ent* get-cone-root) get-super-class))
         (if (is-a? super-class-handle zinal:db:legacy-link%%)
           (legacy-handle->string super-class-handle)
-          (get-short-desc-or* (send super-class-handle get-referable) "<some class>")
+          (get-short-desc-or (send super-class-handle get-referable) "<some class>")
         )
       )
 
@@ -1935,8 +1887,8 @@
 
       (super-make-object this-ent* this-ent*)
 
-      (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE "new anonymous"))
-      (send this insert! 1 (make-object ui:var-scalar% this-ent* REF-STYLE get-super-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
+      (send this insert! 0 (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "new anonymous"))
+      (send this insert! 1 (make-object ui:var-scalar% this-ent* zinal:ui:style:REF-STYLE get-super-text* THING->NOOP NOOP-FALLBACK-EVENT-HANDLER))
       (send this set-horizontal! #t)
     )))
 
@@ -1980,9 +1932,9 @@
       (define format-string-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
       (child-spawner! format-string-slot* (send (send this-ent* get-cone-root) get-format-string) this)
 
-      (send this insert! 0 (make-object ui:const% this-ent* ASSERT-STYLE "assert"))
+      (send this insert! 0 (make-object ui:const% this-ent* zinal:ui:style:ASSERT-STYLE "assert"))
       (send this insert! 1 assertion-slot*)
-      (send this insert! 2 (make-object ui:const% this-ent* ASSERT-STYLE ":"))
+      (send this insert! 2 (make-object ui:const% this-ent* zinal:ui:style:ASSERT-STYLE ":"))
       (send this insert! 3 format-string-slot*)
     )))
 
@@ -2023,7 +1975,7 @@
     (init cone-root-handle child-spawner!)
 
     (define ui-scalar*
-      (make-object ui:var-scalar% this ATOM-STYLE (thunk (get-atom-text (send this get-cone-root))) THING->NOOP this)
+      (make-object ui:var-scalar% this zinal:ui:style:ATOM-STYLE (thunk (get-atom-text (send this get-cone-root))) THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -2038,7 +1990,7 @@
     (init cone-root-handle child-spawner!)
 
     (define ui-scalar*
-      (make-object ui:var-scalar% this STRING-STYLE (thunk (send (send this get-cone-root) get-val)) THING->NOOP this)
+      (make-object ui:var-scalar% this zinal:ui:style:STRING-STYLE (thunk (send (send this get-cone-root) get-val)) THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -2053,7 +2005,7 @@
     (init cone-root-handle child-spawner!)
 
     (define ui-scalar*
-      (make-object ui:var-scalar% this CONST-VALUE-STYLE (const "ε") THING->NOOP this)
+      (make-object ui:var-scalar% this zinal:ui:style:CONST-VALUE-STYLE (const "ε") THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -2068,7 +2020,7 @@
     (init cone-root-handle child-spawner!)
 
     (define ui-scalar*
-      (make-object ui:var-scalar% this REF-STYLE (thunk (get-ref-text (send this get-cone-root))) THING->NOOP this)
+      (make-object ui:var-scalar% this zinal:ui:style:REF-STYLE (thunk (get-ref-text (send this get-cone-root))) THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -2109,7 +2061,7 @@
     (init cone-root-handle child-spawner!)
 
     (define (get-text)
-      (get-short-desc-or* (send this get-cone-root) "<nameless param>")
+      (get-short-desc-or (send this get-cone-root) "<nameless param>")
     )
 
     (define (name-ui->event-handler* name-ui)
@@ -2117,7 +2069,7 @@
     )
 
     (define ui-scalar*
-      (make-object ui:var-scalar% this DEF-STYLE get-text name-ui->event-handler* this)
+      (make-object ui:var-scalar% this zinal:ui:style:DEF-STYLE get-text name-ui->event-handler* this)
     )
 
     (define/override (get-root-ui-item)
@@ -2136,7 +2088,7 @@
     )
 
     (define ui-scalar*
-      (make-object ui:var-scalar% this LEGACY-STYLE get-text THING->NOOP this)
+      (make-object ui:var-scalar% this zinal:ui:style:LEGACY-STYLE get-text THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -2151,7 +2103,7 @@
     (init cone-root-handle child-spawner!)
 
     (define ui-scalar*
-      (make-object ui:var-scalar% this UNASSIGNED-STYLE (thunk (get-unassigned-text (send this get-cone-root))) THING->NOOP this)
+      (make-object ui:var-scalar% this zinal:ui:style:UNASSIGNED-STYLE (thunk (get-unassigned-text (send this get-cone-root))) THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -2248,7 +2200,7 @@
         (set! super-class-slot* (make-object slot% super-class-slot->event-handler NOOP-FALLBACK-EVENT-HANDLER))
         (child-spawner*! super-class-slot* (send (send this-ent* get-cone-root) get-super-class) this)
         (send this insert! prefix-size* super-class-slot*)
-        (send this insert! (add1 prefix-size*) (make-object ui:const% this-ent* NO-STYLE "implementing:"))
+        (send this insert! (add1 prefix-size*) (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "implementing:"))
       )))
 
       (make-object ui:interface-set-list% this-ent* NOOP-FALLBACK-EVENT-HANDLER header-header)
@@ -2263,7 +2215,7 @@
 
     (define/override (get-header-prefix-list)
       (list
-        (make-object ui:const% this NO-STYLE "create anonymous instance of")
+        (make-object ui:const% this zinal:ui:style:NO-STYLE "create anonymous instance of")
       )
     )
 
@@ -2284,14 +2236,14 @@
     )
 
     (define (get-name-text*)
-      (get-short-desc-or* (send this-ent* get-cone-root) "<unnamed class>")
+      (get-short-desc-or (send this-ent* get-cone-root) "<unnamed class>")
     )
 
     (define/override (get-header-prefix-list)
       (list
-        (make-object ui:const% this-ent* NO-STYLE "class")
-        (make-object ui:var-scalar% this-ent* DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
-        (make-object ui:const% this-ent* NO-STYLE "subclass of")
+        (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "class")
+        (make-object ui:var-scalar% this-ent* zinal:ui:style:DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
+        (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "subclass of")
       )
     )
 
@@ -2327,17 +2279,17 @@
         )
 
         (define/override (get-item-ui-style)
-          DEF-STYLE
+          zinal:ui:style:DEF-STYLE
         )
 
-        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER (make-object ui:const% this NO-STYLE "abstract methods:"))
+        (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER (make-object ui:const% this zinal:ui:style:NO-STYLE "abstract methods:"))
       ))
     )
 
     (define/override (get-pseudo-headers)
       (unless params-list*
         (set! params-list*
-          (make-object ui:params-list% this NOOP-FALLBACK-EVENT-HANDLER child-spawner*! (send this get-cone-root) (make-object ui:const% this NO-STYLE "init params:"))
+          (make-object ui:params-list% this NOOP-FALLBACK-EVENT-HANDLER child-spawner*! (send this get-cone-root) (make-object ui:const% this zinal:ui:style:NO-STYLE "init params:"))
         )
         (set! abstracts*
           (get-abstracts*)
@@ -2362,11 +2314,14 @@
       (make-object (class ui:list%
 
         (define (name-ui->event-handler* name-ui)
-          (create-name-change-handler get-method*)
+          (combine-keyname-event-handlers (list
+            (create-name-change-handler get-method*)
+            (create-search-selected-method-handlers* (get-method*))
+          ))
         )
 
         (define (get-name-text*)
-          (get-short-desc-or* (get-method*) "<unnamed method>")
+          (get-short-desc-or (get-method*) "<unnamed method>")
         )
 
         (define (get-method*)
@@ -2375,9 +2330,9 @@
 
         (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
 
-        (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE "method"))
-        (send this insert! 1 (make-object ui:var-scalar% this-ent* DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
-        (send this insert! 2 (make-object ui:const% this-ent* NO-STYLE "= λ:"))
+        (send this insert! 0 (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "method"))
+        (send this insert! 1 (make-object ui:var-scalar% this-ent* zinal:ui:style:DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+        (send this insert! 2 (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "= λ:"))
         (send this set-horizontal! #t)
       ))
     )
@@ -2423,9 +2378,9 @@
 
         (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
 
-        (send this insert! 0 (make-object ui:var-scalar% this-ent* NO-STYLE get-prefix-text* prefix-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
-        (send this insert! 1 (make-object ui:var-scalar% this-ent* DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
-        (send this insert! 2 (make-object ui:const% this-ent* NO-STYLE "= λ:"))
+        (send this insert! 0 (make-object ui:var-scalar% this-ent* zinal:ui:style:NO-STYLE get-prefix-text* prefix-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+        (send this insert! 1 (make-object ui:var-scalar% this-ent* zinal:ui:style:DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+        (send this insert! 2 (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "= λ:"))
         (send this set-horizontal! #t)
       ))
     )
@@ -2469,7 +2424,15 @@
           (define (result-handler result-from-user)
             (set-method!! result-from-user)
           )
-          (create-interaction-dependent-event-handler interaction-function result-handler "s")
+          (define method-change-handler (create-interaction-dependent-event-handler interaction-function result-handler "s"))
+          (define cone-root-handle (send this-ent* get-cone-root))
+          (if (is-a? cone-root-handle zinal:db:has-method%%)
+            (combine-keyname-event-handlers (list
+              method-change-handler
+              (create-search-selected-method-handlers* (send cone-root-handle get-method))
+            ))
+            method-change-handler
+          )
         )
 
         (define method-ui* (make-object ui:var-scalar% this-ent* (get-method-style) (thunk (get-method-name)) method-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
@@ -2483,7 +2446,7 @@
             (define object-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
             (child-spawner*! object-slot* (send (send this-ent* get-cone-root) get-object) this)
             (send this insert! 0 object-slot*)
-            (send this insert! 1 (make-object ui:const% this-ent* NO-STYLE "⇒"))
+            (send this insert! 1 (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "⇒"))
             (send this insert! 2 method-ui*)
           ]
         )
@@ -2503,11 +2466,11 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-method-name)
-      (get-short-desc-or* (send (send this get-cone-root) get-method) "<unnamed method>")
+      (get-short-desc-or (send (send this get-cone-root) get-method) "<unnamed method>")
     )
 
     (define/override (get-method-style)
-      REF-STYLE
+      zinal:ui:style:REF-STYLE
     )
 
     (define/override (get-new-method-from-user)
@@ -2530,7 +2493,7 @@
     )
 
     (define/override (get-method-style)
-      LEGACY-STYLE
+      zinal:ui:style:LEGACY-STYLE
     )
 
     (define/override (get-new-method-from-user)
@@ -2554,7 +2517,7 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-alternative-object-ui)
-      (make-object ui:const% this CONST-VALUE-STYLE "⊙")
+      (make-object ui:const% this zinal:ui:style:CONST-VALUE-STYLE "⊙")
     )
 
     (define/override (get-new-method-from-user)
@@ -2562,7 +2525,7 @@
       (auto-complete*
         "Select a method"
         "Start typing bits and pieces of the desired method's short descriptor"
-        (map (lambda (method-handle) (list method-handle (get-short-desc-or* method-handle "<unnamed method>"))) (send class-handle get-all-methods))
+        (map (lambda (method-handle) (list method-handle (get-short-desc-or method-handle "<unnamed method>"))) (send class-handle get-all-methods))
         handles-equal?
       )
     )
@@ -2575,7 +2538,7 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-alternative-object-ui)
-      (make-object ui:const% this CONST-VALUE-STYLE "⊙")
+      (make-object ui:const% this zinal:ui:style:CONST-VALUE-STYLE "⊙")
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -2586,7 +2549,7 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-alternative-object-ui)
-      (make-object ui:const% this CONST-VALUE-STYLE "🡡")
+      (make-object ui:const% this zinal:ui:style:CONST-VALUE-STYLE "🡡")
     )
 
     (define/override (get-new-method-from-user)
@@ -2601,7 +2564,7 @@
     (init cone-root-handle child-spawner!)
 
     (define/override (get-alternative-object-ui)
-      (make-object ui:const% this CONST-VALUE-STYLE "🡡")
+      (make-object ui:const% this zinal:ui:style:CONST-VALUE-STYLE "🡡")
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -2612,7 +2575,7 @@
     (init cone-root-handle child-spawner!)
 
     (define ui-item*
-      (make-object ui:var-scalar% this CONST-VALUE-STYLE (const "⊙") THING->NOOP this)
+      (make-object ui:var-scalar% this zinal:ui:style:CONST-VALUE-STYLE (const "⊙") THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -2642,7 +2605,7 @@
 
         (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
 
-        (send this insert! 0 (make-object ui:const% this-ent* (send (make-object style-delta%) set-delta-foreground "Lime") "☼"))
+        (send this insert! 0 (make-object ui:const% this-ent* zinal:ui:style:CREATE-SYMBOL-STYLE "☼"))
         (define class-slot* (make-object slot% (lambda (s) (send this child-slot->event-handler s)) NOOP-FALLBACK-EVENT-HANDLER))
         (child-spawner*! class-slot* (send (send this-ent* get-cone-root) get-class-node) this)
         (send this insert! 1 class-slot*)
@@ -2664,7 +2627,7 @@
     (define this-ent* this)
 
     (define/override (get-header)
-      (make-object ui:const% this-ent* (send (make-object style-delta%) set-delta-foreground "Lime") "🡡☼")
+      (make-object ui:const% this-ent* zinal:ui:style:CREATE-SYMBOL-STYLE "🡡☼")
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -2689,13 +2652,13 @@
         )
 
         (define (get-name-text*)
-          (get-short-desc-or* (send this-ent* get-cone-root) "<unnamed interface>")
+          (get-short-desc-or (send this-ent* get-cone-root) "<unnamed interface>")
         )
 
         (super-make-object this-ent* NOOP-FALLBACK-EVENT-HANDLER)
 
-        (send this insert! 0 (make-object ui:const% this-ent* NO-STYLE "interface"))
-        (send this insert! 1 (make-object ui:var-scalar% this-ent* DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+        (send this insert! 0 (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "interface"))
+        (send this insert! 1 (make-object ui:var-scalar% this-ent* zinal:ui:style:DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
         (send this set-horizontal! #t)
       ))
     )
@@ -2745,7 +2708,7 @@
         )
 
         (define/override (get-item-ui-style)
-          DEF-STYLE
+          zinal:ui:style:DEF-STYLE
         )
 
         (super-make-object this-ent* this-ent* header*)
@@ -3015,7 +2978,7 @@
 
     (define header* header)
     (when header* (send header* set-parent! this))
-    (define separator* (or separator (make-object ui:const% parent-ent NO-STYLE " ")))
+    (define separator* (or separator (make-object ui:const% parent-ent zinal:ui:style:NO-STYLE " ")))
     (send separator* set-parent! this)
     (define bookends* bookends)
     (when bookends* (for-each (lambda (b) (send b set-parent! this)) bookends*))
@@ -3121,12 +3084,12 @@
     )
 
     (define (expand*! handle-event-info event)
-      (define (expand ui-list)
+      (define (expand* ui-list)
         (send ui-list set-horizontal! #f)
         (define parent (send ui-list get-parent))
-        (when parent (expand parent))
+        (when parent (expand* parent))
       )
-      (expand this)
+      (expand* this)
       #t
     )
 
@@ -3154,14 +3117,14 @@
     )
 
     (define (get-name-text*)
-      (get-short-desc-or* (db-get-def-handle) (get-default-name-text))
+      (get-short-desc-or (db-get-def-handle) (get-default-name-text))
     )
 
     (super-make-object parent-ent fallback-event-handler)
 
     (send this set-horizontal! #t)
-    (send this insert! 0 (make-object ui:var-scalar% parent-ent DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
-    (send this insert! 1 (make-object ui:const% parent-ent NO-STYLE (get-bridge-text)))
+    (send this insert! 0 (make-object ui:var-scalar% parent-ent zinal:ui:style:DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER))
+    (send this insert! 1 (make-object ui:const% parent-ent zinal:ui:style:NO-STYLE (get-bridge-text)))
   ))
 
   (define ui:possibly-public-def-list% (class ui:def-list% ; abstract
@@ -3172,7 +3135,7 @@
       #f
     )
 
-    (define public* (make-object ui:const% parent-ent (send (make-object style-delta%) set-delta-foreground "Lime") "public"))
+    (define public* (make-object ui:const% parent-ent zinal:ui:style:PUBLICITY-STYLE "public"))
 
     (define (update-publicity-ui*)
       (define db-def-handle (send this db-get-def-handle))
@@ -3194,7 +3157,7 @@
     (super-make-object parent-ent fallback-event-handler)
 
     (when (get-prefix-text)
-      (send this insert! 0 (make-object ui:const% parent-ent NO-STYLE (get-prefix-text)))
+      (send this insert! 0 (make-object ui:const% parent-ent zinal:ui:style:NO-STYLE (get-prefix-text)))
     )
 
     (update-publicity-ui*)
@@ -3462,7 +3425,7 @@
       )
     )
 
-    (super-make-object parent-ent fallback-event-handler child-spawner! header (make-object ui:const% parent-ent NO-STYLE ", "))
+    (super-make-object parent-ent fallback-event-handler child-spawner! header (make-object ui:const% parent-ent zinal:ui:style:NO-STYLE ", "))
 
     (send this set-horizontal! #t)
   ))
@@ -3496,7 +3459,7 @@
             (make-object ui:var-scalar%
               parent-ent*
               (get-item-ui-style)
-              (thunk (get-short-desc-or* h "<unnamed>"))
+              (thunk (get-short-desc-or h "<unnamed>"))
               (curry item-handle->event-handler* h)
               NOOP-FALLBACK-EVENT-HANDLER
             )
@@ -3550,11 +3513,11 @@
     )
 
     (define (item-handle<? item-handle-1 item-handle-2)
-      (define (desc ih) (get-short-desc-or* ih ""))
+      (define (desc ih) (get-short-desc-or ih ""))
       (string<? (desc item-handle-1) (desc item-handle-2))
     )
 
-    (super-make-object parent-ent fallback-event-handler header (make-object ui:const% parent-ent NO-STYLE ", "))
+    (super-make-object parent-ent fallback-event-handler header (make-object ui:const% parent-ent zinal:ui:style:NO-STYLE ", "))
 
     (send this set-horizontal! #t)
     (reset!)
@@ -3593,13 +3556,51 @@
     )
 
     (define/override (get-item-ui-style)
-      REF-STYLE
+      zinal:ui:style:REF-STYLE
     )
 
     (super-make-object parent-ent fallback-event-handler header)
   ))
 
   ; HELPER FUNCTIONS
+
+  (define (slot/ui-item->ui-item slot/ui-item)
+    (if (is-a? slot/ui-item slot%)
+      (send (send slot/ui-item get-ent) get-root-ui-item)
+      slot/ui-item
+    )
+  )
+
+  (define (slot->db-handle slot)
+    (send (send slot get-ent) get-cone-root)
+  )
+
+  (define (find-prev*! criterion)
+    (find*! db-search-prev criterion)
+  )
+
+  (define (find-next*! criterion)
+    (find*! db-search-next criterion)
+  )
+
+  (define (find*! searcher criterion)
+    (define current-handle (send (send selected* get-parent-ent) get-cone-root))
+    (define found-handle (searcher criterion current-handle))
+    (when found-handle
+      (define current-root-slot (get-root-slot*))
+      (define found-root-handle (find-first-root-ancestor found-handle))
+      (assert "found handle has no valid root" found-root-handle)
+      (define new-root-slot
+        (if (handles-equal? (slot->db-handle current-root-slot) found-root-handle)
+          current-root-slot
+          (spawn-root-entity*! found-root-handle)
+        )
+      )
+      (define new-selection (find-handle-under-slot new-root-slot found-handle))
+      (assert "could not find the found handle underneath the new root slot" new-selection)
+      (select! new-selection)
+    )
+  )
 
   (define (legacy-handle->string legacy-handle)
     (define library (send legacy-handle get-library))
@@ -3611,7 +3612,7 @@
     (define param-names
       (map
         (lambda (p)
-          (format (if (send p get-default) "[~a]" "~a") (get-short-desc-or* p "<nameless param>"))
+          (format (if (send p get-default) "[~a]" "~a") (get-short-desc-or p "<nameless param>"))
         )
         (send has-params-handle get-all-params)
       )
@@ -3644,9 +3645,9 @@
   (define (get-module-from-user [selectable-modules (get-all-modules*)])
     (define handles&choices
       (map
-        (lambda (module)
-          (define name (get-short-desc-or* module "<unnamed module>"))
-          (list module (if (send module is-main-module?) (format "~a (Main)" name) name))
+        (lambda (db-module)
+          (define name (get-short-desc-or db-module "<unnamed module>"))
+          (list db-module (if (send db-module is-main-module?) (format "~a (Main)" name) name))
         )
         selectable-modules
       )
@@ -3677,7 +3678,7 @@
     (define handles&choices
       (map
         (lambda (interface)
-          (list interface (get-short-desc-or* interface "<unnamed interface>"))
+          (list interface (get-short-desc-or interface "<unnamed interface>"))
         )
         selectable-interfaces
       )
@@ -3798,6 +3799,31 @@
       )
       '("space" "enter")
     )))
+  )
+
+  (define (create-search-selected-handlers* criterion)
+    (define (search-handler finder input-string)
+      (make-object keyname-event-handler% (list (list
+        (lambda (handle-event-info event)
+          (finder criterion)
+          (send handle-event-info set-db-wasnt-affected!)
+        )
+        (list input-string)
+      )))
+    )
+    (combine-keyname-event-handlers (list
+      (search-handler find-next*! "*")
+      (search-handler find-prev*! "#")
+    ))
+  )
+
+  (define (create-search-selected-method-handlers* method-handle)
+    (create-search-selected-handlers* (lambda (node)
+      (and
+        (is-a? node zinal:db:has-method%%)
+        (handles-equal? (send node get-method) method-handle)
+      )
+    ))
   )
 
   (define (reassign-slot*!! slot ui-parent [new-handle-initializer!! identity])

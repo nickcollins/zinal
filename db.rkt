@@ -298,6 +298,11 @@
   remove-arg!! ; (non-negative-integer)
 ))
 
+(define zinal:db:has-method%% (interface (zinal:db:parent-node%%)
+
+  get-method ; ()
+))
+
 ; OOP
 
 ; Common interface for any zinal element that extends/implements interfaces, i.e.
@@ -475,11 +480,7 @@
 ; There must be no more than one such node per method per class. If the method is defined by any
 ; super class, then this is an override, otherwise it's not. A class can only define a method
 ; which it or a supertype declares
-(define zinal:db:define-method%% (interface (zinal:db:parent-node%%)
-
-  ; Returns a zinal:db:method%% for the method, either a direct method of this type or a method of
-  ; a super type.
-  get-method ; ()
+(define zinal:db:define-method%% (interface (zinal:db:has-method%%)
 
   ; Returns a zinal:db:lambda%% that defines the method. The returned lambda cannot be unassign!! .
   ; Thus the returned lambda is permanent in a sense - it can be manipulated but neither created nor
@@ -519,16 +520,13 @@
 (define zinal:db:super-init%% (interface (zinal:db:has-args%%)))
 
 ; A node which, when evaluated, will invoke the specified method.
-(define zinal:db:invoke-method%% (interface (zinal:db:has-args%%)
+(define zinal:db:invoke-method%% (interface (zinal:db:has-args%% zinal:db:has-method%%)
 
   ; Returns a node for the object to invoke the method on. At first, the node will be a
   ; zinal:db:unassigned%% , which of course cannot transpile. assign!! it to a node which will
   ; evaluate to an object of the method's class. zinal is not smart enough to understand types
   ; so type failure will occur at runtime.
   get-object ; ()
-
-  ; Returns the zinal:db:method%% that this invokation invokes.
-  get-method ; ()
 
   ; Sets the method that this invokation invokes. The type that contains the method must be
   ; visible at this location. No meaningful return value
@@ -555,10 +553,7 @@
 ; A node which, when evaluated, invokes a super-class's definition of the method.
 ; Trying to create this node for a method which is abstract in the super class will throw an exception.
 ; Corresponds to racket of the form '(super <method-name> <args...>) .
-(define zinal:db:invoke-super-method%% (interface (zinal:db:has-args%%)
-
-  ; Returns the zinal:db:method%% that this invokation invokes.
-  get-method ; ()
+(define zinal:db:invoke-super-method%% (interface (zinal:db:has-args%% zinal:db:has-method%%)
 
   ; Sets the method that this invokation invokes. If the method is abstract in the super class, or the
   ; type containing the method is not visible to this node, an exception is thrown.

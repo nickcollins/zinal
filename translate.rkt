@@ -11,6 +11,32 @@
 
 (define BNS (make-base-namespace))
 (define BASE-LEGACIES (set-subtract (list->set (namespace-mapped-symbols BNS)) (list->set (map string->symbol ILLEGAL-STANDARD-LEGACIES))))
+(define SEMI-STANDARD-LEGACIES (list->set '(
+  is-a?
+  first
+  second
+  third
+  curry
+  curryr
+  negate
+  conjoin
+  disjoin
+  identity
+  const
+  thunk
+  thunk*
+  append*
+  append-map
+  filter-map
+  string-join
+  last
+  dropf
+  takef
+  non-empty-string?
+  implies
+  xor
+)))
+(define SENDTINEL "{zinal sendtinel}: ")
 
 ; Reads racket-file , which must only use features supported by zinal, and creates a new module in
 ; db whose contents will correspond to the scheme logic in racket-file . Translation does not claim
@@ -29,9 +55,9 @@
   )
   (define module-children (drop file-data 3))
   (define module-name (second file-data))
-  (define module (send db create-module!! (symbol->string module-name)))
-  (translate-body module-children module)
-  (second-pass module)
+  (define new-module (send db create-module!! (symbol->string module-name)))
+  (translate-body module-children new-module)
+  (second-pass new-module)
   (void)
 )
 
@@ -42,8 +68,32 @@
 (define (audit-unassigned* module-handle current-handle)
   (define next-handle (db-search-next (disjoin (curry handles-equal? module-handle) (curryr is-a? zinal:db:unassigned%%)) current-handle))
   (when (is-a? next-handle zinal:db:unassigned%%)
-    (define ref-name (send next-handle get-short-desc))
-    (audit-unassigned* module-handle (or (and ref-name (translate-reference ref-name next-handle)) next-handle))
+    (define todo-desc (send next-handle get-short-desc))
+    (define next-handle-parent (send next-handle get-parent))
+    (define real-next-handle
+      (cond
+        [(not todo-desc)
+          next-handle
+        ]
+        [(string-prefix? todo-desc SENDTINEL)
+          (translate-send (read (open-input-string (substring todo-desc (string-length SENDTINEL)))) next-handle)
+        ]
+        [(translate-reference todo-desc next-handle) =>
+          identity
+        ]
+        [(and (is-a? next-handle-parent zinal:db:list%%) (= 1 (length (send next-handle-parent get-items))) (local-method-call->method (string->symbol todo-desc) next-handle)) =>
+          (lambda (m)
+            (define db-invoke (send (send next-handle-parent unassign!!) assign-invoke-method!! m))
+            (send (send db-invoke get-object) assign-this!!)
+            db-invoke
+          )
+        ]
+        [else
+          next-handle
+        ]
+      )
+    )
+    (audit-unassigned* module-handle real-next-handle)
   )
 )
 
@@ -64,6 +114,21 @@
 
 (define (translate-body body-data db-has-body)
   (translate-list-like (lambda (i) (send db-has-body insert-into-body!! i)) body-data)
+)
+
+; must return the generated handle
+(define (translate-send datum db-unassigned)
+  (define method-name (~a (third datum)))
+  (define visible-types (filter (curryr is-a? zinal:db:type%%) (send db-unassigned get-visible-referables-underneath)))
+  (define visible-methods (append-map (lambda (t) (send t get-direct-methods)) visible-types))
+  (define zinal-method (get-unique-describable method-name visible-methods))
+  (define db-invoke (if zinal-method
+    (send db-unassigned assign-invoke-method!! zinal-method)
+    (send db-unassigned assign-invoke-legacy-method!! method-name)
+  ))
+  (translate-datum (second datum) (send db-invoke get-object))
+  (translate-args (drop datum 3) db-invoke)
+  db-invoke
 )
 
 (define (translate-params params-data db-has-params)
@@ -124,7 +189,12 @@
       (send db-unassigned assign-class-instance!!)
     )
   )
-  (send db-class set-legacy-super-class!! #f (~a (super*)))
+  (define super-name (~a (super*)))
+  (define super-ref (get-unique-referable super-name db-class))
+  (if (and super-ref (is-a? super-ref zinal:db:define-class%%))
+    (send db-class set-super-class!! super-ref)
+    (send db-class set-legacy-super-class!! #f super-name)
+  )
   (define body (drop class-data 2))
   (when (equal? class-symbol 'class*)
     (define interfaces (car body))
@@ -142,13 +212,17 @@
     (translate-params (cdr possible-init) db-class)
     (set! body (cdr body))
   )
+  (define super-methods (send db-class get-all-methods))
   (define abstract? (conjoin pair? (compose1 (curry equal? 'abstract) first)))
   (define abstracts (takef body abstract?))
   (for-each
     (lambda (abstract)
       (assert (format "class-instance can't have abstract methods: ~a" class-data) definition-name)
       (assert (format "invalid abstract clause: ~a" abstract) (and (= 2 (length abstract)) (symbol? (second abstract))))
-      (send db-class add-direct-method!! (~a (second abstract)))
+      (define abstract-string (~a (second abstract)))
+      (unless (ormap (lambda (m) (equal? abstract-string (send m get-short-desc))) super-methods)
+        (send db-class add-direct-method!! abstract-string)
+      )
     )
     abstracts
   )
@@ -164,6 +238,7 @@
     (and (> (length define-method-data) 2) (pair? (name+params)) (symbol? (name-symbol)))
   )
   (define containing-class (get-class-parent db-unassigned))
+  (assert "no class parent found" containing-class)
   (define name (~a (name-symbol)))
   (define existing-method (findf (lambda (m) (equal? name (send m get-short-desc))) (send containing-class get-all-methods)))
   (define db-define/override-method-node
@@ -222,17 +297,8 @@
 )
 
 (define (translate-reference ref-name db-unassigned)
-  (define possible-referables (filter (lambda (r) (equal? ref-name (send r get-short-desc))) (send db-unassigned get-visible-referables-underneath)))
-  (define (ref) (car possible-referables))
-  (and (= 1 (length possible-referables))
-    (cond
-      [(is-a? (ref) zinal:db:param%%) (send db-unassigned assign-param-ref!! (ref))]
-      [(is-a? (ref) zinal:db:def%%) (send db-unassigned assign-def-ref!! (ref))]
-      [(is-a? (ref) zinal:db:define-class%%) (send db-unassigned assign-class-ref!! (ref))]
-      [(is-a? (ref) zinal:db:interface%%) (send db-unassigned assign-interface-ref!! (ref))]
-      [else (error 'translate-reference "Invalid referable")]
-    )
-  )
+  (define ref (get-unique-referable ref-name db-unassigned))
+  (and ref (assign-reference!! db-unassigned ref))
 )
 
 (define (translate-datum datum db-unassigned)
@@ -282,9 +348,7 @@
         [(equal? 'send (first-item))
           (define (method-symbol) (third datum))
           (assert (format "invalid method invokation: ~a" datum) (and (> (length datum) 2) (symbol? (method-symbol))))
-          (define db-invoke (send db-unassigned assign-invoke-legacy-method!! (~a (method-symbol))))
-          (translate-datum (second datum) (send db-invoke get-object))
-          (translate-args (drop datum 3) db-invoke)
+          (send db-unassigned set-short-desc!! (string-append SENDTINEL (~s datum)))
         ]
         [(equal? 'super-make-object (first-item))
           (translate-args (cdr datum) (send db-unassigned assign-super-init!!))
@@ -292,8 +356,22 @@
         [(equal? 'super (first-item))
           (define (method-symbol) (second datum))
           (assert (format "invalid super invokation: ~a" datum) (and (> (length datum) 1) (symbol? (method-symbol))))
-          (define db-invoke (send db-unassigned assign-invoke-legacy-super-method!! (~a (method-symbol))))
+          (define method-name (~a (method-symbol)))
+          (define class-parent (get-class-parent db-unassigned))
+          (assert "can't invoke a super method in a non-class context" class-parent)
+          (define zinal-method (get-unique-describable method-name (send class-parent get-all-methods)))
+          (define db-invoke (if zinal-method
+            (send db-unassigned assign-invoke-super-method!! zinal-method)
+            (send db-unassigned assign-invoke-legacy-super-method!! method-name)
+          ))
           (translate-args (drop datum 2) db-invoke)
+        ]
+        [(local-method-call->method (first-item) db-unassigned) =>
+          (lambda (m)
+            (define db-invoke (send db-unassigned assign-invoke-method!! m))
+            (send (send db-invoke get-object) assign-this!!)
+            (translate-args (cdr datum) db-invoke)
+          )
         ]
         [else
           (translate-list datum (send db-unassigned assign-list!!))
@@ -333,8 +411,32 @@
   )
 )
 
+(define (local-method-call->method potential-method-datum db-unassigned)
+  (define class-parent (get-class-parent db-unassigned))
+  (define (local-methods)
+    (remove-duplicates
+      (append (send class-parent get-direct-methods) (map (lambda (dm) (send dm get-method)) (get-define-methods class-parent)))
+      handles-equal?
+    )
+  )
+  (and (is-a? class-parent zinal:db:define-class%%) (symbol? potential-method-datum)
+    (get-unique-describable (~a potential-method-datum) (local-methods))
+  )
+)
+
+(define (get-unique-referable ref-name location-node)
+  (get-unique-describable ref-name (send location-node get-visible-referables-after))
+)
+
+(define (get-unique-describable name describables)
+  (unique (filter (lambda (d) (equal? name (send d get-short-desc))) describables))
+)
+
 (define (is-legacy? datum)
-  (set-member? BASE-LEGACIES datum)
+  (or
+    (set-member? BASE-LEGACIES datum)
+    (set-member? SEMI-STANDARD-LEGACIES datum)
+  )
 )
 
 (define (add-direct-super-interfaces!! db super-interface-symbols db-sub-type)
@@ -352,21 +454,26 @@
 )
 
 (define (get-class-parent db-node)
-  (assert "no class parent found" db-node)
-  (if (is-a? db-node zinal:db:class%%)
-    db-node
-    (get-class-parent (send db-node get-parent))
+  (cond
+    [(is-a? db-node zinal:db:class%%) db-node]
+    [db-node (get-class-parent (send db-node get-parent))]
+    [else #f]
   )
 )
 
 ; Example use:
-; (require "sql-db.rkt")
-; (define main-db (make-object zinal:sql-db% "junk.db"))
+(require "sql-db.rkt")
+(define main-db (make-object zinal:sql-db% "junk.db"))
+; (second-pass (findf (lambda (m) (equal? "ents" (send m get-short-desc))) (send main-db get-all-modules)))
+; (second-pass (findf (lambda (m) (equal? "main" (send m get-short-desc))) (send main-db get-all-modules)))
+(second-pass (findf (lambda (m) (equal? "transpile" (send m get-short-desc))) (send main-db get-all-modules)))
 ; (translate "misc.rkt" main-db)
 ; (translate "db.rkt" main-db)
 ; (translate "db-util.rkt" main-db)
 ; (translate "ui.rkt" main-db)
 ; (translate "sql-db.rkt" main-db)
+; (translate "ui-styles.rkt" main-db)
 ; (translate "ents.rkt" main-db)
 ; (translate "main.rkt" main-db)
+; (translate "transpile.rkt" main-db)
 )
