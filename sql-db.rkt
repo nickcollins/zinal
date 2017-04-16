@@ -130,13 +130,13 @@
 (define sql-db%
   (class* object% (zinal:db%%)
 
-    (init filename)
+    (init filepath)
 
     (super-make-object)
 
-    (define filename* filename)
-    (unless (file-exists? filename*) (close-output-port (open-output-file filename*)))
-    (define db* (sqlite3-connect #:database filename*))
+    (define filepath* filepath)
+    (unless (file-exists? filepath*) (close-output-port (open-output-file filepath*)))
+    (define db* (kill-safe-connection (sqlite3-connect #:database filepath*)))
     (define sql-db* this)
     ; This should hold values weakly, but racket seems to only support weak keys.
     (define handles* (make-hash))
@@ -195,8 +195,8 @@
       (id->handle! interface-id)
     )
 
-    (define/public (get-filename)
-      filename*
+    (define/public (get-filepath)
+      filepath*
     )
 
     ; DB ELEMENT IMPLEMENTATION CLASSES
@@ -3187,7 +3187,7 @@
       (first col-info)
     )
 
-    (define create-db*? (zero? (file-size filename*)))
+    (define create-db*? (zero? (file-size filepath*)))
 
     (define (create-tables tables->cols [extra-cols '()])
       (hash-map
