@@ -525,7 +525,7 @@
 (define (new-number-creator parent-handle visible-referables)
   (use-text-from-user
     "Enter a number"
-    "Seriously, do it"
+    "I believe in you"
     (lambda (result)
       (lambda (unassigned) (send unassigned assign-number!! (string->number result)))
     )
@@ -536,7 +536,7 @@
 (define (new-character-creator parent-handle visible-referables)
   (use-text-from-user
     "Enter a character"
-    "Seriously, do it"
+    "I believe in you"
     (lambda (result)
       (lambda (unassigned) (send unassigned assign-char!! (string-ref result 0)))
     )
@@ -547,7 +547,7 @@
 (define (new-string-creator parent-handle visible-referables)
   (use-text-from-user
     "Enter a string"
-    "Seriously, do it"
+    "I believe in you"
     (lambda (result)
       (lambda (unassigned) (send unassigned assign-string!! result))
     )
@@ -576,7 +576,7 @@
 
 (define (new-boolean-creator parent-handle visible-referables)
   (define choices '("true" "false"))
-  (define result (get-choice-from-user "To be or not to be?" "That's the fuckin question" choices))
+  (define result (get-choice-from-user "To be or not to be?" "That's the question" choices))
   (and result
     (lambda (unassigned) (send unassigned assign-bool!! (= result 0)))
   )
@@ -647,7 +647,7 @@
     (and library
       (use-text-from-user
         "Enter the identifier name"
-        "Does this really need explaining?"
+        "The identifier's name, not including its library"
         identity
         ; TODO we need to add a reflective validator
         non-empty-string?
@@ -787,7 +787,7 @@
       (z-handler)
       (use-text-from-user
         r-title
-        "It's not hard ..."
+        "I believe in you ..."
         r-result-handler
         non-empty-string?
       )
@@ -2163,7 +2163,7 @@
                 )
               ]
               [else
-                (issue-warning "Can't change super class" "Changing the super class would orphan a method definition or super invokation, you hapless fool!")
+                (issue-warning "Can't change super class" "Changing the super class would orphan a method definition or super invokation")
                 #f
               ]
             )
@@ -2499,7 +2499,7 @@
     (define/override (get-new-method-from-user)
       (use-text-from-user
         "Enter the name of the racket method"
-        "It's not hard ..."
+        "I believe in you ..."
         identity
         non-empty-string?
       )
@@ -3492,7 +3492,7 @@
                 (reset!)
               ]
               [else
-                (issue-warning "Cannot remove item from set" "I don't really know why you can't, you just can't. Sucks to be you")
+                (issue-warning "Cannot remove item from set" "I don't really know why you can't, you just can't. Bummer, i know")
               ]
             )
             #t

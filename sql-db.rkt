@@ -2018,17 +2018,17 @@
         )
 
         (define/public (assign-number!! value)
-          (assert (format "~a is not a number bruh" value) (number? value))
+          (assert (format "~a is not a number" value) (number? value))
           (assign-atom*!! 'number (number->string value))
         )
 
         (define/public (assign-char!! value)
-          (assert (format "~a is not a char, bruh" value) (char? value))
+          (assert (format "~a is not a char" value) (char? value))
           (assign-atom*!! 'character (number->string (char->integer value)))
         )
 
         (define/public (assign-string!! value)
-          (assert (format "~a is not a string, bruh" value) (string? value))
+          (assert (format "~a is not a string" value) (string? value))
           (assign-atom*!! 'string value)
         )
 
