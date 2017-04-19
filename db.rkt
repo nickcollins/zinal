@@ -28,7 +28,11 @@
   "define-syntax-rule"
 ))
 
-; TODO write more complete/thorough/detailed comments
+; This is an abstract interface to the storage db. This interface should be abstract and clean
+; enough to permit hot swapping out the db/storage format. It also gives us an idea of what a
+; minimalistic (albeit with basic OOP support) scheme-like tree protocol for logic description
+; might look like, regardless storage format or implementation details. Note that the term
+; "legacy" generally refers to a racket identifier or definition.
 ;
 ; VISIBILITY RULES:
 ;
@@ -121,6 +125,7 @@
   create-interface!! ; ([short-desc] [long-desc])
 ))
 
+; Everything in the db is an element - includes both elements of the tree and non-tree elements
 (define zinal:db:element%% (interface ()
 
   ; returns the zinal:db%%
@@ -132,10 +137,11 @@
   equals? ; (zinal:db:element%%)
 ))
 
+; a describable can have a short and long descriptor that explain and document it
 (define zinal:db:describable%% (interface (zinal:db:element%%)
 
   ; A short string description of the element, that should be much less than a line long.
-  ; Comparable to an identifier, but only used by humans; logic should never use this value.
+  ; Comparable to an identifier, but only used by humans; business logic should never use this value.
   ; Returns #f if none is specified
   get-short-desc ; ()
 
@@ -150,6 +156,9 @@
   set-long-desc!! ; (string OR #f)
 ))
 
+; All elements of the db that are part of a tree. Each tree is rooted by a module, each non-leaf node
+; (i.e. zinal:db:parent-node%% ) has a list of children - properties of a node which are sets (e.g.
+; the set of all modules required by a particular module) are generally not part of the tree.
 (define zinal:db:node%% (interface (zinal:db:element%%)
 
   ; Returns a zinal:db:node%% handle to the parent of this node. Returns #f for a module
@@ -185,7 +194,7 @@
 (define zinal:db:parent-node%% (interface (zinal:db:node%%)
 
   ; Returns a list of zinal:db:node%% handles to all children of this non-leaf node. The children
-  ; are returned in "lexical" order, so if child B depends on child A, A must appear before B in
+  ; are returned in programmatic order, so if child B depends on child A, A must appear before B in
   ; the returned list
   get-children ; ()
 ))
@@ -206,7 +215,7 @@
   is-referable-visible? ; ()
 ))
 
-; Any element which can be pointed to by some type of zinal:db:reference%%
+; Any element which can be pointed to by some type of zinal:db:reference%% ; generally definitions
 (define zinal:db:referable%% (interface (zinal:db:element%% zinal:db:describable%%)
 
   ; Find-usages, effectively.
@@ -648,11 +657,11 @@
   remove!! ; (non-negative-integer)
 ))
 
-; A module is comparable in scope to a scheme file. It is a list of nodes,
-; which are evaluated in order by any program which requires it. A module
-; can require other modules in order to refer to their public defs.
-; No module is allowed to require the main module, and the graph of requires must form
-; a DAG.
+; A module is comparable in scope to a racket module. It contains a list of nodes,
+; which are evaluated in order by any program which requires it. Each module is the root
+; of a tree of zinal:db:node%% . A module can require other modules in order to refer to
+; their public defs. No module is allowed to require the main module, and the graph of
+; requires must form a DAG.
 ; There can be any number of modules, but only one main module. If the program is run,
 ; it is the main module that is executed; if there is no main module, then the program
 ; cannot be run as an executable. Generally, referables are only visible within their
@@ -720,6 +729,8 @@
   delete!! ; ()
 ))
 
+; A definition, comparable to scheme define - note this is used for both constants and
+; for functions, tho not for some OOP definitions like method, class, or interface defs
 (define zinal:db:def%% (interface (zinal:db:parent-node%% zinal:db:referable%%)
 
   ; Returns a zinal:db:node%% handle for the expression of this define
@@ -763,8 +774,8 @@
   get-name ; ()
 ))
 
-; A placeholder node that has not been assigned an actual value yet. Scheme code cannot
-; be generated for a db that contains these. The assign!! methods transform this node
+; A placeholder node that has not been assigned an actual value yet. A db that contains
+; these cannot be compiled. The assign!! methods transform this node
 ; into one of a different type. In doing so, any handles to this node become invalid,
 ; and may no longer be used. The assign!! methods return a handle to the newly created
 ; node.

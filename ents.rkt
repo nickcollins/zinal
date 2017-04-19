@@ -2767,11 +2767,7 @@
     (define (handle-left*! handle-event-info event)
       (cond
         [(not parent*)
-          ; TODO this comment is outdated
-          ; This is a special case - normally we return #t from every event handler to prevent a fallback handler from getting to handle the event,
-          ; but in the case of trying to go "out" when we're at the top level, we allow the fallback to handle it in case we want to go from a root
-          ; child back to the containing root
-          (send handle-event-info set-wasnt-handled!)
+          (void)
         ]
         [(send parent* horizontal?)
           (select-neighbor-or*! this #t (thunk
