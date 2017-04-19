@@ -10,6 +10,7 @@
 (require "db-util.rkt")
 (require "ui.rkt")
 (require "ui-styles.rkt")
+(require "key-bindings.rkt")
 
 (provide zinal:ent:manager%)
 
@@ -1099,12 +1100,12 @@
     (unless global-event-handler*
       (set! global-event-handler*
         (make-object keyname-event-handler% (list
-          (list change-module*! '("e"))
-          (list create-new-module*!! '("E"))
-          (list change-interface*! '("c:e"))
-          (list create-new-interface*!! '("c:E"))
-          (list find-next-todo*! '("t"))
-          (list find-prev-todo*! '("T"))
+          (list change-module*! zinal:key-bindings:CHANGE-MODULE)
+          (list create-new-module*!! zinal:key-bindings:CREATE-NEW-MODULE)
+          (list change-interface*! zinal:key-bindings:CHANGE-INTERFACE)
+          (list create-new-interface*!! zinal:key-bindings:CREATE-NEW-INTERFACE)
+          (list find-next-todo*! zinal:key-bindings:GOTO-NEXT-UNASSIGNED)
+          (list find-prev-todo*! zinal:key-bindings:GOTO-PREV-UNASSIGNED)
         ))
       )
     )
@@ -1436,7 +1437,7 @@
     (define event-handler*
       (combine-keyname-event-handlers (list
         (create-name-change-handler (thunk (send this get-cone-root)))
-        (create-simple-event-handler "m"
+        (create-simple-event-handler zinal:key-bindings:TOGGLE-MAIN
           (lambda (handle-event-info event)
             (define module-handle (send this get-cone-root))
             (cond
@@ -1453,7 +1454,7 @@
             #t
           )
         )
-        (create-simple-event-handler "d"
+        (create-simple-event-handler zinal:key-bindings:DELETE/UNASSIGN
           (lambda (handle-event-info event)
             (define module-handle (send this get-cone-root))
             (if (send module-handle can-delete?)
@@ -1573,7 +1574,7 @@
       (define (result-handler new-handle-initializer!!)
         (new-handle-initializer!! (send (get-func-handle*) unassign!!))
       )
-      (create-interaction-dependent-event-handler interaction-function result-handler "s")
+      (create-interaction-dependent-event-handler interaction-function result-handler zinal:key-bindings:REPLACE)
     )
 
     (define (get-func-handle*)
@@ -2188,7 +2189,7 @@
             (spawn-entity*! super-class-slot* new-handle this)
             (select! super-class-slot*)
           )
-          (create-interaction-dependent-event-handler interaction-function result-handler "s")
+          (create-interaction-dependent-event-handler interaction-function result-handler zinal:key-bindings:REPLACE)
         )
 
         (define header-prefix-list* (get-header-prefix-list))
@@ -2367,7 +2368,7 @@
         )
 
         (define (prefix-ui->event-handler* prefix-ui)
-          (create-simple-event-handler "a"
+          (create-simple-event-handler zinal:key-bindings:TOGGLE-AUGMENT
             (lambda (handle-event-info event)
               (define override-handle (send this-ent* get-cone-root))
               (send override-handle set-is-augment!! (not (send override-handle is-augment?)))
@@ -2424,7 +2425,7 @@
           (define (result-handler result-from-user)
             (set-method!! result-from-user)
           )
-          (define method-change-handler (create-interaction-dependent-event-handler interaction-function result-handler "s"))
+          (define method-change-handler (create-interaction-dependent-event-handler interaction-function result-handler zinal:key-bindings:REPLACE))
           (define cone-root-handle (send this-ent* get-cone-root))
           (if (is-a? cone-root-handle zinal:db:has-method%%)
             (combine-keyname-event-handlers (list
@@ -2671,7 +2672,7 @@
         (define/override (get-event-handler)
           (combine-keyname-event-handlers (list
             (super get-event-handler)
-            (create-simple-event-handler "d"
+            (create-simple-event-handler zinal:key-bindings:DELETE/UNASSIGN
               (lambda (handle-event-info event)
                 (define interface-handle (send this-ent* get-cone-root))
                 (if (send interface-handle can-delete?)
@@ -2881,19 +2882,19 @@
     )
 
     (define/public (create-left-handler)
-      (make-object keyname-event-handler% (list (list handle-left*! '("left" "h"))))
+      (create-simple-event-handler zinal:key-bindings:MOVE-LEFT handle-left*!)
     )
 
     (define/public (create-right-handler)
-      (make-object keyname-event-handler% (list (list handle-right*! '("right" "l"))))
+      (create-simple-event-handler zinal:key-bindings:MOVE-RIGHT handle-right*!)
     )
 
     (define/public (create-up-handler)
-      (make-object keyname-event-handler% (list (list handle-up*! '("up" "k"))))
+      (create-simple-event-handler zinal:key-bindings:MOVE-UP handle-up*!)
     )
 
     (define/public (create-down-handler)
-      (make-object keyname-event-handler% (list (list handle-down*! '("down" "j"))))
+      (create-simple-event-handler zinal:key-bindings:MOVE-DOWN handle-down*!)
     )
 
     (super-make-object)
@@ -3015,8 +3016,8 @@
 
     (define/public (create-expand-and-collapse-handler)
       (make-object keyname-event-handler% (list
-        (list collapse*! '("s:left" "H"))
-        (list expand*! '("s:right" "L"))
+        (list collapse*! zinal:key-bindings:EXPAND)
+        (list expand*! zinal:key-bindings:COLLAPSE)
       ))
     )
 
@@ -3227,27 +3228,27 @@
     )
 
     (define/public (create-insert-start-handler [new-item-creator request-new-item-creator])
-      (create-typical-insert-slot-handler get-offset* "I" new-item-creator)
+      (create-typical-insert-slot-handler get-offset* zinal:key-bindings:INSERT-FIRST new-item-creator)
     )
 
     (define/public (create-insert-end-handler [new-item-creator request-new-item-creator])
-      (create-typical-insert-slot-handler (thunk (length (send this get-children-internal))) "A" new-item-creator)
+      (create-typical-insert-slot-handler (thunk (length (send this get-children-internal))) zinal:key-bindings:INSERT-LAST new-item-creator)
     )
 
     (define/public (create-insert-before-handler slot [new-item-creator request-new-item-creator])
-      (create-typical-insert-slot-handler (thunk (get-ui-index* slot)) "i" new-item-creator)
+      (create-typical-insert-slot-handler (thunk (get-ui-index* slot)) zinal:key-bindings:INSERT-BEFORE new-item-creator)
     )
 
     (define/public (create-insert-after-handler slot [new-item-creator request-new-item-creator])
-      (create-typical-insert-slot-handler (thunk (add1 (get-ui-index* slot))) "a" new-item-creator)
+      (create-typical-insert-slot-handler (thunk (add1 (get-ui-index* slot))) zinal:key-bindings:INSERT-AFTER new-item-creator)
     )
 
     (define/public (create-insert-todo-handler slot)
-      (create-typical-insert-slot-handler (thunk (add1 (get-ui-index* slot))) "o" new-unassigned-creator)
+      (create-typical-insert-slot-handler (thunk (add1 (get-ui-index* slot))) zinal:key-bindings:INSERT-UNASSIGNED-AFTER new-unassigned-creator)
     )
 
     (define/public (create-remove-handler slot)
-      (create-simple-event-handler "d"
+      (create-simple-event-handler zinal:key-bindings:DELETE/UNASSIGN
         (lambda (handle-event-info event)
           (when (db-can-remove? (get-db-index* slot)) (remove-slot!! slot))
           #t
@@ -3256,7 +3257,7 @@
     )
 
     (define/public (create-unassign-or-remove-handler slot)
-      (create-simple-event-handler "d"
+      (create-simple-event-handler zinal:key-bindings:DELETE/UNASSIGN
         (lambda (handle-event-info event)
           (cond
             [(db-can-remove? (get-db-index* slot)) (remove-slot!! slot)]
@@ -3291,7 +3292,7 @@
       (get-visible-referables-for-hypothetical-index* (db-get-list-handle) (db-get-items) (ui-index->db-index* ui-index))
     )
 
-    (define (create-insert-slot-handler get-ui-index interaction->new-handle-initializer!! keyname)
+    (define (create-insert-slot-handler get-ui-index interaction->new-handle-initializer!! keylist)
       (define (result-handler new-handle-initializer!!)
         (define ui-index (get-ui-index))
         (define intermediate-handle (db-insert!! (ui-index->db-index* ui-index)))
@@ -3301,15 +3302,15 @@
       (create-interaction-dependent-event-handler
         interaction->new-handle-initializer!!
         result-handler
-        keyname
+        keylist
       )
     )
 
-    (define (create-typical-insert-slot-handler get-ui-index keyname [new-item-creator request-new-item-creator])
+    (define (create-typical-insert-slot-handler get-ui-index keylist [new-item-creator request-new-item-creator])
       (define interaction->new-handle-initializer!!
         (thunk (new-item-creator (db-get-list-handle) (get-visible-referables-for-hypothetical-index (get-ui-index))))
       )
-      (create-insert-slot-handler get-ui-index interaction->new-handle-initializer!! keyname)
+      (create-insert-slot-handler get-ui-index interaction->new-handle-initializer!! keylist)
     )
 
     (define (insert-new-slot! ui-index slot-handle [child-spawner*! spawn-entity*!])
@@ -3385,7 +3386,7 @@
         (send this create-insert-before-handler slot new-param-creator)
         (send this create-insert-after-handler slot new-param-creator)
         (send this create-remove-handler slot)
-        (create-simple-event-handler "r"
+        (create-simple-event-handler zinal:key-bindings:MAKE-REQUIRED
           (lambda (handle-event-info event)
             (define first-opt-index (get-first-opt-index*))
             (define slot-index (send this get-child-index slot))
@@ -3396,7 +3397,7 @@
             #t
           )
         )
-        (create-simple-event-handler "o"
+        (create-simple-event-handler zinal:key-bindings:MAKE-OPTIONAL
           (lambda (handle-event-info event)
             (define first-opt-index (get-first-opt-index*))
             (define slot-index (send this get-child-index slot))
@@ -3484,7 +3485,7 @@
       (combine-keyname-event-handlers (list
         (create-name-change-handler (const item-handle))
         (add-item-event-handler* #t)
-        (create-simple-event-handler "d"
+        (create-simple-event-handler zinal:key-bindings:DELETE/UNASSIGN
           (lambda (handle-event-info event)
             (cond
               [(db-can-remove-item? item-handle)
@@ -3502,14 +3503,21 @@
     )
 
     (define (add-item-event-handler* augmented?)
-      (make-object keyname-event-handler% (list (list
+      (create-simple-event-handler
+        (append
+          zinal:key-bindings:INSERT-FIRST
+          zinal:key-bindings:INSERT-LAST
+          (if augmented?
+            (append zinal:key-bindings:INSERT-BEFORE zinal:key-bindings:INSERT-AFTER)
+            '()
+          )
+        )
         (lambda (handle-event-info event)
           (define added-handle (db-add-item!!))
           (when added-handle (reset! added-handle))
           #t
         )
-        (append '("I" "A") (if augmented? '("i" "a" "o") '()))
-      )))
+      )
     )
 
     (define (item-handle<? item-handle-1 item-handle-2)
@@ -3715,17 +3723,17 @@
   ; result-handler. To indicate that no action should be taken, interaction-function should return #f.
   ; Regardless of what happens, the handler always returns #t, indicating that the action has been
   ; handled
-  (define (create-interaction-dependent-event-handler interaction-function result-handler keyname)
+  (define (create-interaction-dependent-event-handler interaction-function result-handler keylist)
     (define (handler-function handle-event-info event)
       (define interaction-result (interaction-function))
       (when interaction-result (result-handler interaction-result))
       #t
     )
-    (make-object keyname-event-handler% (list (list handler-function (list keyname))))
+    (make-object keyname-event-handler% (list (list handler-function keylist)))
   )
 
-  (define (create-simple-event-handler keyname handler-function)
-    (make-object keyname-event-handler% (list (list handler-function (list keyname))))
+  (define (create-simple-event-handler keylist handler-function)
+    (make-object keyname-event-handler% (list (list handler-function keylist)))
   )
 
   (define (create-legacy-method-name-change-handler get-legacy-method-handle)
@@ -3740,7 +3748,7 @@
     (define (result-handler new-name)
       (send (get-legacy-method-handle) set-legacy-method-name!! new-name)
     )
-    (create-interaction-dependent-event-handler interaction-function result-handler "s")
+    (create-interaction-dependent-event-handler interaction-function result-handler zinal:key-bindings:REPLACE)
   )
 
   (define (create-name-change-handler get-describable-handle)
@@ -3755,7 +3763,7 @@
     (define (result-handler new-name)
       (send (get-describable-handle) set-short-desc!! new-name)
     )
-    (create-interaction-dependent-event-handler interaction-function result-handler "s")
+    (create-interaction-dependent-event-handler interaction-function result-handler zinal:key-bindings:REPLACE)
   )
 
   (define (create-replace-handler* slot ui-parent get-visible-referables-for-slot)
@@ -3766,11 +3774,11 @@
         (request-new-item-creator (send handle get-parent) (get-visible-referables-for-slot slot))
       )
     )
-    (create-interaction-dependent-event-handler interaction-function (lambda (nhi) (reassign-slot*!! slot ui-parent nhi)) "s")
+    (create-interaction-dependent-event-handler interaction-function (lambda (nhi) (reassign-slot*!! slot ui-parent nhi)) zinal:key-bindings:REPLACE)
   )
 
   (define (create-unassign-handler* slot ui-parent)
-    (create-simple-event-handler "d"
+    (create-simple-event-handler zinal:key-bindings:DELETE/UNASSIGN
       (lambda (handle-event-info event)
         (when (unassignable? (slot->db-handle slot)) (reassign-slot*!! slot ui-parent))
         #t
@@ -3779,7 +3787,7 @@
   )
 
   (define (create-modify-publicity-handler* get-define-handle ui-callback)
-    (create-simple-event-handler "m"
+    (create-simple-event-handler zinal:key-bindings:MODIFY-ACCESS
       (lambda (handle-event-info event)
         (define define-handle (get-define-handle))
         (when (can-be-public*? define-handle)
@@ -3792,28 +3800,26 @@
   )
 
   (define (create-navigate-to-root-handler* root-handle)
-    (make-object keyname-event-handler% (list (list
+    (create-simple-event-handler zinal:key-bindings:VIEW-DEFINITION
       (lambda (handle-event-info event)
         (spawn-root-entity*! root-handle)
         (send handle-event-info set-db-wasnt-affected!)
       )
-      '("space" "enter")
-    )))
+    )
   )
 
   (define (create-search-selected-handlers* criterion)
-    (define (search-handler finder input-string)
-      (make-object keyname-event-handler% (list (list
+    (define (search-handler finder keylist)
+      (create-simple-event-handler keylist
         (lambda (handle-event-info event)
           (finder criterion)
           (send handle-event-info set-db-wasnt-affected!)
         )
-        (list input-string)
-      )))
+      )
     )
     (combine-keyname-event-handlers (list
-      (search-handler find-next*! "*")
-      (search-handler find-prev*! "#")
+      (search-handler find-next*! zinal:key-bindings:GOTO-NEXT)
+      (search-handler find-prev*! zinal:key-bindings:GOTO-PREV)
     ))
   )
 
@@ -3859,7 +3865,7 @@
   )
 
   (define (root-slot->root-event-handler* root-slot)
-    (make-object keyname-event-handler% (list (list
+    (create-simple-event-handler zinal:key-bindings:RETURN-TO-PARENT
       (lambda (handle-event-info event)
         (define root-handle (slot->db-handle root-slot))
         (cond
@@ -3877,8 +3883,7 @@
         )
         (send handle-event-info set-db-wasnt-affected!)
       )
-      '("space" "enter" "backspace")
-    )))
+    )
   )
 
   (define (spawn-root-entity*! root-handle)
