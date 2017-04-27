@@ -17,6 +17,7 @@
 
 (require racket/gui/base)
 (require (only-in racket/exn exn->string))
+(require (only-in racket/cmdline parse-command-line))
 (require (only-in compiler/embed create-embedding-executable))
 
 (require "misc.rkt")
@@ -242,6 +243,21 @@
 )
 
 (define (compile-db db output-file-path)
+  (define transpiled-data (transpile db))
+  (define compiled-units
+    (parameterize ([current-namespace (make-base-namespace)])
+      (map compile (list
+        (append (list 'module '__zinal_dummy_module__ 'racket) transpiled-data)
+        (list 'dynamic-require '''__zinal_dummy_module__ #f)
+      ))
+    )
+  )
+  ; adding "--" to cmdline prevents command-line arguments from being treated as racket command line args instead of
+  ; zinal command line args
+  (create-embedding-executable output-file-path #:modules '() #:literal-expressions compiled-units #:cmdline '("--"))
+)
+
+(define (compile-db-with-dialog db output-file-path)
   (when output-file-path
     ; TODO not sure what the best way to do concurrency is but this will have to do for now
     (define dialog (make-object dialog% "Compiling ..."))
@@ -253,16 +269,7 @@
           (message-box "Cannot compile" (exn->string e) #f '(ok caution))
           (send dialog show #f)
         )])
-        (define transpiled-data (transpile db))
-        (define compiled-units
-          (parameterize ([current-namespace (make-base-namespace)])
-            (map compile (list
-              (append (list 'module '__zinal_dummy_module__ 'racket) transpiled-data)
-              (list 'dynamic-require '''__zinal_dummy_module__ #f)
-            ))
-          )
-        )
-        (create-embedding-executable output-file-path #:modules '() #:literal-expressions compiled-units)
+        (compile-db db output-file-path)
         (set! compilation-finished? #t)
         (send dialog show #f)
       )
@@ -279,17 +286,42 @@
 
 ; PROGRAM
 
-(define db-file-path (get-file "Choose a zinal sqlite db to open"))
-(unless db-file-path (exit))
+(define command-line-compile-out-fn #f)
+(define db-file-path-string #f)
 
-(define main-db (make-object zinal:sql-db% db-file-path))
+(parse-command-line
+  "zinal"
+  (current-command-line-arguments)
+  (list (list 'once-each
+    [list
+      '("-o" "--compile-to")
+      (lambda (flag out-fn) (set! command-line-compile-out-fn out-fn))
+      '("Compile the db instead of opening it" "output-filename")
+    ]
+  ))
+  (lambda (flag-args [db-fn #f]) (set! db-file-path-string db-fn))
+  '("db-filename")
+)
+
+(unless db-file-path-string
+  (set! db-file-path-string (get-file "Choose a zinal sqlite db to open"))
+)
+(unless db-file-path-string (exit))
+
+(define main-db (make-object zinal:sql-db% db-file-path-string))
+
+(when command-line-compile-out-fn
+  (compile-db main-db command-line-compile-out-fn)
+  (exit)
+)
+
 (define main-ent-manager (make-object zinal:ent:manager% main-db))
 
 (define main-window (make-object frame% "zinal"))
 (define main-canvas (make-object editor-canvas% main-window))
 (define menu-bar (make-object menu-bar% main-window))
 (define compile-menu (make-object menu% "compile" menu-bar))
-(void (make-object menu-item% "compile" compile-menu (thunk* (compile-db main-db (put-file "Choose the executable destination")))))
+(void (make-object menu-item% "compile" compile-menu (thunk* (compile-db-with-dialog main-db (put-file "Choose the executable destination")))))
 (send main-canvas set-canvas-background (make-object color% #x15 #x15 #x15))
 
 (define last-ui-info* #f)
