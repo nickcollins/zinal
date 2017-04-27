@@ -19,8 +19,11 @@
 
 (define zinal:ui:item%% (interface ()
 
+  ; Returns #t if this item should be displayed as "selected" - only one item
+  ; in the tree should return #t for this.
   selected? ; ()
 
+  ; NYI
   highlighted? ; ()
 
   accept ; (zinal:ui:element-visitor% [data])
@@ -33,20 +36,28 @@
   get-text ; ()
 ))
 
+; get-text always returns the same value
 (define zinal:ui:const%% (interface (zinal:ui:scalar%%)))
 
+; get-text can return different values if something changes
 (define zinal:ui:var-scalar%% (interface (zinal:ui:scalar%%)))
 
 (define zinal:ui:list%% (interface (zinal:ui:item%%)
 
   get-children ; () -> [zinal:ui:item%%]
 
+  ; displayed before the other children - in vertical mode, this is displayed
+  ; on the first line without indentation
   get-header ; () -> zinal:ui:item%% OR #f
 
+  ; If #t, this item, and all its children, should be displayed within a single
+  ; line. Otherwise, each child is displayed on a separate line.
   horizontal? ; ()
 
   get-horizontal-separator ; () -> zinal:ui:const%% OR #f
 
+  ; In some cases, the first item will be displayed before all children (and
+  ; header) and the last item after all children.
   get-bookends ; () -> [zinal:ui:const%% zinal:ui:const%%] OR #f
 ))
 
