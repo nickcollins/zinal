@@ -141,7 +141,9 @@ parts of zinal (the sql db impl and the ent layer), and it represents an abstrac
 
 # Contact and Contributing
 
-If you want to contact me or are interested in contributing, shoot me an email at syntax is boilerplate at gmail dot com.
+If you want to contact me or are interested in contributing, just ping me at [gitter](https://gitter.im/zinal-IDE/Lobby?source=orgpage). I don't expect high volume of pull
+requests right now so I don't have a clear idea about what I'm looking for in terms of contributions, but I'd love to hear any ideas you have so just let me know what you're
+thinking and we can discuss it there.
 
 # Prior work
 
