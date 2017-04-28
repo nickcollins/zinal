@@ -8,7 +8,7 @@ represent the logic to the user as a text buffer (tho often with a good deal of 
 binary database format (currently sqlite3, subject to change) and presents the user with a structured, tree-oriented interface
 for viewing and editing the logic.
 
-As a "proof of concept", zinal is less mature and polished than existing projectional
+As a "Proof of Concept" (PoC), zinal is less mature and polished than existing projectional
 editors such as [MPS](https://www.jetbrains.com/mps/) or [Lamdu](http://www.lamdu.org/), but (at time of writing) I believe that zinal
 is the first open-source projectional editor that
 is demonstrably capable of self hosting - that is, the zinal repo contains a zinal db that zinal can compile into a zinal executable.
@@ -20,7 +20,7 @@ is demonstrably capable of self hosting - that is, the zinal repo contains a zin
 A comprehensive explanation of the rationale for projectional editing would be rather long and complicated. I'm working on coalescing and/or creating a
 solid body of work to explain and defend the value-add of projectional editing over traditional editing. Until then, my elevator pitch is:
 
-_"Syntax is boilerplate - let's factor it out of the software development process and environment"_
+___"Syntax is boilerplate - let's factor it out of the software development process and environment"___
 
 ## Why zinal?
 
@@ -110,7 +110,7 @@ The zinal logic has three basic layers: the front-end GUI, a middle layer of ent
 - The front-end layer is pretty simple, mostly being a thin interface between the human and the entity layer. `main.rkt` is the entry-point. After doing basic start-up and
 set-up, it enters a simple loop of accepting user input, sending the input to the ent layer, receiving a ui response from the ent layer, and then displaying the response to
 the user. The response is a `zinal:ui:item%%` as defined in `ui.rkt`. `ui.rkt` declares an abstract, read-only, line-oriented tree structure. `main.rkt` has to do some somewhat
-fancy stuff for the sake of navigation performance, but at its heart it just runs through the ui tree it receives from the ent layers and lays down its contents into a
+fancy stuff for the sake of navigation performance, but at its heart it just runs through the ui tree it receives from the ent layer and lays down its contents into a
 line-based text display.
 - The storage layer is declared in `db.rkt` and defined in `sql-db.rkt`. `db.rkt` declares a completely abstract interface to a Scheme-like (with OOP) logic storage
 model. The caller to the interface interacts with the storage layer via handles to stored db elements. The only current implementation is `sql-db.rkt`. `sql-db.rkt` implements
@@ -119,7 +119,8 @@ tables, for identifying that element. Lists are implemented as linked lists.
 - The ent layer, contained entirely in `ents.rkt` is the largest, worst organized, most complex part of the code, and is poorly factored and barely documented. Being stuck
 between the GUI and the storage, both of which are stateful, it has a lot of complex responsibility that it must perform performantly (enough).
  - The ent layer parses the db,
-   partitioning the db tree into "cones" (which are like subtrees, but technically different), and creating an ent for each cone. Each ent then creates a corresponding ui cone,
+   partitioning the db tree into "cones" (which are like subtrees, but technically different - see the docs in `ents.rkt`), and creating an ent for each cone. Each ent then
+   creates a corresponding ui cone,
    corresponding to the db cone that the ui must represent, but with a potentially different structure.
  - When the ent layer receives an event from the GUI, it sends the event to
    the currently selected ui item, which handles the event according to the event handler assigned to it by its ent. If the db was (potentially) affected by the event handling,
