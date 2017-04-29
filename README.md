@@ -42,10 +42,12 @@ feedback, but the current UI is very feature poor (it doesn't even have undo/red
 implementation, not with projectional editors in general - see [MPS](https://www.jetbrains.com/mps/) or [Lamdu](http://www.lamdu.org/) for examples of projectional editors with
 better UIs._
 
-All that should be necessary to run zinal is to have [Racket](https://racket-lang.org/download/) installed on your machine. **Make sure you download Racket from their website**
+All that should be necessary to run zinal is to have `sqlite3` and [Racket](https://racket-lang.org/download/) installed on your machine.
+**Make sure you download Racket from their website**
 and not via `apt-get`, as zinal requires Racket v. 6.8 or above, and the Ubuntu package is outdated. After downloading and installing Racket (which should be pretty
 straightforward), you can run
 ```
+sudo apt-get install sqlite3
 racket main.rkt [<zinal-db>]
 ```
 
