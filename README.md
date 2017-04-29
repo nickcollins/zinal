@@ -73,7 +73,7 @@ the `compile` item in the `compile` menu (of course, if you made any changes to 
 `git checkout example.db` to get it back to its original state). A dialog will prompt you for the
 output file, and after compilation that file will be an executable that you can run directly (i.e. don't invoke the executable with `racket`).
 
-You can also compile straight from the command line, via `racket main.rkt -o <exe-dest-file> example.db`. You should close zinal before running this to avoid concurrent db
+You can also compile straight from the command line, via `racket main.rkt -o <dest-file> example.db`. You should close zinal before running this to avoid concurrent db
 access.
 
 ## Create your own program
