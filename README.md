@@ -47,7 +47,7 @@ All that should be necessary to run zinal is to have `sqlite3` and [Racket](http
 and not via `apt-get`, as zinal requires Racket v. 6.8 or above, and the Ubuntu package is outdated. After downloading and installing Racket (which should be pretty
 straightforward), you can run
 ```
-sudo apt-get install sqlite3
+sudo apt-get install sqlite3 libsqlite3-dev
 racket main.rkt [<zinal-db>]
 ```
 
