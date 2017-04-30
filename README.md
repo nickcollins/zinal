@@ -114,6 +114,9 @@ features - a lot of the boilerplate and quality issues could be fixed by using R
 modeling currently. Otherwise, some things are disorganized or poorly factored because in the long-run, they need a huge overhaul, so I don't want to expend effort on long-tail
 refactorings before completely redesigining the ent layer (into a zinal macro system) from the ground up._
 
+The zinal logic is pretty large and complex. The best place to start is probably `db.rkt` - it's the best documented, it's the interface between the two most complex
+parts of zinal (the sql db impl and the ent layer), and it represents an abstract description of zinal's "grammar".
+
 The zinal logic has three basic layers: the front-end GUI, a middle layer of entities that interface with both the GUI and the backend, and a backend storage layer:
 - The front-end layer is pretty simple, mostly being a thin interface between the human and the entity layer. `main.rkt` is the entry-point. After doing basic start-up and
 set-up, it enters a simple loop of accepting user input, sending the input to the ent layer, receiving a ui response from the ent layer, and then displaying the response to
@@ -143,9 +146,6 @@ between the GUI and the storage, both of which are stateful, it has a lot of com
    `ui.rkt`.
  - In the long run, a macro system for zinal ought to be built, at which point all the actual ents can be stored in the database itself, making zinal's logic more powerful and
    abstract while also removing clutter and boilerplate from it.
-
-The zinal logic is pretty large and complex. The best place to start is probably `db.rkt` - it's the best documented, it's the interface between the two most complex
-parts of zinal (the sql db impl and the ent layer), and it represents an abstract description of zinal's "grammar".
 
 # Contact and Contributing
 
