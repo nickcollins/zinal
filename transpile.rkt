@@ -85,6 +85,16 @@
 )
 
 (define (transpile-all-interfaces all-interfaces identifiables)
+  (define seen-ifaces (mutable-set))
+  (define ordered-ifaces '())
+  (define (push-iface iface)
+    (unless (set-member? seen-ifaces iface)
+      (for-each push-iface (send iface get-direct-sub-interfaces))
+      (set-add! seen-ifaces iface)
+      (set! ordered-ifaces (cons iface ordered-ifaces))
+    )
+  )
+  (for-each push-iface (filter (lambda (i) (null? (send i get-direct-super-interfaces))) all-interfaces))
   (map
     (lambda (i)
       (define methods (send i get-direct-methods))
@@ -95,7 +105,7 @@
         (list* 'interface (db-elems->scheme supers identifiables) (db-elems->scheme methods identifiables))
       )
     )
-    all-interfaces
+    ordered-ifaces
   )
 )
 

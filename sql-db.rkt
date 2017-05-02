@@ -425,6 +425,10 @@
         (set-long-desc*!! this new-desc)
       )
 
+      (define/public (get-direct-sub-interfaces)
+        (get-direct-sub-interfaces* this)
+      )
+
       (define/public (get-direct-super-interfaces)
         (get-direct-super-interfaces* this)
       )
@@ -2279,6 +2283,11 @@
 
     (define (get-containing-class* node)
       (and node (if (is-a? node zinal:db:class%%) node (get-containing-class* (send node get-parent))))
+    )
+
+    (define (get-direct-sub-interfaces* caller)
+      (send caller assert-valid)
+      (filter (curryr is-a? zinal:db:interface%%) (map id->handle! (query-list db* "SELECT subtype_id FROM extends WHERE supertype_id = ?1" (send caller get-id))))
     )
 
     (define (get-direct-super-interfaces* caller)

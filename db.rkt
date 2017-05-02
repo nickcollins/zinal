@@ -394,6 +394,10 @@
 ; being attached to any particular module.
 (define zinal:db:interface%% (interface (zinal:db:type%%)
 
+  ; Returns a list of zinal:db:interface%% , in no particular order, for the interfaces that explicitly
+  ; extends this.
+  get-direct-sub-interfaces ; ()
+
   ; Returns #t if this interface has no subtypes, if there are no references to it, and all
   ; of its methods can be deleted.
   ; Otherwise #f
