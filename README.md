@@ -1,6 +1,6 @@
 # What?
 
-zinal (Zinal Is Not A Language) is a PoC projectional-editor/language-alternative demonstrably capable of self-hosting.
+Zinal (Zinal Is Not A Language) is a PoC projectional-editor/language-alternative demonstrably capable of self-hosting.
 
 As a projectional editor, it allows a user to read and edit software via a GUI that is not necessarily a 1:1 reflection of
 the logic's on-disk representation. Traditional editors (and IDEs) are text editors that store logic in text files and
@@ -30,14 +30,16 @@ of fundamental properties of this environment that are critical to its success, 
 compiler was probably compiled from C source code, Vim source code is probably edited in Vim, and GNU/Linux distros are probably developed on GNU/Linux
 machines. If there's any hope of establishing a projectional or text-free (or even text-agnostic) alternative to this text-oriented environment, the
 new alternative will have to likewise be capable of hosting and developing itself. Conceptually, it goes without saying that doing so is _possible_, but
-I wanted to prove that doing so is _feasible_. Hence zinal. Of course, the ability to self-host is far and away not the only critical and fundamental
-property of the traditional unix environment; there are many other properties that would need to be fulfilled which zinal is currently lacking. zinal is
+I wanted to prove that doing so is _feasible_. Hence zinal.
+
+Of course, the ability to self-host is far and away not the only critical and fundamental
+property of the traditional unix environment; there are many other properties that would need to be fulfilled which zinal is currently lacking. Zinal is
 not meant to be the end product - it's intended to encourage the idea of projectional editing and to help prove that the cost of rebuilding the dev environment
 from the ground up, based on new premises, is not prohibitive.
 
 # Try it out!
 
-_**Disclaimer**: zinal is at a very early stage of development - I wanted to put it out there as soon as it was capable of self-hosting to at least get that across, and get some
+_**Disclaimer**: Zinal is at a very early stage of development - I wanted to put it out there as soon as it was capable of self-hosting to at least get that across, and get some
 feedback, but the current UI is very feature poor (it doesn't even have undo/redo) and is kludgy, slow, and sometimes awkward. These are problems with the current
 implementation, not with projectional editors in general - see [MPS](https://www.jetbrains.com/mps/) or [Lamdu](http://www.lamdu.org/) for examples of projectional editors with
 better UIs._
@@ -60,10 +62,13 @@ racket main.rkt [<zinal-db>]
 ## Viewing and editing a zinal db
 
 Run `racket main.rkt example.db` - zinal will display the example db's "main module". Type "right" then "down" to select the module's first statement.
-zinal doesn't currently support mouse input, so you'll have to interact with it exclusively via the keyboard. Use the arrow keys (or `hjkl`) to navigate
-around the module. To expand or collapse a list, use shift in conjunction with left and right movement. To navigate to a different module, type `e`.
-To see the complete body of a definition, navigate to it and press `enter`. To add nodes, press `I`, `A`, `i`, `a`, or `o`, and to delete them press
-`d` (or `s` to replace). The key-bindings are intended to feel familiar to vim users - but you can view or edit them in the `key-bindings.rkt` file.
+Zinal doesn't currently support mouse input, so you'll have to interact with it exclusively via the keyboard:
+- Use the arrow keys (or `hjkl`) to navigate around the module. To expand or collapse a list, use shift in conjunction with left and right movement.
+- To navigate to a different module, type `e`.
+- To see the complete body of a definition, navigate to it and press `enter`.
+- To add nodes, press `I`, `A`, `i`, `a`, or `o`, and to delete them press `d` (or `s` to replace).
+
+The key-bindings are intended to feel familiar to vim users - but you can view or edit them in the `key-bindings.rkt` file.
 
 ## Compiling
 
@@ -82,12 +87,17 @@ To create a new db do:
 ```
 racket main.rkt my-db.db
 ```
-zinal will prompt you to name the initial module - after that, type `I` and `enter` to create a new "unassigned" node, which should
-get you started. You can type `s` on the unassigned node to turn it into something useful. Semantically, zinal is almost equivalent to Racket (which is a variant of Scheme), so
-you'll probably be creating a lot of "list"s. The biggest pain point with the current UI (other than the lack of critical features like undo/redo) is that when
-you create a list, you have to then type `I` or `A` in order to add the first item to it (inside of a list, you can also use `i`, `a`, or `o`). Remember the
-key bindings can be found (and edited) in `key-bindings.rkt`. Play around and create whatever logic you want - if you're not familiar with Scheme primitives and semantics,
-check out `example.db` for some ideas. Before you compile, the program must have a main module. Navigate to
+Zinal will prompt you to name the initial module - after that, type `I` and `enter` to create a new "unassigned" node, which should
+get you started.
+- You can type `s` on an unassigned node (or most other nodes) to turn it into something useful.
+- Semantically, zinal is almost equivalent to Racket (which is a variant of Scheme), so you'll probably be creating a lot of "list"s.
+- When you create a list, you have to then type `I` or `A` in order to add the first item to it (inside of a list, you can also use `i`, `a`, or `o`).
+- Remember the key bindings can be found (and edited) in `key-bindings.rkt`.
+
+Play around and create whatever logic you want - if you're not familiar with Scheme primitives and semantics,
+check out `example.db` for some ideas.
+
+Before you compile, the program must have a main module. Navigate to
 the appropriate module and type "left" enough times until the whole module is selected, then type "right" _twice_ (the current ui is finicky), then press `m`. Now you can
 compile normally.
 
@@ -97,9 +107,10 @@ To see zinal self-hosting in action, run:
 ```
 racket main.rkt -o zinal zinal.db
 ```
-This may take 10-20 minutes (I know - I'm working on it). After compilation is done, you can use `zinal` the same way as `racket main.rkt`. Start-up for `zinal` is a
-lot faster, since it doesn't have to jit. Try running `zinal zinal.db`. Here you can see the source logic from which `zinal` was compiled - it is similar (tho not identical)
-to the Scheme logic found in the `.rkt` files. Try using `e` to switch to the `ui-styles` module, change a few colors or something, compile to `my-zinal`, then run
+This may take 10-20 minutes (I know - I'm working on it). After compilation is done, you can use `zinal` the same way as `racket main.rkt`.
+Try running `zinal zinal.db`. Here you can see the source logic from which `zinal` was compiled - it is similar (tho not identical)
+to the Scheme logic found in the `.rkt` files. Try using `e` to switch to the `ui-styles` module, change a few colors or something (see
+https://docs.racket-lang.org/draw/color-database___.html), compile to `my-zinal`, then run
 `my-zinal zinal.db`. You should see that the style changes you made are now manifest in the custom version of zinal you just created. Imagine if the missing editor features
 were implemented, version control was added, and the ui was made more fluent and elegant; the Scheme code could be completely forgotten, each iteration of zinal being developed
 and compiled by the previous one.
@@ -155,17 +166,16 @@ thinking and we can discuss it there.
 
 # Prior work
 
-As was previously noted, more mature and polished projectional editors exists, such as [MPS](https://www.jetbrains.com/mps/) and [Lamdu](http://www.lamdu.org/), but also
+As was previously noted, more mature and polished projectional editors exist, such as [MPS](https://www.jetbrains.com/mps/) and [Lamdu](http://www.lamdu.org/), but also
 many others (see https://news.ycombinator.com/item?id=13773813, for example). I was not familiar with these when I started this project; had I been I probably wouldn't have
-created a new thing. By the time I became familiar with them, I was already far enough along with zinal that I felt it was best to see it through. The one substantial thing that
-I think zinal might contribute is that it can demonstrably self-host - MPS and Lamdu might be capable of self-hosting with some effort, but based on my current understanding that
-seems quite challenging to make work - both systems are pretty sophisticated and it is easier to close the loop with something simple and minimalistic (hence zinal is written in
-and similar to Scheme, the simplest dialect of Lisp, which is the simplest paradigm of programming languages) and designed from the outset with the goal of self hosting. Of
-course, zinal is pretty useless as an editor (it doesn't even have undo/redo), so the fact that it can self-host is, in and of itself, quite useless. But I hope that
-demonstrating the closed
+created a new thing. By the time I became familiar with them, I was already far enough along with zinal that I felt it was best to see it through.
+
+Given that more mature
+projectional editors exist, the main point of zinal is to demonstrate an example of a projectional editor that can self-host. MPS might be capable of self-hosting with some
+effort, but based on my current understanding that seems quite challenging to make work. Lamdu has self-hosting as a long-term goal, but isn't ready for it at time of writing.
+I hope that demonstrating the closed
 loop, and what it looks like, will help inspire interest in projectional editors in general, help prove that projectional editors are a viable alternative to traditional
-editors, and encourage developers of existing projectional editors to consider self-hosting as a potential long-term goal (I think it's a necessary goal at some point if
-projectional editors are ever going to take off in a big way).
+editors, and encourage developers of existing projectional editors to consider or prioritize self-hosting.
 
 # License
 
