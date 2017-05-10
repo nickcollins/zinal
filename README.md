@@ -1,6 +1,6 @@
 # What?
 
-Zinal (Zinal Is Not A Language) is a PoC projectional-editor/language-alternative demonstrably capable of self-hosting.
+Zinal (Zinal Is Not A Language) is a PoC [projectional-editor](https://martinfowler.com/bliki/ProjectionalEditing.html)/language-alternative demonstrably capable of self-hosting.
 
 As a projectional editor, it allows a user to read and edit software via a GUI that is not necessarily a 1:1 reflection of
 the logic's on-disk representation. Traditional editors (and IDEs) are text editors that store logic in text files and
