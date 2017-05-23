@@ -2,25 +2,23 @@
 
 Zinal (Zinal Is Not A Language) is a PoC [projectional-editor](https://martinfowler.com/bliki/ProjectionalEditing.html)/language-alternative demonstrably capable of self-hosting.
 
-As a projectional editor, it allows a user to read and edit software via a GUI that is not necessarily a 1:1 reflection of
-the logic's on-disk representation. Traditional editors (and IDEs) are text editors that store logic in text files and
-represent the logic to the user as a text buffer (tho often with a good deal of sugaring). But zinal stores logic in a
+As a projectional editor, it allows a programmer to read and edit software via a GUI that is not necessarily a 1:1 reflection of
+the logic's on-disk representation. Conventional editors (and IDEs) are text editors that store logic in text files and
+represent the logic to the programmer as a character matrix (tho often with a good deal of sugaring). But zinal stores logic in a
 binary database format (currently sqlite3, subject to change) and presents the user with a structured, tree-oriented interface
 for viewing and editing the logic.
 
-As a "Proof of Concept" (PoC), zinal is less mature and polished than existing projectional
-editors such as [MPS](https://www.jetbrains.com/mps/) or [Lamdu](http://www.lamdu.org/), but (at time of writing) I believe that zinal
-is the first open-source projectional editor that
-is demonstrably capable of self hosting - that is, the zinal repo contains a zinal db that zinal can compile into a zinal executable.
+As a "Proof of Concept" (PoC), zinal is not the most mature or polished projectional editor, but unlike many projectional editors, zinal aims to be completely
+general-purpose and is demonstrably capable of self hosting - that is, the zinal repo contains a zinal db that zinal can compile into a zinal executable.
 
 # Why?
 
 ## Why projectional editing?
 
 A comprehensive explanation of the rationale for projectional editing would be rather long and complicated. I'm working on coalescing and/or creating a
-solid body of work to explain and defend the value-add of projectional editing over traditional editing. Until then, my elevator pitch is:
+solid body of work to explain and defend the benefits of projectional editing over traditional editing. Until then, my quick sells are:
 
-___"Syntax is boilerplate - let's factor it out of the software development process and environment"___
+___"Syntax is boilerplate"___ and ___"Graphs and strings are both formal, but graphs can be more 'expressive'"___
 
 ## Why zinal?
 
@@ -166,7 +164,7 @@ thinking and we can discuss it there.
 
 # Prior work
 
-As was previously noted, more mature and polished projectional editors exist, such as [MPS](https://www.jetbrains.com/mps/) and [Lamdu](http://www.lamdu.org/), but also
+As was previously noted, more mature projectional editors exist, such as [MPS](https://www.jetbrains.com/mps/) and [Lamdu](http://www.lamdu.org/), but also
 many others (see https://news.ycombinator.com/item?id=13773813, for example). I was not familiar with these when I started this project; had I been I probably wouldn't have
 created a new thing. By the time I became familiar with them, I was already far enough along with zinal that I felt it was best to see it through.
 
