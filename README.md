@@ -18,7 +18,7 @@ general-purpose and is demonstrably capable of self hosting - that is, the zinal
 A comprehensive explanation of the rationale for projectional editing would be rather long and complicated. I'm working on coalescing and/or creating a
 solid body of work to explain and defend the benefits of projectional editing over traditional editing. Until then, my quick sells are:
 
-___"Syntax is boilerplate"___ and ___"Graphs and strings are both formal, but graphs can be more 'expressive'"___
+___"Syntax is boilerplate"___ and ___"Graphs and strings are both equally capable of representing formal logic and data, but graphs can be more 'expressive'"___
 
 ## Why zinal?
 
