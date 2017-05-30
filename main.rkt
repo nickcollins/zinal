@@ -196,22 +196,36 @@
     (define selected-style
       (send styles find-or-create-style
         base-style
-        (send (send (make-object style-delta%) set-delta-background "White") set-delta-foreground "Black")
+        (send (make-object style-delta%) set-delta-background "White")
       )
     )
+
+    (define inversion-style-delta (make-object style-delta%))
+    (send (send inversion-style-delta get-foreground-mult) set -1.0 -1.0 -1.0)
+    (send (send inversion-style-delta get-foreground-add) set 256 256 256)
 
     (define highlighted-style
       (send styles find-or-create-style
         base-style
-        (send (send (make-object style-delta%) set-delta-background (make-object color% #x45 #x2A #x45)) set-delta-foreground "White")
+        (send (make-object style-delta%) set-delta-background (make-object color% #x45 #x2A #x45))
       )
     )
 
     (define (get-style pos-info)
+      (define style-delta (send pos-info get-style-delta))
       (cond
-        [(send pos-info selected?) selected-style]
-        [(send pos-info highlighted?) highlighted-style]
-        [else (send styles find-or-create-style base-style (send pos-info get-style-delta))]
+        [(send pos-info selected?)
+          (send styles find-or-create-style
+            (send styles find-or-create-style selected-style style-delta)
+            inversion-style-delta
+          )
+        ]
+        [(send pos-info highlighted?)
+          (send styles find-or-create-style highlighted-style style-delta)
+        ]
+        [else
+          (send styles find-or-create-style base-style style-delta)
+        ]
       )
     )
 
