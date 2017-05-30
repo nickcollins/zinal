@@ -30,13 +30,15 @@
 (define no-delta (make-object style-delta%))
 
 (define pos-info% (class object%
-  (init text style-delta is-selected?)
+  (init text style-delta is-selected? is-highlighted?)
   (define text* text)
   (define style-delta* style-delta)
   (define selected*? is-selected?)
+  (define highlighted*? is-highlighted?)
   (define/public (get-text) text*)
   (define/public (get-style-delta) style-delta*)
   (define/public (selected?) selected*?)
+  (define/public (highlighted?) highlighted*?)
   (super-make-object)
 ))
 
@@ -70,10 +72,10 @@
       )
     )
 
-    (define (add-snip text style-delta selected?)
+    (define (add-snip text style-delta selected? [highlighted? #f])
       (define text-len (string-length text))
       (assert "Empty text in ui-item" (> text-len 0))
-      (hash-set! pos->pos-info* last-pos* (make-object pos-info% text style-delta selected?))
+      (hash-set! pos->pos-info* last-pos* (make-object pos-info% text style-delta selected? highlighted?))
       (set! last-pos* (+ last-pos* text-len))
     )
 
@@ -134,9 +136,13 @@
     (define (add-ui-item ui-item preceeding-whitespace selected-context?)
       (define selected? (or selected-context? (send ui-item selected?)))
       (if (is-a? ui-item zinal:ui:scalar%%)
-        (add-snip (send ui-item get-text) (send ui-item get-style-delta) selected?)
+        (add-snip (send ui-item get-text) (send ui-item get-style-delta) selected? (is-highlighted? ui-item))
         (add-ui-list ui-item preceeding-whitespace selected?)
       )
+    )
+
+    (define (is-highlighted? ui-item)
+      (and (is-a? ui-item zinal:ui:var-scalar%%) (send ui-item highlighted?))
     )
 
     (add-ui-item root-ui-item "" #f)
@@ -194,10 +200,18 @@
       )
     )
 
+    (define highlighted-style
+      (send styles find-or-create-style
+        base-style
+        (send (send (make-object style-delta%) set-delta-background (make-object color% #x45 #x2A #x45)) set-delta-foreground "White")
+      )
+    )
+
     (define (get-style pos-info)
-      (if (send pos-info selected?)
-        selected-style
-        (send styles find-or-create-style base-style (send pos-info get-style-delta))
+      (cond
+        [(send pos-info selected?) selected-style]
+        [(send pos-info highlighted?) highlighted-style]
+        [else (send styles find-or-create-style base-style (send pos-info get-style-delta))]
       )
     )
 
@@ -206,7 +220,7 @@
       (define new-pos->pos-info (send new-ui-info get-pos->pos-info))
       (hash-map pos->pos-info (lambda (pos old-info)
         (define new-info (hash-ref new-pos->pos-info pos))
-        (when (xor (send old-info selected?) (send new-info selected?))
+        (when (or (xor (send old-info selected?) (send new-info selected?)) (xor (send old-info highlighted?) (send new-info highlighted?)))
           (send this change-style (get-style new-info) pos (+ pos (string-length (send new-info get-text))))
         )
       ))

@@ -23,9 +23,6 @@
   ; in the tree should return #t for this.
   selected? ; ()
 
-  ; NYI
-  highlighted? ; ()
-
   accept ; (zinal:ui:element-visitor% [data])
 ))
 
@@ -40,7 +37,13 @@
 (define zinal:ui:const%% (interface (zinal:ui:scalar%%)))
 
 ; get-text can return different values if something changes
-(define zinal:ui:var-scalar%% (interface (zinal:ui:scalar%%)))
+(define zinal:ui:var-scalar%% (interface (zinal:ui:scalar%%)
+
+  ; Returns #t if this item should be "soft" highlighted - there should be a background color
+  ; difference, but not one that makes it look like it's selected. Multiple items can be highlighted
+  ; this way at once, independent of the selection. If an element is both selected and highlighted, highlighting is ignored.
+  highlighted? ; ()
+))
 
 (define zinal:ui:list%% (interface (zinal:ui:item%%)
 

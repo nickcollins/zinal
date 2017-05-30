@@ -995,15 +995,16 @@
   (define db* db)
   (define ent-manager* this)
   (define selected* #f)
+  (define selected-highlight-equivalence-handle* #f)
   (define global-event-handler* #f)
 
   ; TODO We want ui:scalar% to only refresh its text if the db has actually changed somehow, because the db calls required to update the text
   ; are expensive. There are several major changes that could be made to the framework that might facilitate this, like making db handles
   ; hashable, or giving every ent% a refresh! method that is invoked when that ent is first created and when it's reparsed. These are good
   ; options to consider for later, but for now they require large reworkings and rethinkings of things, and aren't worth the time required to
-  ; do them properly. So for now it's sufficient just to keep a count of the parses that have happened so ui:var-scalar% can compare to the
-  ; global count and refresh if necessary
-  (define parse-count* 0)
+  ; do them properly. So for now it's sufficient just to keep a count of the modifications that have happened so ui:var-scalar% can compare to
+  ; the global count and refresh if necessary
+  (define mod-count* 0)
 
   (define/public (get-initial-ui!)
     (unless (navigate-to-fresh-module*!)
@@ -1019,8 +1020,9 @@
     (unless (send global-event-info was-handled?)
       (define event-info (send selected* handle-event!! event))
       (when (send event-info was-db-affected?)
-        (set! parse-count* (add1 parse-count*))
+        (set! mod-count* (add1 mod-count*))
         (maybe-reparse*! (get-root-slot*) (reverse (get-backwards-selection-path* selected*)))
+        (update-selected-highlight-equivalence-handle*)
       )
     )
     (send selected* get-root)
@@ -1028,6 +1030,11 @@
 
   (define (select! slot/item)
     (set! selected* (slot/ui-item->ui-item slot/item))
+    (update-selected-highlight-equivalence-handle*)
+  )
+
+  (define (update-selected-highlight-equivalence-handle*)
+    (set! selected-highlight-equivalence-handle* (send (send selected* get-parent-ent) get-highlight-equivalence-handle selected*))
   )
 
   (define (get-root-slot*)
@@ -1170,6 +1177,11 @@
       cone-root*
     )
 
+    ; If the database doesn't change, then this must return the same result every time for a given child-ui-item
+    (define/public (get-highlight-equivalence-handle child-ui-item)
+      #f
+    )
+
     (define/public (handle-child-event!! event)
       (assert "You must call assign-to-slot! before sending any events" slot*)
       (send slot* handle-child-event!! event)
@@ -1210,6 +1222,10 @@
 
     (define/public (get-synopsis-text)
       "..."
+    )
+
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (send this get-cone-root)
     )
 
     ; Gross. We happen to know that the superclass does not actually need to call get-root-ui-item during
@@ -1492,7 +1508,7 @@
     )
 
     (define/override (get-header)
-      (make-object (class ui:set-list%
+      (make-object (class ui:handle-set-list%
 
         (define/override (db-get-items)
           (send (send this-ent* get-cone-root) get-required-modules)
@@ -1540,6 +1556,11 @@
     (init cone-root-handle child-spawner!)
 
     (abstract get-header-style)
+
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (define handle (get-func-handle*))
+      (and (is-a? handle zinal:db:reference%%) (send handle get-referable))
+    )
 
     (define/override (db-insert!! index)
       (super db-insert!! (add1 index))
@@ -1717,6 +1738,12 @@
 
     (define this-ent* this)
 
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (and (is-a? ui-item zinal:ui:var-scalar%%)
+        (send this get-cone-root)
+      )
+    )
+
     (define/override (get-params-header)
       (make-object (class ui:possibly-public-def-list%
 
@@ -1827,6 +1854,10 @@
 
     (init cone-root-handle child-spawner!)
 
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (send (send this get-cone-root) get-method)
+    )
+
     (define/override (get-prefix-string)
       "method"
     )
@@ -1875,6 +1906,12 @@
   (define ent:short-class-instance% (class ent%
 
     (init cone-root-handle child-spawner!)
+
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (and (is-a? ui-item zinal:ui:var-scalar%%)
+        (send (send this get-cone-root) get-super-class)
+      )
+    )
 
     (define this-ent* this)
 
@@ -2034,6 +2071,10 @@
 
     (init cone-root-handle child-spawner!)
 
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (send (send this get-cone-root) get-referable)
+    )
+
     (define ui-scalar*
       (make-object ui:var-scalar% this zinal:ui:style:REF-STYLE (thunk (get-ref-text (send this get-cone-root))) THING->NOOP this)
     )
@@ -2048,6 +2089,10 @@
   (define ent:optional-param% (class ent:singleton%
 
     (init cone-root-handle child-spawner!)
+
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (send this get-cone-root)
+    )
 
     (define/override (db-get-single-item)
       (define default (send (send this get-cone-root) get-default))
@@ -2074,6 +2119,10 @@
   (define ent:required-param% (class ent%
 
     (init cone-root-handle child-spawner!)
+
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (send this get-cone-root)
+    )
 
     (define (get-text)
       (get-short-desc-or (send this get-cone-root) "<nameless param>")
@@ -2245,6 +2294,7 @@
     (define this-ent* this)
     (define params-list* #f)
     (define abstracts* #f)
+    (define class-name-ui-item* #f)
 
     (define (name-ui->event-handler* name-ui)
       (create-name-change-handler (thunk (send this-ent* get-cone-root)))
@@ -2254,10 +2304,29 @@
       (get-short-desc-or (send this-ent* get-cone-root) "<unnamed class>")
     )
 
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (and (is-a? ui-item zinal:ui:var-scalar%%)
+        (cond
+          [(eq? ui-item class-name-ui-item*)
+            (send this get-cone-root)
+          ]
+          [(eq? abstracts* (send ui-item get-parent))
+            (send abstracts* get-nth-handle (send abstracts* get-child-index ui-item))
+          ]
+          [else
+            #f
+          ]
+        )
+      )
+    )
+
     (define/override (get-header-prefix-list)
+      (set! class-name-ui-item*
+        (make-object ui:var-scalar% this-ent* zinal:ui:style:DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
+      )
       (list
         (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "class")
-        (make-object ui:var-scalar% this-ent* zinal:ui:style:DEF-STYLE get-name-text* name-ui->event-handler* NOOP-FALLBACK-EVENT-HANDLER)
+        class-name-ui-item*
         (make-object ui:const% this-ent* zinal:ui:style:NO-STYLE "subclass of")
       )
     )
@@ -2267,7 +2336,7 @@
     )
 
     (define (get-abstracts*)
-      (make-object (class ui:set-list%
+      (make-object (class ui:handle-set-list%
 
         (define/override (db-get-items)
           (define class-handle (send this-ent* get-cone-root))
@@ -2324,6 +2393,10 @@
     (init cone-root-handle child-spawner!)
 
     (define this-ent* this)
+
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (send (send this get-cone-root) get-method)
+    )
 
     (define/override (get-params-header)
       (make-object (class ui:list%
@@ -2479,6 +2552,12 @@
   (define ent:invoke-zinal-method% (class ent:invoke-method%
 
     (init cone-root-handle child-spawner!)
+
+    (define/override (get-highlight-equivalence-handle ui-item)
+      (and (is-a? ui-item zinal:ui:var-scalar%%)
+        (send (send this get-cone-root) get-method)
+      )
+    )
 
     (define/override (get-method-name)
       (get-short-desc-or (send (send this get-cone-root) get-method) "<unnamed method>")
@@ -2681,7 +2760,7 @@
     (define header* (make-object ui:interface-set-list% this NOOP-FALLBACK-EVENT-HANDLER header-header*))
 
     (define ui-item*
-      (make-object (class ui:set-list%
+      (make-object (class ui:handle-set-list%
 
         (define/override (get-event-handler)
           (combine-keyname-event-handlers (list
@@ -2835,11 +2914,6 @@
       (eq? this selected*)
     )
 
-    (define/public (highlighted?)
-      ; TODO NYI
-      (error 'highlighted? "highlighted? NYI")
-    )
-
     (define/public (accept visitor [data #f])
       (send visitor visit-item this data)
     )
@@ -2960,18 +3034,33 @@
 
     (define text-getter* text-getter)
     (define current-text* #f)
-    (define last-seen-parse-count* 0)
+    (define current-highlight-equivalence-handle* #f)
+    (define last-seen-mod-count* -1)
 
     (define/override (accept visitor [data #f])
       (send visitor visit-var-scalar this data)
     )
 
     (define/override (get-text)
-      (unless (and current-text* (= last-seen-parse-count* parse-count*))
-        (set! current-text* (text-getter*))
-        (set! last-seen-parse-count* parse-count*)
-      )
+      (update-cached*)
       current-text*
+    )
+
+    (define/public (highlighted?)
+      (update-cached*)
+      (and
+        selected-highlight-equivalence-handle*
+        current-highlight-equivalence-handle*
+        (handles-equal? selected-highlight-equivalence-handle* current-highlight-equivalence-handle*)
+      )
+    )
+
+    (define (update-cached*)
+      (unless (= last-seen-mod-count* mod-count*)
+        (set! current-text* (text-getter*))
+        (set! current-highlight-equivalence-handle* (send (send this get-parent-ent) get-highlight-equivalence-handle this))
+        (set! last-seen-mod-count* mod-count*)
+      )
     )
 
     (super-make-object parent-ent style-delta item->event-handler fallback-event-handler)
@@ -3441,7 +3530,8 @@
     (send this set-horizontal! #t)
   ))
 
-  (define ui:set-list% (class ui:list%
+  ; TODO this probably shouldn't extend ui:list% , cuz it's not meant to be modified or used in the ways that lists can be
+  (define ui:handle-set-list% (class ui:list%
 
     (init parent-ent fallback-event-handler [header #f])
 
@@ -3453,6 +3543,7 @@
     (abstract get-item-ui-style)
 
     (define parent-ent* parent-ent)
+    (define handles* (vector-immutable))
 
     (define/override (get-event-handler)
       (combine-keyname-event-handlers (list
@@ -3461,9 +3552,15 @@
       ))
     )
 
+    (define/public (get-nth-handle index)
+      (vector-ref handles* index)
+    )
+
     (define/public (reset! [handle-to-select #f])
       (define selected-index (list-index (curry eq? selected*) (send this get-children)))
       (send this clear!)
+      (define handles (sort (db-get-items) item-handle<?))
+      (set! handles* (list->vector handles))
       (map-by-index
         (lambda (i h)
           (define to-insert
@@ -3480,7 +3577,7 @@
             (send this insert-but-dont-select! i to-insert)
           )
         )
-        (sort (db-get-items) item-handle<?)
+        handles
       )
       (when (and (not handle-to-select) selected-index)
         (define children (send this get-children))
@@ -3541,7 +3638,7 @@
     (reset!)
   ))
 
-  (define ui:interface-set-list% (class ui:set-list%
+  (define ui:interface-set-list% (class ui:handle-set-list%
 
     (init parent-ent fallback-event-handler [header #f])
 
