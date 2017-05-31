@@ -26,7 +26,7 @@
 
 (provide transpile)
 
-(define ID-PREFIX "zinal_id:_")
+(define ID-PREFIX "zinal_:id:_")
 
 (define transpiler #f)
 
@@ -41,7 +41,7 @@
   (define included-modules '())
   (define transpilation (append
     (error-setup identifiables)
-    (transpile-requires (send db get-all-legacies))
+    (transpile-requires (send db get-all-rackets))
     (transpile-all-interfaces (send db get-all-interfaces) identifiables)
   ))
   (define (include-module db-module)
@@ -109,7 +109,7 @@
   )
 )
 
-(define (transpile-requires all-legacies)
+(define (transpile-requires all-rackets)
   (define requires-data (make-hash))
   (for-each
     (lambda (l)
@@ -118,7 +118,7 @@
         (hash-update! requires-data library (curryr set-add (send l get-name)) set)
       )
     )
-    all-legacies
+    all-rackets
   )
   (define requires
     (hash-map
@@ -127,7 +127,7 @@
         (define name-pairs
           (set-map
             id-set
-            (lambda (name) (list (string->symbol name) (get-non-standard-legacy-id library name)))
+            (lambda (name) (list (string->symbol name) (get-non-standard-racket-id library name)))
           )
         )
         (append (list 'only-in (string->symbol library)) name-pairs)
@@ -164,8 +164,8 @@
   (string->symbol (format "~a~a" ID-PREFIX (add1 num-id)))
 )
 
-(define (get-non-standard-legacy-id library name)
-  (string->symbol (format "zinal_legacy:~a::~a" library name))
+(define (get-non-standard-racket-id library name)
+  (string->symbol (format "zinal_:racket_id:~a::~a" library name))
 )
 
 (define (equals*? elem1 elem2)
@@ -228,10 +228,10 @@
     )
   )
 
-  (define/override (visit-legacy-link l identifiables)
+  (define/override (visit-racket l identifiables)
     (define library (send l get-library))
     (define name (send l get-name))
-    (if library (get-non-standard-legacy-id library name) (string->symbol name))
+    (if library (get-non-standard-racket-id library name) (string->symbol name))
   )
 
   (define/override (visit-invoke-method im identifiables)
@@ -242,9 +242,9 @@
     )
   )
 
-  (define/override (visit-invoke-legacy-method ilm identifiables)
+  (define/override (visit-invoke-racket-method ilm identifiables)
     (visit-has-args
-      (list 'send (db-elem->scheme (send ilm get-object) identifiables) (string->symbol (send ilm get-legacy-method-name)))
+      (list 'send (db-elem->scheme (send ilm get-object) identifiables) (string->symbol (send ilm get-racket-method-name)))
       ilm
       identifiables
     )
@@ -270,9 +270,9 @@
     )
   )
 
-  (define/override (visit-invoke-legacy-super-method ilsm identifiables)
+  (define/override (visit-invoke-racket-super-method ilsm identifiables)
     (visit-has-args
-      (list 'super (string->symbol (send ilsm get-legacy-method-name)))
+      (list 'super (string->symbol (send ilsm get-racket-method-name)))
       ilsm
       identifiables
     )
@@ -293,8 +293,8 @@
     )
   )
 
-  (define/override (visit-override-legacy-method olm identifiables)
-    (define name (string->symbol (send olm get-legacy-method-name)))
+  (define/override (visit-override-racket-method olm identifiables)
+    (define name (string->symbol (send olm get-racket-method-name)))
     (define lambda* (send olm get-lambda))
     (if (send olm is-augment?)
       (list 'begin

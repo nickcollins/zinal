@@ -175,7 +175,7 @@
       (module-id->handle! new-module-id)
     )
 
-    (define/public (get-all-legacies)
+    (define/public (get-all-rackets)
       ; TODO use UNION to optimize this
       (append*
         (hash-map
@@ -568,7 +568,7 @@
 
       (define/public (can-set-super-class?)
         (send this assert-valid)
-        (define super-class (get-non-legacy-super-class* this))
+        (define super-class (get-zinal-super-class* this))
         (implies super-class (can-remove-direct-super-type*? this super-class))
       )
 
@@ -579,9 +579,9 @@
         (set-super-class*!! (curryr create-reference!! to-be-super))
       )
 
-      (define/public (set-legacy-super-class!! library name)
+      (define/public (set-racket-super-class!! library name)
         (send this assert-valid)
-        (set-super-class*!! (curryr create-legacy-node!! library name))
+        (set-super-class*!! (curryr create-racket-node!! library name))
       )
 
       (define/public (get-body)
@@ -857,23 +857,23 @@
       (super-make-object loc)
     ))
 
-    (define db-legacy-override% (class* db-general-define-method% (zinal:db:override-legacy-method%%)
+    (define db-racket-override% (class* db-general-define-method% (zinal:db:override-racket-method%%)
 
       (init loc)
 
       (define/override (accept visitor [data #f])
         (send this assert-valid)
-        (send visitor visit-override-legacy-method this data)
+        (send visitor visit-override-racket-method this data)
       )
 
-      (define/public (get-legacy-method-name)
+      (define/public (get-racket-method-name)
         (send this assert-valid)
         (get-cell* (send this get-id) "legacy_name")
       )
 
-      (define/public (set-legacy-method-name!! name)
+      (define/public (set-racket-method-name!! name)
         (send this assert-valid)
-        (assert-valid-legacy-method-name* name)
+        (assert-valid-racket-method-name* name)
         (set-cell-dangerous*!! (send this get-id) "legacy_name" name)
         (void)
       )
@@ -989,27 +989,27 @@
       (super-make-object loc)
     ))
 
-    (define db-legacy-invokation% (class* db-general-invoke% (zinal:db:invoke-legacy-method%%)
+    (define db-racket-invokation% (class* db-general-invoke% (zinal:db:invoke-racket-method%%)
 
       (init loc)
 
       (define/override (accept visitor [data #f])
         (send this assert-valid)
-        (send visitor visit-invoke-legacy-method this data)
+        (send visitor visit-invoke-racket-method this data)
       )
 
       (define/public (get-object)
         (send this get-object-impl*)
       )
 
-      (define/public (get-legacy-method-name)
+      (define/public (get-racket-method-name)
         (send this assert-valid)
         (get-cell* (send this get-id) "legacy_name")
       )
 
-      (define/public (set-legacy-method-name!! name)
+      (define/public (set-racket-method-name!! name)
         (send this assert-valid)
-        (assert-valid-legacy-method-name* name)
+        (assert-valid-racket-method-name* name)
         (set-cell-dangerous*!! (send this get-id) "legacy_name" name)
         (void)
       )
@@ -1042,23 +1042,23 @@
       (super-make-object loc)
     ))
 
-    (define db-legacy-super-invokation% (class* db-node-with-args% (zinal:db:invoke-legacy-super-method%%)
+    (define db-racket-super-invokation% (class* db-node-with-args% (zinal:db:invoke-racket-super-method%%)
 
       (init loc)
 
       (define/override (accept visitor [data #f])
         (send this assert-valid)
-        (send visitor visit-invoke-legacy-super-method this data)
+        (send visitor visit-invoke-racket-super-method this data)
       )
 
-      (define/public (get-legacy-method-name)
+      (define/public (get-racket-method-name)
         (send this assert-valid)
         (get-cell* (send this get-id) "legacy_name")
       )
 
-      (define/public (set-legacy-method-name!! name)
+      (define/public (set-racket-method-name!! name)
         (send this assert-valid)
-        (assert-valid-legacy-method-name* name)
+        (assert-valid-racket-method-name* name)
         (set-cell-dangerous*!! (send this get-id) "legacy_name" name)
         (void)
       )
@@ -1108,7 +1108,7 @@
         (define/override (can-unassign?)
           (send this assert-valid)
           (define parent (send this get-parent))
-          (not (is-one-of? parent (list zinal:db:define-method%% zinal:db:override-legacy-method%%)))
+          (not (is-one-of? parent (list zinal:db:define-method%% zinal:db:override-racket-method%%)))
         )
 
         (define/override (get-visible-referables-underneath)
@@ -1825,14 +1825,14 @@
       )
     )
 
-    (define db-legacy%
-      (class* db-node% (zinal:db:legacy-link%%)
+    (define db-racket%
+      (class* db-node% (zinal:db:racket%%)
 
         (init loc)
 
         (define/override (accept visitor [data #f])
           (send this assert-valid)
-          (send visitor visit-legacy-link this data)
+          (send visitor visit-racket this data)
         )
 
         (define/override (delete-and-invalidate*!!)
@@ -2064,10 +2064,10 @@
           (assign-atom*!! 'keyword (keyword->string value))
         )
 
-        (define/public (assign-legacy-link!! library name)
-          (assert-valid-legacy* library name)
+        (define/public (assign-racket!! library name)
+          (assert-valid-racket* library name)
           (assign*!! (lambda (loc)
-            (create-legacy-node!! loc library name)
+            (create-racket-node!! loc library name)
           ))
         )
 
@@ -2083,7 +2083,7 @@
               )
             )
             (create-something!! "class_refs" (list (list "class_id" class-id)))
-            (create-legacy-node!! (make-object loc% class-id "superclass_id") #f "object%")
+            (create-racket-node!! (make-object loc% class-id "superclass_id") #f "object%")
             (create-list-header!! (make-object loc% class-id "params_id"))
             (create-list-header!! (make-object loc% class-id "body_id"))
           ))
@@ -2099,7 +2099,7 @@
                 )
               )
             )
-            (create-legacy-node!! (make-object loc% class-id "superclass_id") #f "object%")
+            (create-racket-node!! (make-object loc% class-id "superclass_id") #f "object%")
             (create-list-header!! (make-object loc% class-id "body_id"))
           ))
         )
@@ -2122,8 +2122,8 @@
           ))
         )
 
-        (define/public (assign-invoke-legacy-method!! method-name)
-          (assert-valid-legacy-method-name* method-name)
+        (define/public (assign-invoke-racket-method!! method-name)
+          (assert-valid-racket-method-name* method-name)
           (assign*!! (lambda (loc)
             (define method-invoke-id
               (create-normal!! "legacy_method_invokations" loc
@@ -2174,8 +2174,8 @@
           ))
         )
 
-        (define/public (assign-override-legacy-method!! method-name)
-          (assert-valid-legacy-method-name* method-name)
+        (define/public (assign-override-racket-method!! method-name)
+          (assert-valid-racket-method-name* method-name)
           (assert (format "~a is not the direct child of a class" (send this get-id)) (is-a? (send this get-parent) zinal:db:class%%))
           (assign*!! (lambda (loc)
             (define override-id
@@ -2209,8 +2209,8 @@
           ))
         )
 
-        (define/public (assign-invoke-legacy-super-method!! method-name)
-          (assert-valid-legacy-method-name* method-name)
+        (define/public (assign-invoke-racket-super-method!! method-name)
+          (assert-valid-racket-method-name* method-name)
           (assert-is-within-class*)
           (assign*!! (lambda (loc)
             (define invoke-id
@@ -2381,9 +2381,9 @@
       (void)
     )
 
-    ; only returns zinal types - does not include the super class if the super class is a legacy
+    ; only returns zinal types - does not include the super class if the super class is a racket thing
     (define (get-direct-super-types subtype)
-      (define (superclass) (get-non-legacy-super-class* subtype))
+      (define (superclass) (get-zinal-super-class* subtype))
       (define super-interfaces (get-direct-super-interfaces* subtype))
       (if (and (is-a? subtype zinal:db:class%%) (superclass))
         (cons (superclass) super-interfaces)
@@ -2434,7 +2434,7 @@
     )
 
     (define (does-any-super-define-method? subclass method [severed-edge #f])
-      (define superclass (get-non-legacy-super-class* subclass))
+      (define superclass (get-zinal-super-class* subclass))
       (and superclass (not (severed? severed-edge subclass superclass))
         (or
           (find* method (map get-method* (get-define-methods superclass)))
@@ -2504,7 +2504,7 @@
       (query-exec db* "DELETE FROM extends WHERE subtype_id = ?1" (send subtype get-id))
     )
 
-    (define (get-non-legacy-super-class* class)
+    (define (get-zinal-super-class* class)
       (define super-class-ref (send class get-super-class))
       (and (is-a? super-class-ref zinal:db:class-ref%%) (send super-class-ref get-define-class))
     )
@@ -2786,12 +2786,12 @@
             [("defined_classes") db-define-class%]
             [("insta_classes") db-insta-class%]
             [("method_defines") db-define-method%]
-            [("legacy_overrides") db-legacy-override%]
+            [("legacy_overrides") db-racket-override%]
             [("super_inits") db-super-init%]
             [("method_invokations") db-method-invokation%]
-            [("legacy_method_invokations") db-legacy-invokation%]
+            [("legacy_method_invokations") db-racket-invokation%]
             [("super_invokations") db-super-invokation%]
-            [("legacy_super_invokations") db-legacy-super-invokation%]
+            [("legacy_super_invokations") db-racket-super-invokation%]
             [("object_constructions") db-object-construction%]
             [("lambdas") db-lambda%]
             [("defines") db-def%]
@@ -2819,7 +2819,7 @@
                 [else (error 'create-handle*! "Invalid atom type ~a for id ~a" type id)]
               )
             ]
-            [("legacies") db-legacy%]
+            [("legacies") db-racket%]
             [("unassigned") db-unassigned%]
             [else (error 'create-node-handle*! "cannot create a handle for loc ~a of invalid type ~a" loc (table))]
           )
@@ -2936,17 +2936,17 @@
       param-id
     )
 
-    (define (create-legacy-node!! loc library name)
+    (define (create-racket-node!! loc library name)
       (define storage-lib (or library DEFAULT-LIBRARY))
-      (define link-id
+      (define racket-id
         (or
           (query-maybe-value db* "SELECT id FROM legacies WHERE library = ?1 AND name = ?2" storage-lib name)
           (create-something!! "legacies" (list (list "ref_count" 0) (list "library" storage-lib) (list "name" name)))
         )
       )
-      (inc-ref-count!! link-id)
-      (set-id!! loc link-id)
-      link-id
+      (inc-ref-count!! racket-id)
+      (set-id!! loc racket-id)
+      racket-id
     )
 
     (define (create-reference!! loc referable)
@@ -3093,7 +3093,7 @@
     )
 
     (define (visible-to-elders? handle)
-      (or (function-definition? handle) (is-one-of? handle (list zinal:db:define-method%% zinal:db:override-legacy-method%% zinal:db:define-class%%)))
+      (or (function-definition? handle) (is-one-of? handle (list zinal:db:define-method%% zinal:db:override-racket-method%% zinal:db:define-class%%)))
     )
 
     (define (function-definition? handle)
@@ -3126,19 +3126,19 @@
       (assert (format "~a is not one of ~a:" (send handle get-id) types) (is-one-of? handle types))
     )
 
-    (define (assert-valid-legacy* library name)
+    (define (assert-valid-racket* library name)
       ; TODO properly vet the library and name
       (assert
         (format "Invalid library or identifier: ~a :: ~a" library name)
         (and (implies library (non-empty-string? library)) (non-empty-string? name))
       )
       (assert
-        (format "You can't use a legacy for which there's a corresponding primitive: ~a" name)
-        (or library (not (member name ILLEGAL-STANDARD-LEGACIES)))
+        (format "You can't use a racket function or macro for which there's a corresponding zinal primitive: ~a" name)
+        (or library (not (member name ILLEGAL-STANDARD-RACKETS)))
       )
     )
 
-    (define (assert-valid-legacy-method-name* name)
+    (define (assert-valid-racket-method-name* name)
       (assert (format "Legacy method name '~a' is not a non-empty string" name) (non-empty-string? name))
     )
 

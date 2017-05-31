@@ -24,8 +24,8 @@
 (provide translate)
 
 (define BNS (make-base-namespace))
-(define BASE-LEGACIES (set-subtract (list->set (namespace-mapped-symbols BNS)) (list->set (map string->symbol ILLEGAL-STANDARD-LEGACIES))))
-(define SEMI-STANDARD-LEGACIES (list->set '(
+(define BASE-RACKETS (set-subtract (list->set (namespace-mapped-symbols BNS)) (list->set (map string->symbol ILLEGAL-STANDARD-RACKETS))))
+(define SEMI-STANDARD-RACKETS (list->set '(
   is-a?
   first
   second
@@ -138,7 +138,7 @@
   (define zinal-method (get-unique-describable method-name visible-methods))
   (define db-invoke (if zinal-method
     (send db-unassigned assign-invoke-method!! zinal-method)
-    (send db-unassigned assign-invoke-legacy-method!! method-name)
+    (send db-unassigned assign-invoke-racket-method!! method-name)
   ))
   (translate-datum (second datum) (send db-invoke get-object))
   (translate-args (drop datum 3) db-invoke)
@@ -207,7 +207,7 @@
   (define super-ref (get-unique-referable super-name db-class))
   (if (and super-ref (is-a? super-ref zinal:db:define-class%%))
     (send db-class set-super-class!! super-ref)
-    (send db-class set-legacy-super-class!! #f super-name)
+    (send db-class set-racket-super-class!! #f super-name)
   )
   (define body (drop class-data 2))
   (when (equal? class-symbol 'class*)
@@ -260,7 +260,7 @@
       (send db-unassigned assign-define-method!! existing-method)
       (if (equal? (first define-method-data) 'define/public)
         (send db-unassigned assign-define-method!! (send containing-class add-direct-method!! name))
-        (send db-unassigned assign-override-legacy-method!! name)
+        (send db-unassigned assign-override-racket-method!! name)
       )
     )
   )
@@ -376,7 +376,7 @@
           (define zinal-method (get-unique-describable method-name (send class-parent get-all-methods)))
           (define db-invoke (if zinal-method
             (send db-unassigned assign-invoke-super-method!! zinal-method)
-            (send db-unassigned assign-invoke-legacy-super-method!! method-name)
+            (send db-unassigned assign-invoke-racket-super-method!! method-name)
           ))
           (translate-args (drop datum 2) db-invoke)
         ]
@@ -412,8 +412,8 @@
     ]
     [(symbol? datum)
       (define datum-as-string (symbol->string datum))
-      (if (is-legacy? datum)
-        (send db-unassigned assign-legacy-link!! #f datum-as-string)
+      (if (is-racket? datum)
+        (send db-unassigned assign-racket!! #f datum-as-string)
         (unless (translate-reference datum-as-string db-unassigned)
           (send db-unassigned set-short-desc!! datum-as-string)
         )
@@ -446,10 +446,10 @@
   (unique (filter (lambda (d) (equal? name (send d get-short-desc))) describables))
 )
 
-(define (is-legacy? datum)
+(define (is-racket? datum)
   (or
-    (set-member? BASE-LEGACIES datum)
-    (set-member? SEMI-STANDARD-LEGACIES datum)
+    (set-member? BASE-RACKETS datum)
+    (set-member? SEMI-STANDARD-RACKETS datum)
   )
 )
 

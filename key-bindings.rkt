@@ -130,7 +130,7 @@
   ; a few times to get the correct node selected in order to issue this command.
   (define zinal:key-bindings:TOGGLE-MAIN '("m"))
 
-  ; Changes whether or not the current legacy override is an augment.
+  ; Changes whether or not the current racket method override is an augment.
   (define zinal:key-bindings:TOGGLE-AUGMENT '("a"))
 
   ; When the first optional param (or last required param) is selected, changes it to be required

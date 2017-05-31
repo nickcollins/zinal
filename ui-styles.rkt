@@ -48,9 +48,9 @@
 ; zinal component that is referred to elsewhere. Since zinal short descs can contain spaces, this style is underlined
 (define DEF-STYLE (send (make-object style-delta% 'change-toggle-underline) set-delta-foreground "Yellow"))
 
-; style for legacy references to racket identifiers. They cannot contain spaces and are thus not
+; style for references to racket identifiers. They cannot contain spaces and are thus not
 ; underlined, which also helps distinguish them from zinal references
-(define LEGACY-STYLE (send (make-object style-delta%) set-delta-foreground "Cyan"))
+(define RACKET-STYLE (send (make-object style-delta%) set-delta-foreground "Cyan"))
 
 ; style for unassigned nodes - they're bold to draw attention to unfinished parts of the program
 (define UNASSIGNED-STYLE (send (make-object style-delta% 'change-bold) set-delta-foreground "Chocolate"))

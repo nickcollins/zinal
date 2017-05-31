@@ -56,12 +56,12 @@
 
 ; HELPER FUNCTIONS
 
-(define (standard*? db-legacy-link-handle)
-  (not (send db-legacy-link-handle get-library))
+(define (standard*? db-racket-handle)
+  (not (send db-racket-handle get-library))
 )
 
-(define (standard-with-name*? db-legacy-link-handle name)
-  (and (standard*? db-legacy-link-handle) (equal? name (send db-legacy-link-handle get-name)))
+(define (standard-with-name*? db-racket-handle name)
+  (and (standard*? db-racket-handle) (equal? name (send db-racket-handle get-name)))
 )
 
 (define (can-be-public*? define-handle)
@@ -638,20 +638,20 @@
   )
 )
 
-(define (get-standard-legacy-from-user)
+(define (get-standard-racket-from-user)
   (use-text-from-user
-    "Enter the standard library identifier"
+    "Enter the racket standard library identifier"
     "It must be from the standard racket library. Use the non-standard option if you want to use an identifier from a different library"
     identity
     ; TODO we need to add a reflective validator
-    (conjoin non-empty-string? (negate (curryr member ILLEGAL-STANDARD-LEGACIES)))
+    (conjoin non-empty-string? (negate (curryr member ILLEGAL-STANDARD-RACKETS)))
   )
 )
 
-(define (get-non-standard-legacy-from-user)
+(define (get-non-standard-racket-from-user)
   (define library
     (use-text-from-user
-      "Enter the library name"
+      "Enter the racket library name"
       "Enter exactly what you would enter as the argument to racket 'require - e.g. 'racket/hash' (without quotes)"
       identity
       ; TODO we need to add a reflective validator
@@ -672,17 +672,17 @@
   (and name (list library name))
 )
 
-(define (new-standard-legacy-creator parent-handle visible-referables)
-  (define result (get-standard-legacy-from-user))
+(define (new-standard-racket-creator parent-handle visible-referables)
+  (define result (get-standard-racket-from-user))
   (and result
-    (lambda (unassigned) (send unassigned assign-legacy-link!! #f result))
+    (lambda (unassigned) (send unassigned assign-racket!! #f result))
   )
 )
 
-(define (new-non-standard-legacy-creator parent-handle visible-referables)
-  (define library&name (get-non-standard-legacy-from-user))
+(define (new-non-standard-racket-creator parent-handle visible-referables)
+  (define library&name (get-non-standard-racket-from-user))
   (and library&name
-    (lambda (unassigned) (send unassigned assign-legacy-link!! (first library&name) (second library&name)))
+    (lambda (unassigned) (send unassigned assign-racket!! (first library&name) (second library&name)))
   )
 )
 
@@ -728,7 +728,7 @@
       )
     ]
     [else
-      (issue-warning "Can't invoke zinal super method" "This class's super class is a legacy, so it can't super invoke any zinal methods")
+      (issue-warning "Can't invoke zinal super method" "This class's super class is a racket class, so it can't super invoke any zinal methods")
       #f
     ]
   )
@@ -795,7 +795,7 @@
 )
 
 (define (switch-r/z r/z-title r-title r-result-handler z-handler)
-  (define zinal/racket '("zinal (non-legacy)" "racket (legacy)"))
+  (define zinal/racket '("zinal" "racket"))
   (define choice-index (get-choice-from-user r/z-title "The choice is yours, and yours alone" zinal/racket))
   (and choice-index
     (if (zero? choice-index)
@@ -812,10 +812,10 @@
 
 (define (new-invoke-method-creator parent-handle visible-referables)
   (switch-r/z
-    "Invoke a legacy method or a zinal method?"
+    "Invoke a racket method or a zinal method?"
     "Enter the name of the racket method to invoke"
     (lambda (result)
-      (lambda (unassigned) (send unassigned assign-invoke-legacy-method!! result))
+      (lambda (unassigned) (send unassigned assign-invoke-racket-method!! result))
     )
     (thunk
       (define method (get-method-from-user visible-referables))
@@ -829,11 +829,11 @@
 (define (new-invoke-this-method-creator parent-handle visible-referables)
   (and (check-in-class? parent-handle)
     (switch-r/z
-      "Invoke a legacy method or a zinal method?"
+      "Invoke a racket method or a zinal method?"
       "Enter the name of the racket method to invoke"
       (lambda (result)
         (lambda (unassigned)
-          (define result-handle (send unassigned assign-invoke-legacy-method!! result))
+          (define result-handle (send unassigned assign-invoke-racket-method!! result))
           (send (send result-handle get-object) assign-this!!)
           result-handle
         )
@@ -862,10 +862,10 @@
 (define (new-invoke-super-method-creator parent-handle visible-referables)
   (and (check-in-class? parent-handle)
     (switch-r/z
-      "Invoke a legacy super method or a zinal super method?"
+      "Invoke a racket super method or a zinal super method?"
       "Enter the name of the racket method to invoke"
       (lambda (result)
-        (lambda (unassigned) (send unassigned assign-invoke-legacy-super-method!! result))
+        (lambda (unassigned) (send unassigned assign-invoke-racket-super-method!! result))
       )
       (thunk
         (define method (get-super-method-from-user parent-handle))
@@ -896,10 +896,10 @@
 (define (new-define-existing-method-creator parent-handle visible-referables)
   (and (check-directly-in-class? parent-handle)
     (switch-r/z
-      "Override a legacy super method, or define/override a zinal method?"
+      "Override a racket super method, or define/override a zinal method?"
       "Enter the name of the racket method to override"
       (lambda (result)
-        (lambda (unassigned) (send unassigned assign-override-legacy-method!! result))
+        (lambda (unassigned) (send unassigned assign-override-racket-method!! result))
       )
       (thunk
         (define method (get-method-to-define/override-from-user parent-handle))
@@ -957,8 +957,8 @@
   "define" new-define-creator
   "lambda" new-lambda-creator
   "reference" new-value-read-creator
-  "legacy (standard library)" new-standard-legacy-creator
-  "legacy (non-standard library)" new-non-standard-legacy-creator
+  "racket (standard library)" new-standard-racket-creator
+  "racket (non-standard library)" new-non-standard-racket-creator
   "TODO" new-unassigned-creator
 
   "invoke method" new-invoke-method-creator
@@ -1589,8 +1589,8 @@
     (define (get-header-text*)
       (define func (get-func-handle*))
       (cond
-        [(is-a? func zinal:db:legacy-link%%)
-          (legacy-handle->string func)
+        [(is-a? func zinal:db:racket%%)
+          (racket-handle->string func)
         ]
         [(is-a? func zinal:db:reference%%)
           (get-short-desc-or (send func get-referable) "<nameless ref>")
@@ -1604,7 +1604,7 @@
     (define (header->event-handler* header)
       (define (interaction-function)
         (define list-handle (send this db-get-list-handle))
-        (request-new-item-creator list-handle (send list-handle get-visible-referables-underneath) '("legacy (standard library)" "legacy (non-standard library)" "reference"))
+        (request-new-item-creator list-handle (send list-handle get-visible-referables-underneath) '("racket (standard library)" "racket (non-standard library)" "reference"))
       )
       (define (result-handler new-handle-initializer!!)
         (new-handle-initializer!! (send (get-func-handle*) unassign!!))
@@ -1619,12 +1619,12 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:legacy-invokation% (class ent:invokation%
+  (define ent:racket-invokation% (class ent:invokation%
 
     (init cone-root-handle child-spawner!)
 
     (define/override (get-header-style)
-      zinal:ui:style:LEGACY-STYLE
+      zinal:ui:style:RACKET-STYLE
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -1873,31 +1873,31 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:short-override-legacy-method% (class ent:short-method-definition%
+  (define ent:short-override-racket-method% (class ent:short-method-definition%
 
     (init cone-root-handle child-spawner!)
 
     (define/override (get-prefix-string)
-      "override legacy method"
+      "override racket method"
     )
 
     (define/override (get-method-name)
-      (send (send this get-cone-root) get-legacy-method-name)
+      (send (send this get-cone-root) get-racket-method-name)
     )
 
     (define/override (get-name-change-handler)
-      (create-legacy-method-name-change-handler (thunk (send this get-cone-root)))
+      (create-racket-method-name-change-handler (thunk (send this get-cone-root)))
     )
 
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:short-augment-legacy-method% (class ent:short-override-legacy-method%
+  (define ent:short-augment-racket-method% (class ent:short-override-racket-method%
 
     (init cone-root-handle child-spawner!)
 
     (define/override (get-prefix-string)
-      "augment legacy method"
+      "augment racket method"
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -1924,8 +1924,8 @@
 
       (define (get-super-text*)
         (define super-class-handle (send (send this-ent* get-cone-root) get-super-class))
-        (if (is-a? super-class-handle zinal:db:legacy-link%%)
-          (legacy-handle->string super-class-handle)
+        (if (is-a? super-class-handle zinal:db:racket%%)
+          (racket-handle->string super-class-handle)
           (get-short-desc-or (send super-class-handle get-referable) "<some class>")
         )
       )
@@ -2143,16 +2143,16 @@
     (super-make-object cone-root-handle)
   ))
 
-  (define ent:legacy% (class ent%
+  (define ent:racket% (class ent%
 
     (init cone-root-handle child-spawner!)
 
     (define (get-text)
-      (legacy-handle->string (send this get-cone-root))
+      (racket-handle->string (send this get-cone-root))
     )
 
     (define ui-scalar*
-      (make-object ui:var-scalar% this zinal:ui:style:LEGACY-STYLE get-text THING->NOOP this)
+      (make-object ui:var-scalar% this zinal:ui:style:RACKET-STYLE get-text THING->NOOP this)
     )
 
     (define/override (get-root-ui-item)
@@ -2202,7 +2202,7 @@
                 (define choice-index
                   (get-choice-from-user
                     "Is the super class zinal or racket?"
-                    "Choose whether to refer to a zinal class, standard lib legacy class, or non-standard lib legacy class"
+                    "Choose whether to refer to a zinal class, standard library racket class, or non-standard library racket class"
                     '("zinal class" "racket class (standard library)" "racket class (non-standard library)")
                   )
                 )
@@ -2216,10 +2216,10 @@
                     )
                   ]
                   [(1)
-                    (get-standard-legacy-from-user)
+                    (get-standard-racket-from-user)
                   ]
                   [(2)
-                    (get-non-standard-legacy-from-user)
+                    (get-non-standard-racket-from-user)
                   ]
                   [else
                     #f
@@ -2239,10 +2239,10 @@
                   (send class-handle set-super-class!! result)
                 ]
                 [(string? result)
-                  (send class-handle set-legacy-super-class!! #f result)
+                  (send class-handle set-racket-super-class!! #f result)
                 ]
                 [(and (pair? result) (= 2 (length result)) (andmap string? result))
-                  (send class-handle set-legacy-super-class!! (first result) (second result))
+                  (send class-handle set-racket-super-class!! (first result) (second result))
                 ]
                 [else
                   (error 'super-class-slot->event-handler "Bad super-class choice result:" result)
@@ -2432,7 +2432,7 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:override-legacy-method% (class ent:lambda-like%
+  (define ent:override-racket-method% (class ent:lambda-like%
 
     (init cone-root-handle child-spawner!)
 
@@ -2442,16 +2442,16 @@
       (make-object (class ui:list%
 
         (define (name-ui->event-handler* name-ui)
-          (create-legacy-method-name-change-handler (thunk (send this-ent* get-cone-root)))
+          (create-racket-method-name-change-handler (thunk (send this-ent* get-cone-root)))
         )
 
         (define (get-name-text*)
-          (send (send this-ent* get-cone-root) get-legacy-method-name)
+          (send (send this-ent* get-cone-root) get-racket-method-name)
         )
 
         (define (get-prefix-text*)
           (define prefix (if (send (send this-ent* get-cone-root) is-augment?) "augment" "override"))
-          (format "~a legacy" prefix)
+          (format "~a racket method" prefix)
         )
 
         (define (prefix-ui->event-handler* prefix-ui)
@@ -2578,16 +2578,16 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:invoke-legacy-method% (class ent:invoke-method%
+  (define ent:invoke-racket-method% (class ent:invoke-method%
 
     (init cone-root-handle child-spawner!)
 
     (define/override (get-method-name)
-      (send (send this get-cone-root) get-legacy-method-name)
+      (send (send this get-cone-root) get-racket-method-name)
     )
 
     (define/override (get-method-style)
-      zinal:ui:style:LEGACY-STYLE
+      zinal:ui:style:RACKET-STYLE
     )
 
     (define/override (get-new-method-from-user)
@@ -2600,7 +2600,7 @@
     )
 
     (define/override (set-method!! name)
-      (send (send this get-cone-root) set-legacy-method-name!! name)
+      (send (send this get-cone-root) set-racket-method-name!! name)
     )
 
     (super-make-object cone-root-handle child-spawner!)
@@ -2627,7 +2627,7 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:this-invoke-legacy-method% (class ent:invoke-legacy-method%
+  (define ent:this-invoke-racket-method% (class ent:invoke-racket-method%
 
     (init cone-root-handle child-spawner!)
 
@@ -2653,7 +2653,7 @@
     (super-make-object cone-root-handle child-spawner!)
   ))
 
-  (define ent:super-invoke-legacy-method% (class ent:invoke-legacy-method%
+  (define ent:super-invoke-racket-method% (class ent:invoke-racket-method%
 
     (init cone-root-handle child-spawner!)
 
@@ -3717,9 +3717,9 @@
     )
   )
 
-  (define (legacy-handle->string legacy-handle)
-    (define library (send legacy-handle get-library))
-    (define name (send legacy-handle get-name))
+  (define (racket-handle->string racket-handle)
+    (define library (send racket-handle get-library))
+    (define name (send racket-handle get-name))
     (if library (format "~a→~a" library name) name)
   )
 
@@ -3843,17 +3843,17 @@
     (make-object keyname-event-handler% (list (list handler-function keylist)))
   )
 
-  (define (create-legacy-method-name-change-handler get-legacy-method-handle)
+  (define (create-racket-method-name-change-handler get-racket-method-handle)
     (define (interaction-function)
       (use-text-from-user
-        "Enter the new legacy method name"
+        "Enter the new racket method name"
         "The exact name of the racket method you want to change this to"
         identity
         non-empty-string?
       )
     )
     (define (result-handler new-name)
-      (send (get-legacy-method-handle) set-legacy-method-name!! new-name)
+      (send (get-racket-method-handle) set-racket-method-name!! new-name)
     )
     (create-interaction-dependent-event-handler interaction-function result-handler zinal:key-bindings:REPLACE)
   )
@@ -4004,7 +4004,7 @@
 
   (define (can-be-root*? handle)
     ; TODO maybe make some definitions present inline
-    (is-one-of? handle (list zinal:db:def%% zinal:db:define-method%% zinal:db:override-legacy-method%% zinal:db:subtype%% zinal:db:module%%))
+    (is-one-of? handle (list zinal:db:def%% zinal:db:define-method%% zinal:db:override-racket-method%% zinal:db:subtype%% zinal:db:module%%))
   )
 
   (define (find-first-root-ancestor h)
@@ -4037,8 +4037,8 @@
         ent:define-method%
       )
 
-      (define/override (visit-override-legacy-method root-override-legacy-handle meh)
-        ent:override-legacy-method%
+      (define/override (visit-override-racket-method root-override-racket-handle meh)
+        ent:override-racket-method%
       )
 
       (define/override (visit-interface root-interface-handle meh)
@@ -4070,7 +4070,7 @@
     (define items (send db-list-handle get-items))
     (define first-item (first items))
     (cond
-      [(is-a? first-item zinal:db:legacy-link%%)
+      [(is-a? first-item zinal:db:racket%%)
         (cond
           [(and (= 2 (length items)) (standard-with-name*? first-item "quote") (is-a? (second items) zinal:db:list%%))
             ent:quoted-list%
@@ -4081,7 +4081,7 @@
           [else
             ; TODO we should probably have some sort of quote-context to make this an ordinary
             ; list when underneath something quoted ... or something
-            ent:legacy-invokation%
+            ent:racket-invokation%
           ]
         )
       ]
@@ -4106,10 +4106,10 @@
         )
       )
 
-      (define/override (visit-invoke-legacy-method db-invoke-legacy-method-handle meh)
-        (if (is-a? (send db-invoke-legacy-method-handle get-object) zinal:db:this%%)
-          ent:this-invoke-legacy-method%
-          ent:invoke-legacy-method%
+      (define/override (visit-invoke-racket-method db-invoke-racket-method-handle meh)
+        (if (is-a? (send db-invoke-racket-method-handle get-object) zinal:db:this%%)
+          ent:this-invoke-racket-method%
+          ent:invoke-racket-method%
         )
       )
 
@@ -4125,18 +4125,18 @@
         ent:super-invoke-zinal-method%
       )
 
-      (define/override (visit-invoke-legacy-super-method db-invoke-legacy-super-method-handle meh)
-        ent:super-invoke-legacy-method%
+      (define/override (visit-invoke-racket-super-method db-invoke-racket-super-method-handle meh)
+        ent:super-invoke-racket-method%
       )
 
       (define/override (visit-define-method db-define-method-handle meh)
         ent:short-define-method%
       )
 
-      (define/override (visit-override-legacy-method db-override-legacy-handle meh)
-        (if (send db-override-legacy-handle is-augment?)
-          ent:short-augment-legacy-method%
-          ent:short-override-legacy-method%
+      (define/override (visit-override-racket-method db-override-racket-handle meh)
+        (if (send db-override-racket-handle is-augment?)
+          ent:short-augment-racket-method%
+          ent:short-override-racket-method%
         )
       )
 
@@ -4199,8 +4199,8 @@
         )
       )
 
-      (define/override (visit-legacy-link db-legacy-link-handle meh)
-        ent:legacy%
+      (define/override (visit-racket db-racket-handle meh)
+        ent:racket%
       )
 
       (define/override (visit-unassigned db-unassigned-handle meh)

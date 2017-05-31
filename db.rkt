@@ -17,7 +17,7 @@
 
 (provide (all-defined-out))
 
-(define ILLEGAL-STANDARD-LEGACIES '(
+(define ILLEGAL-STANDARD-RACKETS '(
   "new"
   "super-new"
   "make-object"
@@ -45,8 +45,8 @@
 ; This is an abstract interface to the storage db. This interface should be abstract and clean
 ; enough to permit hot swapping out the db/storage format. It also gives us an idea of what a
 ; minimalistic (albeit with basic OOP support) scheme-like tree protocol for logic description
-; might look like, regardless storage format or implementation details. Note that the term
-; "legacy" generally refers to a racket identifier or definition.
+; might look like, regardless storage format or implementation details. Racket identifiers,
+; definitions, functions, macros, and names will be referred to collectively as "rackets"
 ;
 ; VISIBILITY RULES:
 ;
@@ -58,7 +58,7 @@
 ;
 ;      Somewhat less intuitively, some "younger siblings" of the reference's parent/ancestors
 ;      are visible. A node is "elder visible" if it's a function definition (i.e., a define whose
-;      expr is a lambda), a zinal:db:define-method%% , zinal:db:override-legacy-method%% , or
+;      expr is a lambda), a zinal:db:define-method%% , zinal:db:override-racket-method%% , or
 ;      zinal:db:define-class%% . Let's say R is a descendant of A. If A is elder visible, then an
 ;      unbroken sequence of elder visible nodes immediately following A are also visible to R.
 ;      That is, if A is the Nth sibling, then if siblings N+1, N+2, ... N+M are all elder visible,
@@ -125,8 +125,8 @@
   ; for the newly minted module
   create-module!! ; ([short-desc] [long-desc])
 
-  ; Returns a list of all zinal:db:legacy-link%% in this db, in no particular order
-  get-all-legacies ; ()
+  ; Returns a list of all zinal:db:racket%% in this db, in no particular order
+  get-all-rackets ; ()
 
   ; Returns a list of all zinal:db:referable%% in this db, in no particular order
   get-all-referables ; ()
@@ -443,8 +443,8 @@
   ; other method
   is-method-overridden? ; (zinal:db:method%%)
 
-  ; Returns a zinal:db:legacy-link%% or zinal:db:class-ref%% corresponding to the super class of
-  ; this class. At initiation the super class is a zinal:db:legacy-link%% corresponding to the
+  ; Returns a zinal:db:racket%% or zinal:db:class-ref%% corresponding to the super class of
+  ; this class. At initiation the super class is a zinal:db:racket%% corresponding to the
   ; racket object% .
   get-super-class ; ()
 
@@ -463,11 +463,11 @@
   ; Returns a handle to the new zinal:db:class-ref%%
   set-super-class!! ; (zinal:db:define-class%%)
 
-  ; Changes the super class to be a zinal:db:legacy-link%% with the name and library specified by
+  ; Changes the super class to be a zinal:db:racket%% with the name and library specified by
   ; the arguments. Any handles previously returned by get-super-class become invalid.
   ; Throws an exception if can-set-super-class? would return #f
-  ; Returns a handle to the new zinal:db:legacy-link%%
-  set-legacy-super-class!! ; (library name)
+  ; Returns a handle to the new zinal:db:racket%%
+  set-racket-super-class!! ; (library name)
 ))
 
 ; Comparable to a racket class definition. Defines a class. The init params are represented by the
@@ -521,23 +521,23 @@
 ))
 
 ; A node which overrides a method of a racket super class. Should be used sparingly
-(define zinal:db:override-legacy-method%% (interface (zinal:db:parent-node%%)
+(define zinal:db:override-racket-method%% (interface (zinal:db:parent-node%%)
 
   ; Returns a string for the name of the racket method that is to be overridden
-  get-legacy-method-name ; ()
+  get-racket-method-name ; ()
 
   ; Sets a string corresponding to the name of the racket method to invoke.
   ; No meaningful return value.
-  set-legacy-method-name!! ; (string)
+  set-racket-method-name!! ; (string)
 
   ; Returns the lambda that defines the overridden method. Comparable to zinal:db:define-method%% ,
   ; the returned lambda is permanent and cannot be unassign!! , created nor destroyed
   get-lambda ; ()
 
-  ; Returns #t if this is meant to augment a legacy super method rather than override, per se
+  ; Returns #t if this is meant to augment a racket super method rather than override, per se
   is-augment? ; ()
 
-  ; If should-be-augment? is #f , makes this no longer be an augmentation of the legacy super
+  ; If should-be-augment? is #f , makes this no longer be an augmentation of the racket super
   ; method. Otherwise, makes this become an augmentation. No meaningful return value.
   set-is-augment!! ; (should-be-augment?)
 ))
@@ -561,20 +561,20 @@
 ))
 
 ; A node which, when evaluated, invokes a method of some racket class.
-(define zinal:db:invoke-legacy-method%% (interface (zinal:db:has-args%%)
+(define zinal:db:invoke-racket-method%% (interface (zinal:db:has-args%%)
 
-  ; Returns a node for the object to invoke the legacy method on. At first, the node will be a
+  ; Returns a node for the object to invoke the racket method on. At first, the node will be a
   ; zinal:db:unassigned%% , which of course cannot transpile. assign! it to a node which will
   ; evaluate to an object that extends (directly or indirectly) a racket class that possesses a
-  ; public method whose name corresponds to the result of get-legacy-method-name .
+  ; public method whose name corresponds to the result of get-racket-method-name .
   get-object ; ()
 
   ; Returns a string corresponding to the name of the racket method to invoke.
-  get-legacy-method-name ; ()
+  get-racket-method-name ; ()
 
   ; Sets a string corresponding to the name of the racket method to invoke.
   ; No meaningful return value.
-  set-legacy-method-name!! ; (string)
+  set-racket-method-name!! ; (string)
 ))
 
 ; A node which, when evaluated, invokes a super-class's definition of the method.
@@ -590,14 +590,14 @@
 
 ; A node which, when evaluated, invokes a racket super-class's definition of the method, if one
 ; exists. Corresponds to racket of the form '(super <method-name> <args...>) .
-(define zinal:db:invoke-legacy-super-method%% (interface (zinal:db:has-args%%)
+(define zinal:db:invoke-racket-super-method%% (interface (zinal:db:has-args%%)
 
   ; Returns a string corresponding to the name of the racket method to invoke.
-  get-legacy-method-name ; ()
+  get-racket-method-name ; ()
 
   ; Sets a string corresponding to the name of the racket method to invoke.
   ; No meaningful return value.
-  set-legacy-method-name!! ; (string)
+  set-racket-method-name!! ; (string)
 ))
 
 ; A node which, when evaluated, creates a new object of the corresponding defined class.
@@ -605,7 +605,7 @@
 
   ; Returns a node for the class to create a new instance of. At first, the node will be a
   ; zinal:db:unassigned%% , which of course cannot transpile. assign!! it to a node which will
-  ; evaluate to the proper class, either a zinal:db:legacy-link%% for racket classes, a
+  ; evaluate to the proper class, either a zinal:db:racket%% for racket classes, a
   ; zinal:db:class-ref%% for zinal classes, or any expression which evaluates to one of those. It's
   ; not valid for it to evaluate to zinal:db:define-class%% or zinal:db:class-instance%%
   get-class-node ; ()
@@ -778,11 +778,11 @@
 ))
 
 ; Used for invoking (or identifying) scheme functions, macros, constants, classes, etc.
-; E.g., a zinal:db:legacy-link%% with library #f and name "string->symbol" represents the
+; E.g., a zinal:db:racket%% with library #f and name "string->symbol" represents the
 ; scheme string->symbol function. If it were the first node in a zinal:db:list%% , then
 ; that list is probably an invokation of string->symbol. This is used for all important
 ; built-ins, such as 'send, 'quote, '+, and 'list.
-(define zinal:db:legacy-link%% (interface (zinal:db:node%%)
+(define zinal:db:racket%% (interface (zinal:db:node%%)
 
   ; Returns the name (as a string) of the library the specified identifier belongs to.
   ; Returns #f for the default library
@@ -808,7 +808,7 @@
     assign-list!! ; ()
     assign-assert!! ; ()
     ; Use #f for library to specify the standard library
-    assign-legacy-link!! ; (library name)
+    assign-racket!! ; (library name)
 
     ; If a reference is assigned to a referable that is not visible, an exception is
     ; thrown. See the section about reference visibility.
@@ -827,18 +827,18 @@
     assign-define-class!! ; ([short-desc] [long-desc])
     assign-class-instance!! ; ()
     assign-invoke-method!! ; (zinal:db:method%%)
-    assign-invoke-legacy-method!! ; (string)
+    assign-invoke-racket-method!! ; (string)
     assign-create-object!! ; ()
     ; attempting to call any of the following methods on a node that is not inside a
     ; zinal:db:class%% body will throw an exception
     assign-this!! ; ()
     assign-invoke-super-method!! ; (zinal:db:method%%)
-    assign-invoke-legacy-super-method!! ; (string)
+    assign-invoke-racket-super-method!! ; (string)
     ; attempting to call these methods at any location besides the direct child of a
     ; class will throw an exception
     assign-super-init!! ; ()
     assign-define-method!! ; (zinal:db:method%%)
-    assign-override-legacy-method!! ; (string)
+    assign-override-racket-method!! ; (string)
   )
 )
 
@@ -870,16 +870,16 @@
     (define/public (visit-def-ref dr data) (visit-reference dr data))
     (define/public (visit-param p data) (visit-node p data))
     (define/public (visit-param-ref pr data) (visit-reference pr data))
-    (define/public (visit-legacy-link l data) (visit-node l data))
+    (define/public (visit-racket l data) (visit-node l data))
 
     (define/public (visit-invoke-method im data) (visit-node im data))
-    (define/public (visit-invoke-legacy-method ilm data) (visit-node ilm data))
+    (define/public (visit-invoke-racket-method ilm data) (visit-node ilm data))
     (define/public (visit-create-object co data) (visit-node co data))
     (define/public (visit-super-init si data) (visit-node si data))
     (define/public (visit-invoke-super-method ism data) (visit-node ism data))
-    (define/public (visit-invoke-legacy-super-method ilsm data) (visit-node ilsm data))
+    (define/public (visit-invoke-racket-super-method ilsm data) (visit-node ilsm data))
     (define/public (visit-define-method dm data) (visit-node dm data))
-    (define/public (visit-override-legacy-method olm data) (visit-node olm data))
+    (define/public (visit-override-racket-method olm data) (visit-node olm data))
     (define/public (visit-this t data) (visit-node t data))
 
     (define/public (visit-class c data) (visit-node c data))
