@@ -184,11 +184,13 @@
 
     (super-make-object)
 
+    (define white-foregeround-style-delta (send (make-object style-delta%) set-delta-foreground "White"))
+
     (define styles (send this get-style-list))
     (define base-style
       (send styles find-or-create-style
         (send styles basic-style)
-        (send (make-object style-delta%) set-delta-foreground "White")
+        white-foregeround-style-delta
       )
     )
     (send this change-style base-style)
@@ -207,7 +209,7 @@
     (define highlighted-style
       (send styles find-or-create-style
         base-style
-        (send (make-object style-delta%) set-delta-background (make-object color% #x45 #x2A #x45))
+        (send (make-object style-delta%) set-delta-background (make-object color% #x41 #x13 #x56))
       )
     )
 
@@ -221,7 +223,10 @@
           )
         ]
         [(send pos-info highlighted?)
-          (send styles find-or-create-style highlighted-style style-delta)
+          (send styles find-or-create-style
+            (send styles find-or-create-style highlighted-style style-delta)
+            white-foregeround-style-delta
+          )
         ]
         [else
           (send styles find-or-create-style base-style style-delta)
