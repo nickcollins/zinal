@@ -42,7 +42,7 @@ feedback, but the current UI is very feature poor (it doesn't even have undo/red
 implementation, not with projectional editors in general - see [MPS](https://www.jetbrains.com/mps/) or [Lamdu](http://www.lamdu.org/) for examples of projectional editors with
 better UIs._
 
-**[Tutorial video](https://youtu.be/A4Z5rcyaE7M)**.
+**[Tutorial video](https://youtu.be/xZa62nrh99c)**.
 This video is long, but very detailed, so it's best for those who want step-by-step instructions, those who find the instructions in this page to be lacking, or
 those who haven't used Lisp before.
 
