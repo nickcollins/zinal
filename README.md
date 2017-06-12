@@ -42,6 +42,12 @@ feedback, but the current UI is very feature poor (it doesn't even have undo/red
 implementation, not with projectional editors in general - see [MPS](https://www.jetbrains.com/mps/) or [Lamdu](http://www.lamdu.org/) for examples of projectional editors with
 better UIs._
 
+**[Tutorial video](https://youtu.be/A4Z5rcyaE7M)**.
+This video is long, but very detailed, so it's best for those who want step-by-step instructions, those who find the instructions in this page to be lacking, or
+those who haven't used Lisp before.
+
+## Installation/setup ##
+
 All that should be necessary to run zinal is to have [sqlite3](https://sqlite.org/download.html) and [Racket](https://racket-lang.org/download/) installed on your machine.
 **Make sure you download Racket from their website**
 and not via `apt-get`, as zinal requires Racket v. 6.8 or above, and the Ubuntu package is outdated. On Ubuntu, you can install sqlite3 via
@@ -90,6 +96,7 @@ get you started.
 - You can type `s` on an unassigned node (or most other nodes) to turn it into something useful.
 - Semantically, zinal is almost equivalent to Racket (which is a variant of Scheme), so you'll probably be creating a lot of "list"s.
 - When you create a list, you have to then type `I` or `A` in order to add the first item to it (inside of a list, you can also use `i`, `a`, or `o`).
+- Use the `racket (standard library)` node type to harness Lisp/Scheme/Racket functionality. See https://docs.racket-lang.org/ to search and explore the Racket standard library.
 - Remember the key bindings can be found (and edited) in `key-bindings.rkt`.
 
 Play around and create whatever logic you want - if you're not familiar with Scheme primitives and semantics,
@@ -105,7 +112,7 @@ To see zinal self-hosting in action, run:
 ```
 racket main.rkt -o zinal zinal.db
 ```
-This may take 10-20 minutes (I know - I'm working on it). After compilation is done, you can use `zinal` the same way as `racket main.rkt`.
+This may take 10-20 minutes (it's long, I know). After compilation is done, you can use `zinal` the same way as `racket main.rkt`.
 Try running `zinal zinal.db`. Here you can see the source logic from which `zinal` was compiled - it is similar (tho not identical)
 to the Scheme logic found in the `.rkt` files. Try using `e` to switch to the `ui-styles` module, change a few colors or something (see
 https://docs.racket-lang.org/draw/color-database___.html), compile to `my-zinal`, then run
