@@ -2,6 +2,8 @@
 
 Zinal (Zinal Is Not A Language) is a PoC [projectional-editor](https://martinfowler.com/bliki/ProjectionalEditing.html)/language-alternative demonstrably capable of self-hosting.
 
+[Check out the intro video](https://youtu.be/9msNAMTMBU0)
+
 As a projectional editor, it allows a programmer to read and edit software via a GUI that is not necessarily a 1:1 reflection of
 the logic's on-disk representation. Conventional editors (and IDEs) are text editors that store logic in text files and
 represent the logic to the programmer as a character matrix (tho often with a good deal of sugaring). But zinal stores logic in a
